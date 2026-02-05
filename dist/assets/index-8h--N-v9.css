@@ -1,0 +1,1 @@
+*{margin:0;padding:0;box-sizing:border-box}body{overflow:hidden;background-color:#000;font-family:sans-serif}#app{width:100vw;height:100vh}#loading{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;font-size:24px;pointer-events:none;transition:opacity .5s}.hidden{opacity:0}
