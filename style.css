@@ -101,6 +101,20 @@ body {
   bottom: 40px;
 }
 
+#btn-zoom {
+  left: auto;
+  /* CRITICAL: Override default left:40px from .mobile-btn */
+  right: 40px;
+  bottom: 160px;
+  /* Moved up slightly to clear joystick thumb area further */
+  border-color: rgba(255, 0, 0, 0.5);
+  /* Red tint for 'Aim' */
+  /* Above joystick area */
+  border-color: rgba(255, 0, 0, 0.5);
+  /* Red tint for 'Aim' */
+  color: red;
+}
+
 /* Chat UI */
 #chat-container {
   position: absolute;
