@@ -6,7 +6,7 @@ export class RemotePlayer {
         this.scene = scene;
         this.assets = assets;
         this.id = id;
-        
+
         this.mesh = null;
         this.mixer = null;
         this.animations = {};
@@ -25,10 +25,14 @@ export class RemotePlayer {
         }
 
         this.mesh = SkeletonUtils.clone(idleAsset.scene);
-        
-        // Visual Distinction: Tint the mesh (Neon Green)
-        this.tintMesh(this.mesh, 0x39ff14); 
-        
+
+        // Visual Distinction: Tint the mesh (Server Assigned Color)
+        const color = data.color || '#39ff14'; // Fallback to green
+        this.tintMesh(this.mesh, color);
+
+        // Create Name Tag
+        this.createNameTag(data.name);
+
         this.mesh.position.set(data.x, data.y, data.z);
         this.mesh.rotation.y = data.rot;
         this.state = data.state;
@@ -37,7 +41,7 @@ export class RemotePlayer {
 
         // Setup Animations
         this.mixer = new THREE.AnimationMixer(this.mesh);
-        
+
         // Helper to get clip
         const getClip = (name) => {
             const asset = this.assets[name];
@@ -48,7 +52,7 @@ export class RemotePlayer {
         this.animations['walk'] = getClip('walking');
         this.animations['run'] = getClip('running');
         this.animations['jump'] = getClip('jump');
-        
+
         // Start initial animation
         this.playAnimation(this.state);
     }
@@ -65,19 +69,51 @@ export class RemotePlayer {
                 // child.material.emissive.setHex(0x222244); 
             }
         });
-        
-        // Add a floating marker (Text) logic could go here later
     }
 
-    update(dt) {
+    createNameTag(name) {
+        // Create Name Tag
+        this.nameTag = document.createElement('div');
+        this.nameTag.style.position = 'absolute';
+        this.nameTag.style.color = 'white';
+        this.nameTag.style.background = 'rgba(0, 0, 0, 0.5)';
+        this.nameTag.style.padding = '2px 5px';
+        this.nameTag.style.borderRadius = '3px';
+        this.nameTag.style.fontSize = '12px';
+        this.nameTag.style.pointerEvents = 'none'; // Click through
+        this.nameTag.style.userSelect = 'none';
+        this.nameTag.innerText = name || "Player";
+        document.body.appendChild(this.nameTag);
+    }
+
+    update(dt, camera) {
         if (this.mixer) this.mixer.update(dt);
+
+        // Update Name Tag Position
+        if (this.nameTag && this.mesh && camera) {
+            const headPos = this.mesh.position.clone().add(new THREE.Vector3(0, 2.0, 0)); // Above head
+            headPos.project(camera);
+
+            const x = (headPos.x * .5 + .5) * window.innerWidth;
+            const y = (-(headPos.y * .5) + .5) * window.innerHeight;
+
+            // Simple check if in front of camera
+            if (headPos.z < 1) {
+                this.nameTag.style.display = 'block';
+                this.nameTag.style.left = `${x}px`;
+                this.nameTag.style.top = `${y}px`;
+                this.nameTag.style.transform = 'translate(-50%, -100%)';
+            } else {
+                this.nameTag.style.display = 'none';
+            }
+        }
     }
 
     updateState(data) {
         // Smoothly interpolate position (Simple Lerp)
         // Ideally we use a buffer, but for now simple Lerp is better than snap
         this.mesh.position.lerp(new THREE.Vector3(data.x, data.y, data.z), 0.3);
-        
+
         // Rotation (Shortest path interpolation could be better, but direct set is OK for now)
         this.mesh.rotation.y = data.rot;
 
@@ -89,7 +125,7 @@ export class RemotePlayer {
 
     playAnimation(name) {
         // Map 'backward' to 'walk' or specific if we had it
-        if (name === 'backward') name = 'walk'; 
+        if (name === 'backward') name = 'walk';
 
         const clip = this.animations[name];
         if (!clip) return;
@@ -107,6 +143,10 @@ export class RemotePlayer {
     }
 
     dispose() {
+        if (this.nameTag) {
+            this.nameTag.remove();
+        }
+
         if (this.mesh) {
             this.scene.remove(this.mesh);
             this.mesh.traverse((child) => {

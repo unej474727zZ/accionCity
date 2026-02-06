@@ -4,12 +4,12 @@ export class NetworkManager {
     constructor() {
         this.socket = null;
         this.start = false;
-        
+
         // Events
         this.onPlayerJoined = null;
         this.onPlayerMoved = null;
         this.onPlayerLeft = null;
-        
+
         this.id = null;
     }
 
@@ -48,17 +48,28 @@ export class NetworkManager {
         this.socket.on('playerDisconnected', (id) => {
             if (this.onPlayerLeft) this.onPlayerLeft(id);
         });
+
+        // 5. Chat Message
+        this.socket.on('chatMessage', (data) => {
+            if (this.onChatMessage) this.onChatMessage(data);
+        });
     }
 
     sendUpdate(pos, rot, state) {
         if (this.socket) {
-            this.socket.emit('playerMove', { 
-                x: pos.x, 
-                y: pos.y, 
-                z: pos.z, 
-                rot: rot, 
-                state: state 
+            this.socket.emit('playerMove', {
+                x: pos.x,
+                y: pos.y,
+                z: pos.z,
+                rot: rot,
+                state: state
             });
+        }
+    }
+
+    sendChat(text) {
+        if (this.socket) {
+            this.socket.emit('chatMessage', { text: text });
         }
     }
 }

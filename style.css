@@ -100,3 +100,54 @@ body {
 #btn-back {
   bottom: 40px;
 }
+
+/* Chat UI */
+#chat-container {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  width: 300px;
+  max-width: 80%;
+  height: 200px;
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+  /* Let clicks pass through empty areas */
+  z-index: 1000;
+  /* Ensure it's on top of everything */
+}
+
+#chat-messages {
+  flex-grow: 1;
+  overflow-y: auto;
+  background: rgba(0, 0, 0, 0.4);
+  /* Slightly darker for contrast */
+  padding: 5px;
+  border-radius: 5px;
+  margin-bottom: 5px;
+  color: white;
+  font-size: 14px;
+  text-shadow: 1px 1px 1px black;
+  scrollbar-width: thin;
+}
+
+/* Individual message style */
+.chat-msg {
+  margin-bottom: 2px;
+  word-wrap: break-word;
+}
+
+#chat-input {
+  width: 100%;
+  padding: 5px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: white;
+  border-radius: 3px;
+  pointer-events: auto;
+  /* Enable typing */
+}
+
+#chat-input::placeholder {
+  color: #aaa;
+}
