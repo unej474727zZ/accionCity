@@ -49,8 +49,8 @@ export class RemotePlayer {
         };
 
         this.animations['idle'] = getClip('idle');
-        this.animations['walk'] = getClip('walking');
-        this.animations['run'] = getClip('running');
+        this.animations['walk'] = getClip('walk'); // Fixed from 'walking'
+        this.animations['run'] = getClip('run');   // Fixed from 'running'
         this.animations['jump'] = getClip('jump');
 
         // Start initial animation
@@ -62,11 +62,18 @@ export class RemotePlayer {
             if (child.isMesh && child.material) {
                 // Clone material to avoid affecting local player
                 child.material = child.material.clone();
-                // Simple tint using emissive or color
-                // If texture exists, color multiplies it.
-                // Let's try explicit color set + emissive for glow
-                child.material.color.setHex(colorHex);
-                // child.material.emissive.setHex(0x222244); 
+
+                // 1. Set Base Color
+                child.material.color.set(colorHex);
+
+                // 2. Add Emissive (Glow) to prevent being pitch black in shadows
+                // Use the same color but dimmer
+                child.material.emissive.set(colorHex);
+                child.material.emissiveIntensity = 0.4; // Valid glow
+
+                // 3. Ensure map is preserved but colored
+                // If the texture is white/grayscale, this tints it.
+                // If the texture is dark, emissive helps.
             }
         });
     }

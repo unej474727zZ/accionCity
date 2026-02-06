@@ -234,6 +234,15 @@ export class World {
 
         if (this.character) {
             this.character.update(dt);
+
+            // CAMERA ZOOM LOGIC
+            const targetFOV = this.character.desiredFOV;
+
+            // Smooth Lerp
+            if (Math.abs(this.camera.fov - targetFOV) > 0.1) {
+                this.camera.fov += (targetFOV - this.camera.fov) * 10.0 * dt;
+                this.camera.updateProjectionMatrix();
+            }
         }
 
         // Update Remote Players (Animations & Name Tags)

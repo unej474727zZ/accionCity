@@ -112,8 +112,8 @@ export class CharacterController {
         this.yaw = 0;
         this.pitch = 0;
 
-        // Zoom State
-        this.isZooming = false;
+        // Zoom State (Target FOV)
+        this.desiredFOV = 75;
 
         document.addEventListener('mousemove', (e) => this.onMouseMove(e));
 
@@ -124,20 +124,21 @@ export class CharacterController {
             }
         });
 
-        // Zoom Input (Right Click)
-        document.addEventListener('mousedown', (e) => {
-            if (e.button === 2) { // 2 = Right Click
-                this.isZooming = true;
+        // Zoom Input (Mouse Wheel - Incremental)
+        document.addEventListener('wheel', (e) => {
+            // e.deltaY > 0 means scroll down (zoom out)
+            // e.deltaY < 0 means scroll up (zoom in)
+            const step = 5;
+            if (e.deltaY < 0) {
+                this.desiredFOV -= step; // Zoom In
+            } else {
+                this.desiredFOV += step; // Zoom Out
             }
-        });
+            // Clamp between 10 (Super Zoom) and 75 (Normal)
+            this.desiredFOV = Math.max(10, Math.min(75, this.desiredFOV));
+        }, { passive: false });
 
-        document.addEventListener('mouseup', (e) => {
-            if (e.button === 2) {
-                this.isZooming = false;
-            }
-        });
-
-        // Prevent Context Menu on Right Click
+        // Prevent Context Menu on Right Click (still good to keep)
         document.addEventListener('contextmenu', e => e.preventDefault());
 
         // 4. Setup Input (Mobile Joysticks)
@@ -169,15 +170,22 @@ export class CharacterController {
         handleTouch(btnBack, 'backward', false);
 
         // Zoom Button (Mobile)
+        // Zoom Button (Mobile)
         const btnZoom = document.getElementById('btn-zoom');
         if (btnZoom) {
-            const handleZoom = (active) => {
-                this.isZooming = active;
+            // Toggle Logic
+            const toggleZoom = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (this.desiredFOV < 70) {
+                    this.desiredFOV = 75; // Reset
+                } else {
+                    this.desiredFOV = 10; // Max Zoom (Increased from 30)
+                }
+                console.log("Zoom toggled to:", this.desiredFOV);
             };
-            btnZoom.addEventListener('touchstart', (e) => { e.preventDefault(); handleZoom(true); });
-            btnZoom.addEventListener('touchend', (e) => { e.preventDefault(); handleZoom(false); });
-            btnZoom.addEventListener('mousedown', (e) => { e.preventDefault(); handleZoom(true); });
-            btnZoom.addEventListener('mouseup', (e) => { e.preventDefault(); handleZoom(false); });
+            btnZoom.addEventListener('touchstart', toggleZoom);
+            // btnZoom.addEventListener('click', toggleZoom); // touchstart is enough/faster on mobile
         }
 
         // 2. Right Joystick: Camera Look (Dynamic joystick)
