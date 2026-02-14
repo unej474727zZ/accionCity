@@ -60,21 +60,43 @@ export class NetworkManager {
             if (this.onPlayerLeft) this.onPlayerLeft(id);
         });
 
-        // 5. Chat Message
         this.socket.on('chatMessage', (data) => {
             if (this.onChatMessage) this.onChatMessage(data);
         });
+
+        // 6. Player Shoot
+        this.socket.on('playerShoot', (data) => {
+            if (this.onPlayerShoot) this.onPlayerShoot(data);
+        });
+
+        // 7. Player Hit
+        this.socket.on('playerHit', (data) => {
+            if (this.onPlayerHit) this.onPlayerHit(data);
+        });
     }
 
-    sendUpdate(pos, rot, state) {
+    sendUpdate(pos, rot, state, weaponType) {
         if (this.socket) {
             this.socket.emit('playerMove', {
                 x: pos.x,
                 y: pos.y,
                 z: pos.z,
                 rot: rot,
-                state: state
+                state: state,
+                weaponType: weaponType
             });
+        }
+    }
+
+    sendShoot(origin, direction, weaponType) {
+        if (this.socket) {
+            this.socket.emit('playerShoot', { origin, direction, weaponType });
+        }
+    }
+
+    sendHit(position, type) {
+        if (this.socket) {
+            this.socket.emit('playerHit', { position, type });
         }
     }
 

@@ -1,21 +1,26 @@
 import * as THREE from 'three';
+import { VehicleManager } from './VehicleManager.js';
 import { AssetLoader } from './AssetLoader.js';
 import { CharacterController } from './CharacterController.js';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { NPCManager } from './NPCManager.js';
 import { NetworkManager } from './NetworkManager.js';
 import { RemotePlayer } from './RemotePlayer.js';
 import { WeaponManager } from './WeaponManager.js';
 import { Minimap } from './Minimap.js';
+import { SoundManager } from './SoundManager.js';
 
 export class World {
     constructor(container) {
         this.container = container;
         this.scene = new THREE.Scene();
-        this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 3000);
+        this.scene.userData.world = this; // Global access for components
 
         // NETWORKING
         this.networkManager = new NetworkManager();
         this.remotePlayers = {}; // Map id -> Mesh
+        this.soundManager = new SoundManager(this.camera); // Initialize centralized manager
 
         try {
             // r128 WebGLRenderer
@@ -39,6 +44,15 @@ export class World {
         this.assetLoader = new AssetLoader();
         this.character = null;
         this.clock = new THREE.Clock();
+
+        // CONTROLS
+        // 1. OrbitControls (Inspection Mode)
+        this.orbitControls = new OrbitControls(this.camera, this.renderer.domElement);
+        this.orbitControls.listenToKeyEvents(window); // Enable Keyboard (Arrows)
+        this.orbitControls.enabled = false; // Disabled by default
+        this.orbitControls.enableDamping = true;
+        this.orbitControls.dampingFactor = 0.05;
+        this.isInspectionMode = false;
 
         window.addEventListener('resize', () => this.onWindowResize(), false);
 
@@ -123,12 +137,12 @@ export class World {
             canvas.width = 512;
             canvas.height = 512;
             const ctx = canvas.getContext('2d');
-            ctx.fillStyle = '#1a1a1a'; // Darker asphalt
+            ctx.fillStyle = '#bebbbb9b'; // Darker asphalt
             ctx.fillRect(0, 0, 512, 512);
 
             // Add Noise
             for (let i = 0; i < 80000; i++) {
-                ctx.fillStyle = Math.random() > 0.5 ? '#333333' : '#000000';
+                ctx.fillStyle = Math.random() > 0.5 ? '#546057ff' : '#000000';
                 const x = Math.random() * 512;
                 const y = Math.random() * 512;
                 ctx.fillRect(x, y, 2, 2);
@@ -153,7 +167,8 @@ export class World {
 
 
             // Setup Character
-            this.character = new CharacterController(this.scene, this.camera, assets);
+            this.character = new CharacterController(this.scene, this.camera, assets, this);
+            this.camera.lookAt(this.character.mesh.position);
 
             // NPC MANAGER
             // NPC MANAGER
@@ -167,10 +182,15 @@ export class World {
 
             // LINK CONTROLLER TO WEAPON MANAGER
             this.character.weaponManager = this.weaponManager;
-            this.character.world = this;
 
             // MINIMAP
             this.minimap = new Minimap();
+
+            // VEHICLE MANAGER
+            this.vehicleManager = new VehicleManager(this.scene, assets, this.character);
+            // Spawn Motorcycle slightly higher to clear sidewalk (0.75m)
+            this.vehicleManager.spawnVehicle('motorcycle', new THREE.Vector3(1, 0.75, 1));
+
             // Start with Pistol equipped? Or wait for input? Let's equip Pistol by default.
             // But we need to make sure model is ready. Construct it now, call equip later or inside.
 
@@ -184,7 +204,6 @@ export class World {
             }
 
 
-
             // NETWORK: Connect and Setup Events
             this.networkManager.connect();
 
@@ -194,6 +213,7 @@ export class World {
 
                 const remotePlayer = new RemotePlayer(this.scene, assets, id, data);
                 this.remotePlayers[id] = remotePlayer;
+                this.updateRemoteColliders(); // Sync with key systems
             };
 
             this.networkManager.onPlayerMoved = (id, data) => {
@@ -209,6 +229,7 @@ export class World {
                 if (remotePlayer) {
                     remotePlayer.dispose();
                     delete this.remotePlayers[id];
+                    this.updateRemoteColliders(); // Sync with key systems
                 }
             };
 
@@ -251,6 +272,29 @@ export class World {
                 chatMessages.scrollTop = chatMessages.scrollHeight;
             };
 
+            // COMBAT EVENTS
+            this.networkManager.onPlayerShoot = (data) => {
+                // data: { id, origin, direction, weaponType }
+                if (data.id === this.networkManager.id) return;
+                console.log(`[NET] Received playerShoot from ${data.id}`, data);
+
+                const remotePlayer = this.remotePlayers[data.id];
+                if (remotePlayer) {
+                    console.log(`[COMBAT] Commanding RemotePlayer ${data.id} to shoot`);
+                    remotePlayer.shoot(data.origin, data.direction, data.weaponType);
+                } else {
+                    console.warn(`[COMBAT] RemotePlayer ${data.id} NOT FOUND for shoot event`);
+                }
+            };
+
+            this.networkManager.onPlayerHit = (data) => {
+                // data: { id, position, type }
+                console.log(`[NET] Global Hit Received:`, data);
+                if (this.weaponManager) {
+                    this.weaponManager.createImpact(data.position, data.type);
+                }
+            };
+
             if (chatInput) {
                 chatInput.addEventListener('keydown', (e) => {
                     e.stopPropagation(); // Keep reacting to keys but don't propagate to game
@@ -281,6 +325,46 @@ export class World {
                 if (e.code === 'KeyP') {
                     this.toggleUI();
                 }
+
+                // Vehicle Interaction (F)
+                if (e.code === 'KeyF') {
+                    if (this.character.isDriving) {
+                        this.vehicleManager.exitVehicle();
+                    } else {
+                        // Try to enter nearest vehicle
+                        const nearest = this.vehicleManager.findNearestVehicle(this.character.mesh.position);
+                        if (nearest) {
+                            this.vehicleManager.enterVehicle(nearest);
+                        }
+                    }
+                }
+
+                // INSPECTION MODE (I)
+                if (e.code === 'KeyI') {
+                    this.isInspectionMode = !this.isInspectionMode;
+                    this.orbitControls.enabled = this.isInspectionMode;
+
+                    if (this.isInspectionMode) {
+                        console.log("🔍 Inspection Mode: ON. Use Mouse to Rotate/Pan.");
+                        document.exitPointerLock();
+
+                        // FIX: Auto-Focus on Character/Vehicle
+                        const targetObj = this.character.mesh;
+                        if (targetObj) {
+                            // Target slightly above the pivot (which is at feet)
+                            const targetPos = targetObj.position.clone().add(new THREE.Vector3(0, 1.5, 0));
+                            this.orbitControls.target.copy(targetPos);
+
+                            // Optional: Move camera if it's too far/close? 
+                            // Letting OrbitControls handle current position is usually smoother unless broken.
+                            this.orbitControls.update();
+                        }
+                    } else {
+                        console.log("▶️ Game Mode: ON");
+                        // Attempt to re-lock mouse for game controls
+                        document.body.requestPointerLock();
+                    }
+                }
             });
 
             this.animate();
@@ -288,6 +372,22 @@ export class World {
             console.error('Failed to load game:', err);
             document.getElementById('loading').innerText = 'Error loading assets.';
         }
+    }
+
+
+    // Helper: Sync Remote Player Meshes to Controllers
+    updateRemoteColliders() {
+        if (!this.character || !this.weaponManager) return;
+
+        const players = Object.values(this.remotePlayers);
+        // For physics (CharacterController), we need Meshes
+        const meshes = players.map(p => p.mesh).filter(m => m);
+
+        // Update Character Controller (Physics Collision)
+        if (this.character) this.character.remoteColliders = meshes;
+
+        // Update Weapon Manager (Bullet Hits)
+        if (this.weaponManager) this.weaponManager.remotePlayers = players;
     }
 
     onWindowResize() {
@@ -353,15 +453,23 @@ export class World {
         requestAnimationFrame(() => this.animate());
 
         const dt = this.clock.getDelta();
+        const time = Date.now() / 1000;
+
+        // INSPECTION MODE LOGIC
+        if (this.isInspectionMode) {
+            this.orbitControls.update();
+            this.renderer.render(this.scene, this.camera);
+            // Still update others for animations?
+            // if (this.character) this.character.mixer.update(dt); 
+            return; // Skip normal camera/character physics
+        }
 
         // --- DAY/NIGHT CYCLE ---
-        // Cycle duration in seconds (1h Day + 1h Night = 7200s)
-        const dayDuration = 7200;
-        const time = Date.now() / 1000;
-        const cycle = (time % dayDuration) / dayDuration; // 0 to 1
+        // --- DAY/NIGHT CYCLE (LOCKED TO DAY) ---
+        // User Request: Freeze time during day.
 
-        // Sun Position (Rotate around Z axis)
-        const sunAngle = (cycle * Math.PI * 2) - (Math.PI / 2); // Start at Sunrise
+        // Fixed Sun Angle (High Noon)
+        const sunAngle = Math.PI / 2; // 90 degrees, straight up-ish
         const sunRadius = 200;
 
         let sunIntensity = 0;
@@ -376,17 +484,9 @@ export class World {
             // Base intensity based on height
             sunIntensity = Math.max(0, Math.sin(sunAngle) * 1.5);
 
-            // --- CLOUD SHADOWS ---
-            // Use sine waves to simulate passing clouds
-            const cloudNoise = Math.sin(time * 0.1) + Math.sin(time * 0.05) + Math.cos(time * 0.02);
-            // If noise is high, it's a "cloudy moment"
+            // --- CLOUD SHADOWS DISABLED ---
+            // Keep it clear as requested by the user
             let cloudFactor = 1.0;
-            if (cloudNoise > 1.0) { // Arbitrary threshold for "cloud passing"
-                cloudFactor = 0.3; // Dim significantly
-            }
-
-            // Apply Cloud Dimming
-            sunIntensity *= cloudFactor;
 
             dirLight.mask = (dirLight.position.y > 0) ? 1 : 0;
             dirLight.intensity = sunIntensity;
@@ -396,7 +496,7 @@ export class World {
         // Sky Color Interpolation
         let skyHex = 0x000000;
         let groundHex = 0x111111;
-        let fogDist = 150;
+        let fogDist = 1500;
         let fogColor = null;
 
         const dayIntensity = Math.max(0, Math.sin(sunAngle));
@@ -407,11 +507,11 @@ export class World {
         } else if (dayIntensity > 0.2) {
             skyHex = 0xFF4500; // Orange
             groundHex = 0x332222;
-            fogDist = 100;
+            fogDist = 800;
         } else {
             skyHex = 0x050510; // Night
             groundHex = 0x000000;
-            fogDist = 80;
+            fogDist = 500;
         }
 
         // --- NIGHT VISION OVERRIDE ---
@@ -463,44 +563,29 @@ export class World {
 
         // --- END CYCLE ---
 
-        // Update Weapons (Effects)
-        if (this.weaponManager) {
-            this.weaponManager.update(dt);
-        }
-
-        // Update Minimap
-        if (this.minimap && this.character && this.character.mesh) {
-            this.minimap.update(this.character.mesh, this.remotePlayers, this.npcManager);
-        }
-
-        // NETWORK: Send Update
-        if (this.character) {
-            this.networkManager.sendUpdate(
-                this.character.mesh.position,
-                this.character.yaw,
-                this.character.state
-            );
-        }
-
         if (this.character) {
             this.character.update(dt);
-            // Pass remote colliders for Player-Player Collision
-            this.character.remoteColliders = Object.values(this.remotePlayers).map(p => p.mesh);
+            // Pass remote colliders (meshes) for Player-Player Collision
+            this.character.remoteColliders = Object.values(this.remotePlayers).map(p => p.mesh).filter(m => m);
         }
 
         if (this.npcManager) this.npcManager.update(dt);
 
         if (this.weaponManager) {
-            // Pass remote players for Hit Detection & Laser Sight
-            this.weaponManager.remotePlayers = Object.values(this.remotePlayers).map(p => p.mesh);
+            // Pass remote players (instances) for Hit Detection
+            this.weaponManager.remotePlayers = Object.values(this.remotePlayers);
             this.weaponManager.update(dt);
+        }
+
+        // Vehicle System Update
+        if (this.vehicleManager && this.character) {
+            const input = this.character.inputVector || { x: 0, y: 0 };
+            this.vehicleManager.update(dt, input);
         }
 
         // CAMERA ZOOM LOGIC
         if (this.character && this.camera && this.character.desiredFOV) {
             const targetFOV = this.character.desiredFOV;
-            // Stable Time-Based Lerp (Frame-rate independent dampening)
-            // lerp(current, target, 1 - exp(-speed * dt))
             const speed = 5.0;
             const t = 1.0 - Math.pow(0.01, dt * speed);
 
@@ -512,6 +597,21 @@ export class World {
 
         // Update Remote Players (Animations & Name Tags)
         Object.values(this.remotePlayers).forEach(p => p.update(dt, this.camera));
+
+        // NETWORK: Send Update (Pulse every frame)
+        if (this.character && this.networkManager) {
+            this.networkManager.sendUpdate(
+                this.character.mesh.position,
+                this.character.yaw,
+                this.character.state,
+                this.weaponManager ? this.weaponManager.currentWeaponType : 'pistol'
+            );
+        }
+
+        // Update Minimap
+        if (this.minimap && this.character && this.character.mesh) {
+            this.minimap.update(this.character.mesh, this.remotePlayers, this.npcManager);
+        }
 
         this.renderer.render(this.scene, this.camera);
     }

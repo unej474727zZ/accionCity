@@ -16,10 +16,14 @@ export class AssetLoader {
       { name: 'firing', url: '/models/FiringRifle.glb' },
       { name: 'shooting', url: '/models/shooting.glb' }, // Walking Shoot
 
-      // Cars
+      // Vehicles
       { name: 'car1', url: '/models/car1.glb' },
       { name: 'car2', url: '/models/car2.glb' },
       { name: 'car3', url: '/models/car3.glb' },
+      { name: 'motorcycle', url: '/models/motorcycle.glb' },
+
+      // Vehicle Animations
+      { name: 'driving', url: '/models/driving.glb' },
 
       // Weapons (Corrected Mapping: Key 1 -> Pistol, Key 2 -> Rifle)
       { name: 'pistol', url: '/models/pistol.glb' }, // Handgun (was showing as Rifle before?)

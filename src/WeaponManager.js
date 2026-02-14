@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { Bullet } from './Bullet';
-import { SoundManager } from './SoundManager';
+import { Bullet } from './Bullet.js';
+import { SoundManager } from './SoundManager.js';
 
 export class WeaponManager {
     constructor(scene, characterController, camera, assets) {
@@ -9,14 +9,14 @@ export class WeaponManager {
         this.character = characterController.mesh; // Extract mesh from controller
         this.camera = camera;
         this.assets = assets;
-        this.camera = camera;
-        this.assets = assets;
-        this.soundManager = new SoundManager(camera);
-        console.log("WeaponManager Loaded: VERSION CHECK 9000");
+        this.soundManager = this.scene.userData.world ? this.scene.userData.world.soundManager : null;
+        if (!this.soundManager) console.warn("WeaponManager: SoundManager not found in World context");
+        console.log("WeaponManager Loaded: VERSION CHECK 9007");
 
         this.rightHandBone = null;
         this.currentWeaponMesh = null;
         this.currentWeaponType = null; // 'pistol' | 'rifle'
+        this.remotePlayers = []; // List of remote players for hit detection
 
         // Weapon Configs (Offsets for valid hand placement)
         // Weapon Configs (Offsets for valid hand placement)
@@ -32,10 +32,9 @@ export class WeaponManager {
                 scale: 250.0,
                 // User: "Lower a bit" -> -0.4 Y
                 position: new THREE.Vector3(0, -0.4, 0.5),
-                position: new THREE.Vector3(0, -0.4, 0.5),
                 // User: "Perfect" -> X=2.77, Y=5.74, Z=-64.00
-                rotation: new THREE.Vector3(2.77, 5.74, -64.00),
-                fireRate: 0.15 // Rapid fire
+                rotation: new THREE.Euler(2.77, 5.74, -64.00),
+                fireRate: 0.8 // Rapid fire
             }
         };
 
@@ -65,13 +64,27 @@ export class WeaponManager {
         this.bulletCamTimer = 0;
 
         // Laser Sight
-        this.laserActive = false;
+        this.laserActive = true;
+        this.laserMesh = this.createLaser();
+        this.scene.add(this.laserMesh);
+    }
+
+    isSelf(obj) {
+        let temp = obj;
+        while (temp) {
+            if (temp === this.character || temp === this.currentWeaponMesh) return true;
+            temp = temp.parent;
+        }
+        return false;
+    }
+
+    createLaser() {
         const laserGeom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)]);
         const laserMat = new THREE.LineBasicMaterial({ color: 0xff0000 });
-        this.laserMesh = new THREE.Line(laserGeom, laserMat);
-        this.laserMesh.frustumCulled = false; // Always render
-        this.scene.add(this.laserMesh);
-        this.laserMesh.visible = false;
+        const laserMesh = new THREE.Line(laserGeom, laserMat);
+        laserMesh.frustumCulled = false; // Always render
+        laserMesh.visible = this.laserActive;
+        return laserMesh;
     }
 
     findHandBone() {
@@ -160,24 +173,6 @@ export class WeaponManager {
                     this.updateDebugDisplay();
                     console.log(`ROTATION: X=${rot.x.toFixed(2)}, Y=${rot.y.toFixed(2)}, Z=${rot.z.toFixed(2)}`);
                 }
-            }
-        });
-
-        window.addEventListener('mousedown', (e) => {
-            if (e.button === 0) {
-                if (!this.currentWeaponMesh) return; // Prevent firing if no weapon
-
-                this.isFiring = true;
-                // Shoot immediately
-                this.shoot();
-                // NO Firing Pose (ADS) - Keeps weapon in hand
-            }
-        });
-
-        window.addEventListener('mouseup', (e) => {
-            if (e.button === 0) {
-                this.isFiring = false;
-                // No need to restore parent/transform if we didn't change it
             }
         });
 
@@ -286,7 +281,12 @@ export class WeaponManager {
         this.currentWeaponMesh.scale.set(config.scale, config.scale, config.scale);
         this.currentWeaponMesh.position.copy(config.position);
         if (config.rotation) {
-            this.currentWeaponMesh.rotation.set(config.rotation.x, config.rotation.y, config.rotation.z);
+            // Check if it's an Euler or Vector3
+            if (config.rotation instanceof THREE.Euler) {
+                this.currentWeaponMesh.rotation.copy(config.rotation);
+            } else {
+                this.currentWeaponMesh.rotation.set(config.rotation.x, config.rotation.y, config.rotation.z);
+            }
         }
 
         parent.add(this.currentWeaponMesh);
@@ -365,27 +365,29 @@ export class WeaponManager {
         raycaster.set(this.camera.position, camDir); // Use camera forward direction
         raycaster.far = 1000; // 1000 meters range
 
-        // Intersect everything except:
-        // - The character itself
-        // - The current weapon
+        // Intersect everything except the local player and current weapon
         let visualObjects = [];
         this.scene.traverse(c => {
-            if (c.isMesh && c !== this.currentWeaponMesh && c !== this.character) {
+            if (c.isMesh && !this.isSelf(c)) {
                 visualObjects.push(c);
             }
         });
 
         // Add Remote Players Explicitly
-        if (this.remotePlayers) {
+        if (this.remotePlayers && Array.isArray(this.remotePlayers)) {
             this.remotePlayers.forEach(p => {
-                if (p.mesh) {
-                    p.mesh.traverse(c => {
+                if (!p) return;
+                // Support both RemotePlayer instances and direct Meshes
+                const mesh = p.mesh || (p.isMesh ? p : null);
+                if (mesh) {
+                    mesh.traverse(c => {
                         if (c.isMesh) visualObjects.push(c);
                     });
                 }
             });
         }
 
+        console.log(`[COMBAT] Raycasting against ${visualObjects.length} meshes`);
         const hits = raycaster.intersectObjects(visualObjects, false);
 
         if (hits.length > 0) {
@@ -394,24 +396,56 @@ export class WeaponManager {
             // Determine Impact Type
             let impactType = 'spark';
 
-            // Check if hit object is a player (SkinnedMesh or parent is RemotePlayer mesh)
+            // Check if hit object is a player
             let obj = hit.object;
+            let isPlayer = false;
             while (obj) {
-                if (obj.type === 'SkinnedMesh') { // Players are SkinnedMeshes
-                    impactType = 'blood';
+                if (obj.type === 'SkinnedMesh' || obj.name === 'RemotePlayerHitBox' || (obj.name && obj.name.toLowerCase().includes('body'))) {
+                    isPlayer = true;
                     break;
+                }
+                // Also check if this mesh belongs to a RemotePlayer instance
+                if (this.remotePlayers) {
+                    const found = Array.isArray(this.remotePlayers) ?
+                        this.remotePlayers.find(p => p && (p.mesh === obj || p === obj)) : null;
+
+                    if (found) {
+                        isPlayer = true;
+                        break;
+                    }
                 }
                 obj = obj.parent;
             }
 
+            if (isPlayer) impactType = 'blood';
+
+            console.log(`[COMBAT] Impact at ${hit.point.x.toFixed(2)}, ${hit.point.y.toFixed(2)}, Type: ${impactType}, Object: ${hit.object.name}`);
+
             // Create Impact Effect at hit point
             this.createImpact(hit.point, impactType);
+
+            // NETWORK SYNC: Tell everyone about the hit
+            if (this.characterController && this.characterController.world && this.characterController.world.networkManager) {
+                console.log("WeaponManager: Sending Hit Sync!", impactType);
+                this.characterController.world.networkManager.sendHit(hit.point, impactType);
+            }
         }
         // 4. HIT SCAN (Instant Hit Detection)
         // ... (Hit scan logic remains)
 
         // 5. BULLET CAM (Disabled)
         // this.setupBulletTime(bullet);
+
+        // 6. NETWORK SYNC
+        if (this.characterController && this.characterController.world && this.characterController.world.networkManager) {
+            // Send Shoot Event (Origin + Direction + WeaponType)
+            this.characterController.world.networkManager.sendShoot(gunPos, bulletDir, this.currentWeaponType);
+        }
+
+        // 7. AUDIO
+        if (this.soundManager) {
+            this.soundManager.playShoot(this.currentWeaponType);
+        }
     }
 
     createImpact(point, type = 'spark') {
@@ -470,15 +504,17 @@ export class WeaponManager {
             // Intersect Checks (Same as shoot: ignore self/weapon)
             let targets = [];
             this.scene.traverse(c => {
-                if (c.isMesh && c !== this.currentWeaponMesh && c !== this.character && c.visible) {
+                if (c.isMesh && !this.isSelf(c) && c.visible) {
                     targets.push(c);
                 }
             });
             // Add Remote Players
-            if (this.remotePlayers) {
+            if (this.remotePlayers && Array.isArray(this.remotePlayers)) {
                 this.remotePlayers.forEach(p => {
-                    if (p.mesh) {
-                        p.mesh.traverse(c => {
+                    if (!p) return;
+                    const mesh = p.mesh || (p.isMesh ? p : null);
+                    if (mesh) {
+                        mesh.traverse(c => {
                             if (c.isMesh) targets.push(c);
                         });
                     }

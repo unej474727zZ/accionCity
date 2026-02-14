@@ -79,16 +79,21 @@ export class Minimap {
             });
         }
 
-        // 2. Draw Remote Players (Red Dots)
-        ctx.fillStyle = 'red';
+        // 2. Draw Remote Players (Yellow Dots with border)
         Object.values(remotePlayers).forEach(p => {
             if (p.mesh) {
                 const pos = toMap(p.mesh.position.x, p.mesh.position.z);
                 // Check bounds (clip if outside map)
                 if (pos.x >= 0 && pos.x <= width && pos.y >= 0 && pos.y <= height) {
+                    ctx.fillStyle = '#ffcc00'; // Bright Yellow
                     ctx.beginPath();
-                    ctx.arc(pos.x, pos.y, 4, 0, Math.PI * 2);
+                    ctx.arc(pos.x, pos.y, 5, 0, Math.PI * 2); // Larger (5px)
                     ctx.fill();
+
+                    // Stroke for contrast
+                    ctx.strokeStyle = 'black';
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
                 }
             }
         });

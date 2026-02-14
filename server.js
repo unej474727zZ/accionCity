@@ -94,6 +94,17 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Handle Shooting
+  socket.on('playerShoot', (data) => {
+    socket.broadcast.emit('playerShoot', { id: socket.id, ...data });
+  });
+
+  // Handle Hits (Impacts)
+  socket.on('playerHit', (data) => {
+    // Broadcast to everyone so they see the blood/spark
+    io.emit('playerHit', { id: socket.id, ...data });
+  });
+
   // Handle Chat
   socket.on('chatMessage', (data) => {
     const player = players[socket.id];

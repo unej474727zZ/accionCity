@@ -23,11 +23,7 @@ if (btnNV) {
 // Keyboard Shortcut (N)
 window.addEventListener('keydown', (e) => {
     if (e.code === 'KeyN') {
-        world.toggleNightVision();
-    }
-    // DEBUG: Time Scale
-    if (e.code === 'KeyT' && e.shiftKey) {
-        // Shortcut to verify day/night cycle
-        // Not implemented in world public API but good to know
+        // Toggle Night Vision (Assuming world has this method exposed/implemented)
+        if (world.toggleNightVision) world.toggleNightVision();
     }
 });
