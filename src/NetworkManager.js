@@ -14,10 +14,21 @@ export class NetworkManager {
     }
 
     connect() {
-        // Connect to same host (Vite proxy will handle port 3000)
-        this.socket = io('/', {
+        // Connect to the same origin (the browser URL)
+        // Vite proxy will handle forwarding /socket.io to port 3000
+        const url = window.location.origin;
+        console.log("Connecting to Socket.IO at:", url);
+
+        this.socket = io(url, {
             reconnection: true,
-            reconnectionAttempts: 5
+            reconnectionAttempts: 10,
+            transports: ['websocket', 'polling'],
+            path: '/socket.io',
+            forceNew: true
+        });
+
+        this.socket.on("connect_error", (err) => {
+            console.error("Socket Connection Error:", err);
         });
 
         this.socket.on("connect", () => {

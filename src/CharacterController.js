@@ -57,6 +57,8 @@ export class CharacterController {
         this.groundRaycaster.ray.direction.set(0, -1, 0);
 
         this.colliders = []; // Will be populated by World
+        this.remoteColliders = []; // Remote Players for collision
+
 
         this.init();
     }
@@ -86,6 +88,34 @@ export class CharacterController {
             this.animations['backward'] = this.getClip(this.assets['backward'], 'backward');
             this.animations['jump'] = this.getClip(this.assets['jump'], 'jump');
 
+            // 3. WEAPON MASKS (Upper Body Only)
+            // Create specific upper-body clips for each weapon to layer over walking.
+
+            const upperBodyBones = ['Spine', 'Neck', 'Head', 'Shoulder', 'Arm', 'Hand', 'ForeArm'];
+
+            // A) RIFLE MASK (from FiringRifle.glb)
+            const rifleClipRaw = this.getClip(this.assets['firing'], 'firing') || (this.assets['firing'] ? this.assets['firing'].animations[0] : null);
+            if (rifleClipRaw) {
+                const newTracks = [];
+                rifleClipRaw.tracks.forEach(track => {
+                    const boneName = track.name.split('.')[0];
+                    if (upperBodyBones.some(b => boneName.includes(b))) newTracks.push(track);
+                });
+                this.animations['firing'] = new THREE.AnimationClip('firing_upper', -1, newTracks);
+            }
+
+            // B) PISTOL MASK (from shooting.glb)
+            // User reported shooting.glb plays well on upper body but freezes legs. So we filter it too.
+            const pistolClipRaw = this.getClip(this.assets['shooting'], 'shoot_walk') || (this.assets['shooting'] ? this.assets['shooting'].animations[0] : null);
+            if (pistolClipRaw) {
+                const newTracks = [];
+                pistolClipRaw.tracks.forEach(track => {
+                    const boneName = track.name.split('.')[0];
+                    if (upperBodyBones.some(b => boneName.includes(b))) newTracks.push(track);
+                });
+                this.animations['pistol_upper'] = new THREE.AnimationClip('pistol_upper', -1, newTracks);
+            }
+
             // Start idle
             this.playAnimation('idle');
 
@@ -95,14 +125,33 @@ export class CharacterController {
             const geometry = new THREE.BoxGeometry(0.5, 1.8, 0.5);
             const material = new THREE.MeshBasicMaterial({ color: 0xff0000, wireframe: true });
             this.mesh = new THREE.Mesh(geometry, material);
-
             // No animations (mixer stays null)
         }
 
-        // START POS: Back to (0,0,40) as requested
-        // Ensure we start high enough to fall/snap correctly
-        this.mesh.position.set(0, 5, 40);
+        // START POS: Check LocalStorage or Default
+        const savedPos = JSON.parse(localStorage.getItem('playerPos'));
+        if (savedPos) {
+            this.mesh.position.set(savedPos.x, savedPos.y, savedPos.z);
+            this.yaw = savedPos.yaw || 0;
+            console.log("Restored Setup:", savedPos);
+        } else {
+            this.mesh.position.set(0, 5, 40); // Default
+        }
+
         this.scene.add(this.mesh);
+
+        // Auto-Save Position Interval
+        setInterval(() => {
+            if (this.mesh) {
+                const pos = {
+                    x: this.mesh.position.x,
+                    y: this.mesh.position.y,
+                    z: this.mesh.position.z,
+                    yaw: this.yaw
+                };
+                localStorage.setItem('playerPos', JSON.stringify(pos));
+            }
+        }, 1000);
 
         // 3. Setup Input (Keyboard)
         document.addEventListener('keydown', (e) => this.onKeyDown(e));
@@ -143,72 +192,236 @@ export class CharacterController {
 
         // 4. Setup Input (Mobile Joysticks)
         this.initJoysticks();
+
+        // Noclip Toggle (G)
+        this.noclip = false;
+        this.noclipDebounce = false;
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'KeyG' && !this.noclipDebounce) {
+                this.noclip = !this.noclip;
+                this.noclipDebounce = true;
+                console.log("👻 GHOST MODE: " + (this.noclip ? "ON" : "OFF"));
+                setTimeout(() => this.noclipDebounce = false, 500);
+            }
+        });
     }
 
 
     initJoysticks() {
-        // 1. Buttons (Left Side: Forward/Back)
-        const btnFwd = document.getElementById('btn-fwd');
-        const btnBack = document.getElementById('btn-back');
+        // --- PSP CONTROLS SETUP ---
 
-        const handleTouch = (btn, key, active) => {
-            btn.addEventListener(active ? 'touchstart' : 'touchend', (e) => {
-                e.preventDefault();
-                this.keys[key] = active;
-            });
-            // Handle mouse too for testing
-            btn.addEventListener(active ? 'mousedown' : 'mouseup', (e) => {
-                e.preventDefault();
-                this.keys[key] = active;
-            });
+        // Helper for D-Pad (Simulate Analog Input)
+        const dpadState = { up: 0, down: 0, left: 0, right: 0 };
+        const updateMove = () => {
+            this.joystickValues.linear = dpadState.up - dpadState.down;
+            this.joystickValues.angular = dpadState.right - dpadState.left;
         };
 
-        handleTouch(btnFwd, 'forward', true);
-        handleTouch(btnFwd, 'forward', false);
-
-        handleTouch(btnBack, 'backward', true);
-        handleTouch(btnBack, 'backward', false);
-
-        // Zoom Button (Mobile)
-        // Zoom Button (Mobile)
-        const btnZoom = document.getElementById('btn-zoom');
-        if (btnZoom) {
-            // Toggle Logic
-            const toggleZoom = (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                if (this.desiredFOV < 70) {
-                    this.desiredFOV = 75; // Reset
-                } else {
-                    this.desiredFOV = 10; // Max Zoom (Increased from 30)
-                }
-                console.log("Zoom toggled to:", this.desiredFOV);
+        const bindDpad = (id, direction) => {
+            const btn = document.getElementById(id);
+            if (!btn) return;
+            const handler = (active) => {
+                dpadState[direction] = active ? 1 : 0;
+                updateMove();
             };
-            btnZoom.addEventListener('touchstart', toggleZoom);
-            // btnZoom.addEventListener('click', toggleZoom); // touchstart is enough/faster on mobile
+            btn.addEventListener('touchstart', (e) => { e.preventDefault(); handler(true); }, { passive: false });
+            btn.addEventListener('touchend', (e) => { e.preventDefault(); handler(false); }, { passive: false });
+            // Mouse
+            btn.addEventListener('mousedown', (e) => { e.preventDefault(); handler(true); });
+            btn.addEventListener('mouseup', (e) => { e.preventDefault(); handler(false); });
+            // Block click propagation (Fixes PointerLock spin)
+            btn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); });
+        };
+
+        bindDpad('btn-up', 'up');
+        bindDpad('btn-down', 'down');
+        bindDpad('btn-left', 'left');
+        bindDpad('btn-right', 'right');
+
+        // Right Zone (Camera Look) - Touch Drag (Background)
+        const zoneRight = document.getElementById('zone_right');
+        if (zoneRight) {
+            let lookTouchId = null;
+            let lastX, lastY;
+
+            const handleStart = (e) => {
+                // e.preventDefault(); // Don't prevent default here? Might block other things? 
+                // Actually, for a look zone, we usually WANT to prevent scrolling.
+
+                // Find the touch that started on this element
+                const touch = e.changedTouches[0];
+                if (touch) {
+                    lookTouchId = touch.identifier;
+                    lastX = touch.clientX;
+                    lastY = touch.clientY;
+                }
+            };
+
+            const handleMove = (e) => {
+                if (lookTouchId === null) return;
+
+                // Find our tracked touch
+                for (let i = 0; i < e.changedTouches.length; i++) {
+                    const touch = e.changedTouches[i];
+                    if (touch.identifier === lookTouchId) {
+                        const cx = touch.clientX;
+                        const cy = touch.clientY;
+                        const dx = cx - lastX;
+                        const dy = cy - lastY;
+
+                        const sens = 0.005;
+                        this.yaw -= dx * sens;
+                        this.pitch -= dy * sens;
+                        this.pitch = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, this.pitch));
+
+                        lastX = cx;
+                        lastY = cy;
+                        break;
+                    }
+                }
+            };
+
+            const handleEnd = (e) => {
+                if (lookTouchId === null) return;
+                for (let i = 0; i < e.changedTouches.length; i++) {
+                    if (e.changedTouches[i].identifier === lookTouchId) {
+                        lookTouchId = null;
+                        break;
+                    }
+                }
+            };
+
+            zoneRight.addEventListener('touchstart', handleStart, { passive: false });
+            zoneRight.addEventListener('touchmove', handleMove, { passive: false });
+            zoneRight.addEventListener('touchend', handleEnd, { passive: false });
+            zoneRight.addEventListener('touchcancel', handleEnd, { passive: false });
         }
 
-        // 2. Right Joystick: Camera Look (Dynamic joystick)
-        const rightZone = document.getElementById('zone_right');
-        const managerRight = nipplejs.create({
-            zone: rightZone,
-            mode: 'dynamic',
-            position: { left: '50%', top: '50%' },
-            color: 'red',
-            size: 100
+        // 3. Action Buttons Binding helper
+        const bindBtn = (id, onStart, onEnd) => {
+            const btn = document.getElementById(id);
+            if (btn) {
+                // Use pointer events or touch events? Touch is strict.
+                btn.addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (onStart) onStart();
+                }, { passive: false });
+
+                btn.addEventListener('touchend', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (onEnd) onEnd();
+                }, { passive: false });
+
+                // Mouse fallback
+                btn.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (onStart) onStart();
+                });
+                btn.addEventListener('mouseup', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (onEnd) onEnd();
+                });
+
+                // Block click propagation (Fixes PointerLock spin)
+                btn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); });
+            }
+        };
+
+        // --- PSP ACTIONS MAPPING ---
+
+        // L BUTTON -> NIGHT VISION (Swapped with Select)
+        bindBtn('btn-l', () => {
+            if (this.world) this.world.toggleNightVision();
+        }, null);
+
+        // R BUTTON -> FIRE
+        bindBtn('btn-r', () => {
+            if (this.weaponManager) {
+                this.weaponManager.isFiring = true;
+                this.weaponManager.shoot();
+            }
+        }, () => {
+            if (this.weaponManager) this.weaponManager.isFiring = false;
         });
 
-        managerRight.on('move', (evt, data) => {
-            if (data.vector) {
-                this.joystickValues.lookX = data.vector.x * 2.5;
-                this.joystickValues.lookY = data.vector.y * 2.0;
+        // TRIANGLE -> SWITCH WEAPON
+        bindBtn('btn-tri', () => {
+            if (this.weaponManager) this.weaponManager.cycleWeapon();
+        }, null);
+
+        // CIRCLE -> LASER TOGGLE
+        bindBtn('btn-cir', () => {
+            if (this.weaponManager) this.weaponManager.toggleLaser();
+        }, null);
+
+        // X (CROSS) -> JUMP
+        bindBtn('btn-x', () => this.triggerJump('touch'), null);
+
+        // SQUARE -> RUN (Sprint)
+        bindBtn('btn-sq', () => this.keys.run = true, () => this.keys.run = false);
+
+
+        // SELECT -> ZOOM (Toggle) (Swapped with L)
+        bindBtn('btn-select', () => {
+            this.desiredFOV = (this.desiredFOV < 70) ? 75 : 30;
+        }, null);
+
+        // START -> PAUSE / TOGGLE UI
+        bindBtn('btn-start', () => {
+            // User requested Start to be different from Map.
+            // Mapping to UI Toggle (Cinematic/Pause feel)
+            if (this.world && this.world.toggleUI) {
+                this.world.toggleUI();
+            } else {
+                console.log("Start Pressed - UI Toggle not available");
             }
-        });
-        managerRight.on('end', () => {
-            this.joystickValues.lookX = 0;
-            this.joystickValues.lookY = 0;
-        });
+        }, null);
+
+
+        // --- EXTRA TOGGLES ---
+
+        // CHAT TOGGLE
+        bindBtn('btn-chat-toggle', () => {
+            const chat = document.getElementById('chat-container');
+            if (chat) chat.style.display = (chat.style.display === 'none') ? 'flex' : 'none';
+        }, null);
+
+        // MAP TOGGLE (Button) - Same as Start
+        bindBtn('btn-map-toggle', () => {
+            const minimap = document.getElementById('minimap-canvas');
+            if (minimap) minimap.style.display = (minimap.style.display === 'none') ? 'block' : 'none';
+        }, null);
+
+        // EXTRA: RIGHT D-PAD (Camera Control) - "Second Cross"
+        const bindCamBtn = (id, key) => {
+            const btn = document.getElementById(id);
+            if (btn) {
+                const handler = (active) => {
+                    this.keys[key] = active;
+                };
+                // Touch
+                btn.addEventListener('touchstart', (e) => { e.preventDefault(); handler(true); }, { passive: false });
+                btn.addEventListener('touchend', (e) => { e.preventDefault(); handler(false); }, { passive: false });
+                // Mouse
+                btn.addEventListener('mousedown', (e) => { e.preventDefault(); handler(true); });
+                btn.addEventListener('mouseup', (e) => { e.preventDefault(); handler(false); });
+                btn.addEventListener('mouseleave', (e) => { e.preventDefault(); handler(false); });
+                // Block click propagation (Fixes PointerLock spin)
+                btn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); });
+            }
+        };
+
+        // BIND CAMERA CROSS (To keys used in update loop)
+        bindCamBtn('btn-cam-up', 'lookUp');
+        bindCamBtn('btn-cam-down', 'lookDown');
+        bindCamBtn('btn-cam-left', 'lookLeft');
+        bindCamBtn('btn-cam-right', 'lookRight');
     }
+
 
     getClip(gltf, fallbackName) {
         if (gltf && gltf.animations && gltf.animations.length > 0) {
@@ -217,13 +430,55 @@ export class CharacterController {
         return null;
     }
 
+    setFiring(isActive) {
+        if (!this.mixer) return;
+
+        // Determine which mask to use based on weapon
+        const isRifle = (this.weaponManager && this.weaponManager.currentWeaponType === 'rifle');
+        const targetClipName = isRifle ? 'firing' : 'pistol_upper'; // 'firing' is the rifle mask key
+        const otherClipName = isRifle ? 'pistol_upper' : 'firing';
+
+        // Get Actions
+        const targetClip = this.animations[targetClipName];
+        if (!targetClip) return;
+        const targetAction = this.mixer.clipAction(targetClip);
+
+        // Fade OUT the other mask if it's running (e.g. switched weapon while firing)
+        const otherClip = this.animations[otherClipName];
+        if (otherClip) {
+            const otherAction = this.mixer.clipAction(otherClip);
+            if (otherAction.isRunning()) otherAction.fadeOut(0.2);
+        }
+
+        if (isActive) {
+            // Only play if not already playing or fading in
+            if (!targetAction.isRunning() || targetAction.getEffectiveWeight() < 0.1) {
+                targetAction.reset();
+                targetAction.enabled = true;
+                targetAction.setLoop(THREE.LoopRepeat);
+                targetAction.clampWhenFinished = false;
+                // High weight to override arms
+                targetAction.setEffectiveWeight(50.0);
+                targetAction.play();
+                targetAction.fadeIn(0.2);
+            }
+        } else {
+            if (targetAction.isRunning()) {
+                targetAction.fadeOut(0.2);
+            }
+        }
+    }
+
     playAnimation(name, loop = true) {
         if (this.currentAction && this.state === name) return;
 
         // console.log(`Anim switch: ${this.state} -> ${name}`); // DEBUG
 
         const clip = this.animations[name];
-        if (!clip) return;
+        if (!clip) {
+            console.warn(`Animation '${name}' not found! Available:`, Object.keys(this.animations));
+            return;
+        }
 
         const action = this.mixer.clipAction(clip);
         action.reset();
@@ -264,6 +519,7 @@ export class CharacterController {
     }
 
     onKeyDown(e) {
+        // console.log("Key pressed:", e.code); // DEBUG: Uncomment if inputs are weird
         switch (e.code) {
             case 'KeyW': this.keys.forward = true; break;
             case 'KeyS': this.keys.backward = true; break;
@@ -281,6 +537,12 @@ export class CharacterController {
                     this.keys.spaceHeld = true;
                 }
                 break;
+
+            // CAMERA LOOK (Arrow Keys Only)
+            case 'ArrowUp': this.keys.lookUp = true; break;
+            case 'ArrowDown': this.keys.lookDown = true; break;
+            case 'ArrowLeft': this.keys.lookLeft = true; break;
+            case 'ArrowRight': this.keys.lookRight = true; break;
         }
     }
 
@@ -298,6 +560,12 @@ export class CharacterController {
             case 'Space':
                 this.keys.spaceHeld = false;
                 break;
+
+            // CAMERA LOOK (Arrow Keys Only)
+            case 'ArrowUp': this.keys.lookUp = false; break;
+            case 'ArrowDown': this.keys.lookDown = false; break;
+            case 'ArrowLeft': this.keys.lookLeft = false; break;
+            case 'ArrowRight': this.keys.lookRight = false; break;
         }
     }
 
@@ -314,12 +582,20 @@ export class CharacterController {
 
         let gpInfo = "No GP";
 
-        // 1. Update Rotation (Joystick + Mouse)
-        const joyLookSpeed = 1.5; // Speed multiplier for joystick look
+        // 1. Update Rotation (Joystick + Mouse + Keyboard)
+        const joyLookSpeed = 0.75; // REDUCED from 1.5 for smoother mobile control
         this.yaw -= this.joystickValues.lookX * joyLookSpeed * dt;
-        this.pitch += this.joystickValues.lookY * joyLookSpeed * dt; // Inverted Y typically? Standard is Up=Up.
+        this.pitch += this.joystickValues.lookY * joyLookSpeed * dt;
+
+        // KEYBOARD LOOK UPDATE
+        const keyLookSpeed = 2.0 * dt;
+        if (this.keys.lookLeft) this.yaw += keyLookSpeed;
+        if (this.keys.lookRight) this.yaw -= keyLookSpeed;
+        if (this.keys.lookUp) this.pitch += keyLookSpeed;
+        if (this.keys.lookDown) this.pitch -= keyLookSpeed;
+
         // Clamping pitch
-        this.pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, this.pitch));
+        this.pitch = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, this.pitch));
 
         // Fix: Rotate mesh 180 (Math.PI) because GLB faces +Z (towards cam) by default
         // We want it to face -Z (away from cam/forward)
@@ -406,6 +682,73 @@ export class CharacterController {
             } else {
                 this.gamepadJumpHeld = false;
             }
+
+            // COMBAT CONTROLS
+            if (this.weaponManager) {
+                // Shoot (Right Trigger / R2 / Button 7)
+                if (gamepad.buttons[7] && gamepad.buttons[7].value > 0.1) {
+                    this.weaponManager.isFiring = true;
+                    if (!this.gamepadTriggerHeld) {
+                        // Optional: semi-auto logic or just let weapon manager handle rate
+                    }
+                    this.gamepadTriggerHeld = true;
+                    this.weaponManager.shoot(); // Ensure it calls shoot (auto-fire handled in WM update too?)
+                    // Actually WM handles auto-fire if isFiring is true.
+                } else {
+                    this.weaponManager.isFiring = false;
+                    this.gamepadTriggerHeld = false;
+                }
+
+                // Switch Weapon (Y / Triangle / Button 3)
+                if (gamepad.buttons[3].pressed) {
+                    if (!this.gamepadSwitchHeld) {
+                        this.weaponManager.cycleWeapon();
+                        this.gamepadSwitchHeld = true;
+                    }
+                } else {
+                    this.gamepadSwitchHeld = false;
+                }
+
+                // Toggle Laser (B / Circle / Button 1) OR R3 (Button 11)
+                // Let's use R3 for Laser (Common for special) or D-Pad Up?
+                // User asked for B? No, user just asked to update.
+                // Let's use B (Button 1) for now as it's unused.
+                if (gamepad.buttons[1].pressed) {
+                    if (!this.gamepadLaserHeld) {
+                        this.weaponManager.toggleLaser();
+                        this.gamepadLaserHeld = true;
+                    }
+                } else {
+                    this.gamepadLaserHeld = false;
+                }
+
+                // Zoom (Left Trigger / L2 / Button 6)
+                if (gamepad.buttons[6] && gamepad.buttons[6].value > 0.1) {
+                    this.desiredFOV = 30; // Zoom In
+                } else {
+                    this.desiredFOV = 75; // Reset
+                }
+
+                // Night Vision (D-Pad Up / Button 12)
+                if (gamepad.buttons[12].pressed) {
+                    if (!this.gamepadNVHeld) {
+                        if (this.world) this.world.toggleNightVision();
+                        this.gamepadNVHeld = true;
+                    }
+                } else {
+                    this.gamepadNVHeld = false;
+                }
+
+                // Photo Mode / Toggle UI (Select / Back / Button 8)
+                if (gamepad.buttons[8] && gamepad.buttons[8].pressed) {
+                    if (!this.gamepadUIHeld) {
+                        if (this.world) this.world.toggleUI();
+                        this.gamepadUIHeld = true;
+                    }
+                } else {
+                    this.gamepadUIHeld = false;
+                }
+            }
         }
 
         // Keyboard contrib
@@ -443,17 +786,25 @@ export class CharacterController {
             }
 
             if (forwardInput > 0.1) { // Moving forward
-                if (!this.isJumping) nextState = isRunning ? 'run' : 'walk';
-
+                if (!this.isJumping) {
+                    // Always use Run/Walk state. 
+                    // Firing is handled as a Mask Layer in update() / setFiring()
+                    nextState = isRunning ? 'run' : 'walk';
+                }
                 speed = isRunning ? this.runSpeed : this.walkSpeed;
                 // Modulate speed by stick pressure
                 speed *= Math.abs(forwardInput);
             } else if (forwardInput < -0.1) { // Moving backward
                 if (!this.isJumping) nextState = 'backward';
+                // console.log("State: Backward"); // DEBUG
                 speed = -this.walkSpeed * 0.6 * Math.abs(forwardInput);
             } else {
                 // pure strafe
-                if (!this.isJumping) nextState = 'walk';
+
+                // pure strafe
+                if (!this.isJumping) {
+                    nextState = 'walk'; // Standard strafe + Mask handled by setFiring
+                }
                 speed = this.walkSpeed * Math.abs(strafeInput); // Just applying speed to movement vector
             }
         } else {
@@ -463,9 +814,59 @@ export class CharacterController {
         }
 
         // 3. Move Character (Always run physics)
-        // 3. PHYSICS & GRAVITY
 
-        // RAYCAST FIRST to see what's below us
+        // --- NOCLIP / GHOST MODE ---
+        if (this.noclip) {
+            // Fly Mode Logic
+            const flySpeed = this.runSpeed * 2; // Fast
+            const moveVec = new THREE.Vector3(0, 0, 0);
+
+            // Vertical (Space=Up, Shift=Down)
+            if (this.keys.spaceHeld || this.keys[' ']) moveVec.y += 1;
+            if (this.keys.isShiftPressed || this.keys['shift']) moveVec.y -= 1;
+
+            // Horizontal (Relative to Camera/Mesh Rotation)
+            // Forward/Back
+            if (forwardInput !== 0) moveVec.z -= forwardInput; // -Z is forward in local space
+            // Strafe
+            if (strafeInput !== 0) moveVec.x -= strafeInput;
+
+            if (moveVec.length() > 0) {
+                // Apply rotation
+                moveVec.normalize().multiplyScalar(flySpeed * dt);
+                moveVec.applyQuaternion(this.mesh.quaternion);
+
+                // Vertical is absolute world Y, not local Y (so we can fly up/down easily)
+                // Actually, let's keep it simple: Camera-relative or World-Absolute?
+                // World Absolute for Up/Down is easier to control.
+                if (this.keys.spaceHeld) this.mesh.position.y += flySpeed * dt;
+                if (this.keys.isShiftPressed) this.mesh.position.y -= flySpeed * dt;
+
+                // Horizontal movement
+                const forwardDir = new THREE.Vector3(0, 0, 1).applyQuaternion(this.mesh.quaternion);
+                const rightDir = new THREE.Vector3(1, 0, 0).applyQuaternion(this.mesh.quaternion);
+
+                // We need to decouple Y from forward/right to fly straight
+                // but for noclip we usually want to look-to-fly.
+                // For now, simple WASD plane movement + Space/Shift vertical is best.
+
+                const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.mesh.quaternion);
+                const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.mesh.quaternion);
+
+                // Remove Y component for horizontal flying if we want "FPS style"
+                // but for noclip we usually want to look-to-fly.
+                // For now, simple WASD plane movement + Space/Shift vertical is best.
+
+                const moveStep = forward.multiplyScalar(forwardInput * flySpeed * dt)
+                    .add(right.multiplyScalar(strafeInput * flySpeed * dt));
+
+                this.mesh.position.add(moveStep);
+            }
+
+            return; // SKIP PHYSICS
+        }
+
+        // 3. PHYSICS & GRAVITY
         const rayOrigin = this.mesh.position.clone();
         rayOrigin.y += 1.0;
         this.groundRaycaster.set(rayOrigin, new THREE.Vector3(0, -1, 0));
@@ -601,6 +1002,32 @@ export class CharacterController {
             if (blocked) {
                 moveVector.set(0, 0, 0);
             }
+
+            // PLAYER-PLAYER COLLISION
+            // Check against remote players (Simple Radius Check)
+            if (this.remoteColliders.length > 0) {
+                const myPos = this.mesh.position.clone().add(moveVector); // Predicted position
+                const radius = 0.5; // Player radius
+
+                for (const otherMesh of this.remoteColliders) {
+                    if (!otherMesh) continue;
+                    // Horizontal distance only
+                    const dx = myPos.x - otherMesh.position.x;
+                    const dz = myPos.z - otherMesh.position.z;
+                    const distSq = dx * dx + dz * dz;
+
+                    if (distSq < (radius * 2) * (radius * 2)) {
+                        // Collision!
+                        // Push back vector
+                        const dist = Math.sqrt(distSq);
+                        const pushDir = new THREE.Vector3(dx, 0, dz).normalize();
+                        const overlap = (radius * 2) - dist;
+
+                        // Apply push to moveVector (soft collision)
+                        moveVector.add(pushDir.multiplyScalar(overlap));
+                    }
+                }
+            }
         }
 
         // Apply Move
@@ -614,10 +1041,45 @@ export class CharacterController {
             this.playAnimation(nextState);
         }
 
+        // Handle Upper Body Firing Mask Visibility
+        // RULES:
+        // ALWAYS use mask when firing. We have specific masks for Rifle and Pistol.
+        // The 'setFiring' method handles selecting the correct mask clip.
+
+        const useMask = (this.weaponManager && this.weaponManager.isFiring);
+        this.setFiring(useMask);
+
         // 6. Update Camera
         // Calculate Orbit Position: Rotate offset vector by yaw
         const currentOffset = this.cameraOffset.clone();
         currentOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
+
+        // onMouseMove (for debug tracking)
+        // We'll capture last movementX in a class property if needed, 
+        // but for now let's just show PointerLock status.
+
+        // DEBUG OUTPUT
+        const debugEl = document.getElementById('debug-console');
+        if (debugEl) {
+            let keyStr = "";
+            for (let k in this.keys) {
+                if (this.keys[k]) keyStr += k + " ";
+            }
+            const plStatus = (document.pointerLockElement === document.body) ? "ACTIVE" : "OFF";
+            // Get lookTouchId from zoneRight closure? 
+            // We can't access closure vars easily. 
+            // But we can infer from joyLookX if it was touch.
+
+            debugEl.innerText = `
+FPS: ${(1 / dt).toFixed(0)}
+YAW: ${this.yaw.toFixed(2)}
+PITCH: ${this.pitch.toFixed(2)}
+JOY-LOOK X: ${this.joystickValues.lookX.toFixed(2)}
+KEYS: ${keyStr}
+TOUCHES: ${navigator.maxTouchPoints}
+PTR LOCK: ${plStatus}
+            `;
+        }
 
         // Ideal Position (Target)
         const idealPosition = this.mesh.position.clone().add(currentOffset);

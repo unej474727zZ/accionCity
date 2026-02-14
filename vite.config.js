@@ -17,9 +17,9 @@ export default defineConfig({
     // Enable CORS for external access
     cors: true,
     origin: '*',
-    // Fix WebSocket (HMR) connection through tunnel
-    hmr: {
-        clientPort: 443 // Force client to connect via HTTPS port (tunnel)
-    }
+    // Fix WebSocket (HMR) connection 
+    // hmr: {
+    //     clientPort: 443 
+    // }
   }
 });

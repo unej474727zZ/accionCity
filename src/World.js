@@ -1,9 +1,11 @@
 import * as THREE from 'three';
 import { AssetLoader } from './AssetLoader.js';
 import { CharacterController } from './CharacterController.js';
-
+import { NPCManager } from './NPCManager.js';
 import { NetworkManager } from './NetworkManager.js';
 import { RemotePlayer } from './RemotePlayer.js';
+import { WeaponManager } from './WeaponManager.js';
+import { Minimap } from './Minimap.js';
 
 export class World {
     constructor(container) {
@@ -40,17 +42,40 @@ export class World {
 
         window.addEventListener('resize', () => this.onWindowResize(), false);
 
-        // Initial simple lighting
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
-        this.scene.add(ambientLight);
+        // Environment: Sky & Fog
+        const skyColor = 0x87CEEB; // Sky Blue
+        const groundColor = 0x555555; // Grayish
+        this.scene.background = new THREE.Color(skyColor);
 
-        const dirLight = new THREE.DirectionalLight(0xffffff, 1);
-        dirLight.position.set(10, 20, 10);
+        // FOG: Hides the edge of the world (Depth)
+        // Denser fog for "heavy atmosphere" as requested
+        // near: 20 (starts close), far: 150 (obscures distant buildings)
+        this.scene.fog = new THREE.Fog(skyColor, 20, 150);
+
+        // Lighting
+        // Hemisphere: Sky Color + Ground Bounce
+        const hemiLight = new THREE.HemisphereLight(skyColor, groundColor, 0.6);
+        this.scene.add(hemiLight);
+
+        // Directional (Sun)
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+        dirLight.position.set(50, 100, 50); // High sun
         dirLight.castShadow = true;
-        this.scene.add(dirLight);
 
-        // Environment
-        this.scene.background = new THREE.Color(0x87CEEB); // Sky Blue
+        // Shadow High Quality
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        dirLight.shadow.camera.near = 0.5;
+        dirLight.shadow.camera.far = 500;
+
+        // Configure shadow camera volume to cover the city view
+        const d = 100;
+        dirLight.shadow.camera.left = -d;
+        dirLight.shadow.camera.right = d;
+        dirLight.shadow.camera.top = d;
+        dirLight.shadow.camera.bottom = -d;
+
+        this.scene.add(dirLight);
 
         // DEBUG: Floor/Grid removed to see City clearly
     }
@@ -130,6 +155,25 @@ export class World {
             // Setup Character
             this.character = new CharacterController(this.scene, this.camera, assets);
 
+            // NPC MANAGER
+            // NPC MANAGER
+            this.npcManager = new NPCManager(this.scene, assets);
+            // Parked Cars (Static) per user request
+            this.npcManager.initParkedCars(50);
+
+            // WEAPON MANAGER (EMOTION!!!)
+            // Pass character.mesh (for bones) AND character controller (for animations)
+            this.weaponManager = new WeaponManager(this.scene, this.character, this.camera, assets);
+
+            // LINK CONTROLLER TO WEAPON MANAGER
+            this.character.weaponManager = this.weaponManager;
+            this.character.world = this;
+
+            // MINIMAP
+            this.minimap = new Minimap();
+            // Start with Pistol equipped? Or wait for input? Let's equip Pistol by default.
+            // But we need to make sure model is ready. Construct it now, call equip later or inside.
+
             // PASS COLLIDERS
             this.character.colliders = [];
             if (city) {
@@ -172,6 +216,31 @@ export class World {
             const chatInput = document.getElementById('chat-input');
             const chatMessages = document.getElementById('chat-messages');
 
+            // STATUS INDICATOR
+            const statusEl = document.createElement('div');
+            statusEl.style.position = 'absolute';
+            statusEl.style.top = '10px';
+            statusEl.style.left = '50%';
+            statusEl.style.transform = 'translateX(-50%)';
+            statusEl.style.color = 'red';
+            statusEl.style.fontWeight = 'bold';
+            statusEl.style.fontSize = '14px';
+            statusEl.style.zIndex = '1000';
+            statusEl.innerText = 'DISCONNECTED';
+            document.body.appendChild(statusEl);
+
+            this.networkManager.socket.on('connect', () => {
+                statusEl.innerText = 'ONLINE';
+                statusEl.style.color = 'lime';
+                setTimeout(() => { statusEl.style.display = 'none'; }, 3000);
+            });
+
+            this.networkManager.socket.on('disconnect', () => {
+                statusEl.innerText = 'DISCONNECTED';
+                statusEl.style.color = 'red';
+                statusEl.style.display = 'block';
+            });
+
             this.networkManager.onChatMessage = (data) => {
                 console.log("Chat received:", data); // Debug
                 const msg = document.createElement('div');
@@ -205,6 +274,15 @@ export class World {
             }
 
             document.getElementById('loading').style.display = 'none';
+
+            // UI Toggle State
+            this.uiVisible = true;
+            window.addEventListener('keydown', (e) => {
+                if (e.code === 'KeyP') {
+                    this.toggleUI();
+                }
+            });
+
             this.animate();
         } catch (err) {
             console.error('Failed to load game:', err);
@@ -218,8 +296,182 @@ export class World {
         this.renderer.setSize(window.innerWidth, window.innerHeight);
     }
 
+    toggleNightVision() {
+        this.isNightVision = !this.isNightVision;
+        console.log("Night Vision:", this.isNightVision);
+    }
+
+    toggleUI() {
+        this.uiVisible = !this.uiVisible;
+        const display = this.uiVisible ? 'block' : 'none';
+        const displayFlex = this.uiVisible ? 'flex' : 'none';
+
+        // 1. Chat
+        const chatInput = document.getElementById('chat-input');
+        const chatMessages = document.getElementById('chat-messages');
+        if (chatInput) chatInput.style.display = display;
+        if (chatMessages) chatMessages.style.display = display;
+
+        // 2. Mobile PSP Controls (Game parts only)
+        // We keep #center-bar (Start/Select) and #toggles-container visible so we can toggle back!
+        const idsToToggle = [
+            'dpad-container',
+            'shapes-container',
+            'camera-cross-container',
+            'btn-l',
+            'btn-r',
+            'minimap-canvas' // Also hide map canvas
+        ];
+
+        idsToToggle.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) {
+                // Check if it was flex or block? Most are absolute/block.
+                // Except shoulder buttons which are flex.
+                // Safest to toggle visibility or display based on original?
+                // For simplicity, display='none' vs ... empty string?
+                // Or just use the 'display' var which is 'block'/'none'.
+                // Shoulder btns and others are okay with block or flex?
+                // .psp-btn is flex.
+                el.style.display = this.uiVisible ? '' : 'none'; // '' reverts to CSS default
+            }
+        });
+
+        // 3. Status
+        // ...
+
+        // 4. Weapon UI
+        if (this.weaponManager) this.weaponManager.toggleUI(this.uiVisible);
+
+        // 5. Minimap Container
+        // if (this.minimap) this.minimap.toggleUI(this.uiVisible); // Handled by ID above
+
+        console.log("UI Visibility:", this.uiVisible);
+    }
+
     animate() {
         requestAnimationFrame(() => this.animate());
+
+        const dt = this.clock.getDelta();
+
+        // --- DAY/NIGHT CYCLE ---
+        // Cycle duration in seconds (1h Day + 1h Night = 7200s)
+        const dayDuration = 7200;
+        const time = Date.now() / 1000;
+        const cycle = (time % dayDuration) / dayDuration; // 0 to 1
+
+        // Sun Position (Rotate around Z axis)
+        const sunAngle = (cycle * Math.PI * 2) - (Math.PI / 2); // Start at Sunrise
+        const sunRadius = 200;
+
+        let sunIntensity = 0;
+
+        // Find the directional light
+        const dirLight = this.scene.children.find(c => c.isDirectionalLight);
+        if (dirLight) {
+            dirLight.position.x = Math.cos(sunAngle) * sunRadius;
+            dirLight.position.y = Math.sin(sunAngle) * sunRadius;
+            dirLight.position.z = 50;
+
+            // Base intensity based on height
+            sunIntensity = Math.max(0, Math.sin(sunAngle) * 1.5);
+
+            // --- CLOUD SHADOWS ---
+            // Use sine waves to simulate passing clouds
+            const cloudNoise = Math.sin(time * 0.1) + Math.sin(time * 0.05) + Math.cos(time * 0.02);
+            // If noise is high, it's a "cloudy moment"
+            let cloudFactor = 1.0;
+            if (cloudNoise > 1.0) { // Arbitrary threshold for "cloud passing"
+                cloudFactor = 0.3; // Dim significantly
+            }
+
+            // Apply Cloud Dimming
+            sunIntensity *= cloudFactor;
+
+            dirLight.mask = (dirLight.position.y > 0) ? 1 : 0;
+            dirLight.intensity = sunIntensity;
+            dirLight.castShadow = (dirLight.position.y > 10);
+        }
+
+        // Sky Color Interpolation
+        let skyHex = 0x000000;
+        let groundHex = 0x111111;
+        let fogDist = 150;
+        let fogColor = null;
+
+        const dayIntensity = Math.max(0, Math.sin(sunAngle));
+
+        if (dayIntensity > 0.8) {
+            skyHex = 0x87CEEB; // Blue
+            groundHex = 0x555555;
+        } else if (dayIntensity > 0.2) {
+            skyHex = 0xFF4500; // Orange
+            groundHex = 0x332222;
+            fogDist = 100;
+        } else {
+            skyHex = 0x050510; // Night
+            groundHex = 0x000000;
+            fogDist = 80;
+        }
+
+        // --- NIGHT VISION OVERRIDE ---
+        if (this.isNightVision) {
+            skyHex = 0x002200; // Dark Green
+            groundHex = 0x004400; // Brighter Green Floor
+            fogDist = 200; // See further in dark
+            fogColor = new THREE.Color(0x00FF00); // Bright Green Fog
+        }
+
+        // Smoothly lerp current color to target
+        const currentSky = this.scene.background;
+        currentSky.lerp(new THREE.Color(skyHex), dt * 0.5);
+
+        // Update Fog
+        if (fogColor) {
+            this.scene.fog.color.lerp(fogColor, dt * 2.0); // Fast transition to NV
+        } else {
+            this.scene.fog.color.copy(currentSky);
+        }
+
+        this.scene.fog.far = THREE.MathUtils.lerp(this.scene.fog.far, fogDist, dt * 0.5);
+
+        // Update Ambient/Hemi Light
+        const hemiLight = this.scene.children.find(c => c.isHemisphereLight);
+        if (hemiLight) {
+            if (this.isNightVision) {
+                // NV Mode: High ambient light to "see in dark"
+                hemiLight.color.setHex(0x00FF00);
+                hemiLight.groundColor.setHex(0x003300);
+                hemiLight.intensity = 2.0; // Artificial gain
+            } else {
+                // Normal Mode
+                hemiLight.color.lerp(new THREE.Color(skyHex), dt * 0.5);
+                hemiLight.groundColor.lerp(new THREE.Color(groundHex), dt * 0.5);
+
+                // Cloud shadows affect ambient too? Maybe slightly
+                // If direct light is blocked by clouds, ambient drops a bit too
+                const cloudAmbient = (sunIntensity < 0.5 && dayIntensity > 0.5) ? 0.5 : 1.0;
+                hemiLight.intensity = (0.2 + (dayIntensity * 0.6)) * cloudAmbient;
+            }
+        }
+
+        // Sky Sphere Rotation
+        if (this.skySphere) {
+            this.skySphere.rotation.y += 0.01 * dt;
+            this.skySphere.material.color.copy(currentSky);
+        }
+
+        // --- END CYCLE ---
+
+        // Update Weapons (Effects)
+        if (this.weaponManager) {
+            this.weaponManager.update(dt);
+        }
+
+        // Update Minimap
+        if (this.minimap && this.character && this.character.mesh) {
+            this.minimap.update(this.character.mesh, this.remotePlayers, this.npcManager);
+        }
 
         // NETWORK: Send Update
         if (this.character) {
@@ -230,17 +482,30 @@ export class World {
             );
         }
 
-        const dt = this.clock.getDelta();
-
         if (this.character) {
             this.character.update(dt);
+            // Pass remote colliders for Player-Player Collision
+            this.character.remoteColliders = Object.values(this.remotePlayers).map(p => p.mesh);
+        }
 
-            // CAMERA ZOOM LOGIC
+        if (this.npcManager) this.npcManager.update(dt);
+
+        if (this.weaponManager) {
+            // Pass remote players for Hit Detection & Laser Sight
+            this.weaponManager.remotePlayers = Object.values(this.remotePlayers).map(p => p.mesh);
+            this.weaponManager.update(dt);
+        }
+
+        // CAMERA ZOOM LOGIC
+        if (this.character && this.camera && this.character.desiredFOV) {
             const targetFOV = this.character.desiredFOV;
+            // Stable Time-Based Lerp (Frame-rate independent dampening)
+            // lerp(current, target, 1 - exp(-speed * dt))
+            const speed = 5.0;
+            const t = 1.0 - Math.pow(0.01, dt * speed);
 
-            // Smooth Lerp
             if (Math.abs(this.camera.fov - targetFOV) > 0.1) {
-                this.camera.fov += (targetFOV - this.camera.fov) * 10.0 * dt;
+                this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFOV, t);
                 this.camera.updateProjectionMatrix();
             }
         }

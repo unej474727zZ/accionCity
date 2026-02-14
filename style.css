@@ -29,106 +29,305 @@ body {
   transition: opacity 0.5s;
 }
 
-/* Joystick Zones */
-#zone_joystick {
+/* --- PSP CONTROLS LAYOUT (Reference Style) --- */
+
+#psp-controls {
   position: absolute;
-  bottom: 0px;
-  left: 0px;
+  top: 0;
+  left: 0;
   width: 100%;
   height: 100%;
-  /* Full screen to capture right side properly? No, right zone is enough */
   pointer-events: none;
-  z-index: 10;
+  z-index: 20;
 }
 
-.zone {
+/* Base Button - Transparent & Clean */
+.psp-btn {
   position: absolute;
-  width: 50%;
-  height: 50%;
-  bottom: 0;
-  pointer-events: auto;
-}
-
-/* Right Joystick only */
-#zone_right {
-  right: 0;
-  bottom: 0px;
-  height: 60%;
-}
-
-.hidden {
-  opacity: 0;
-}
-
-/* Movement Buttons */
-.mobile-btn {
-  position: absolute;
-  left: 40px;
-  width: 60px;
-  /* Smaller */
-  height: 60px;
-
-  /* Transparent with Turquoise reflections */
-  background: rgba(0, 255, 255, 0.1);
-  border: 1px solid rgba(0, 255, 255, 0.5);
-  box-shadow: 0 0 10px rgba(0, 255, 255, 0.3);
-
-  border-radius: 50%;
-  color: cyan;
-  font-size: 24px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  /* Thin outline */
+  color: rgba(255, 255, 255, 0.8);
   display: flex;
   justify-content: center;
   align-items: center;
   user-select: none;
   touch-action: none;
   pointer-events: auto;
-  z-index: 20;
-  transition: all 0.2s;
+  border-radius: 5px;
+  transition: transform 0.1s, background 0.1s;
 }
 
-.mobile-btn:active {
-  background: rgba(0, 255, 255, 0.3);
-  box-shadow: 0 0 15px cyan;
+.psp-btn:active {
+  background: rgba(255, 255, 255, 0.2);
   transform: scale(0.95);
+  color: white;
+  border-color: white;
 }
 
-#btn-fwd {
-  bottom: 110px;
-  /* Adjusted for smaller size */
+/* SHOULDER BUTTONS (L / R) - Top Corners, Wide & Thin */
+.shoulder-btn {
+  top: 20px;
+  width: 100px;
+  height: 40px;
+  border-radius: 5px;
+  border-top-left-radius: 15px;
+  border-top-right-radius: 15px;
+  font-size: 18px;
 }
 
-#btn-back {
-  bottom: 40px;
+#btn-l {
+  left: 20px;
+  border-top-right-radius: 5px;
 }
 
-#btn-zoom {
-  left: auto;
-  /* CRITICAL: Override default left:40px from .mobile-btn */
-  right: 40px;
-  bottom: 160px;
-  /* Moved up slightly to clear joystick thumb area further */
-  border-color: rgba(255, 0, 0, 0.5);
-  /* Red tint for 'Aim' */
-  /* Above joystick area */
-  border-color: rgba(255, 0, 0, 0.5);
-  /* Red tint for 'Aim' */
-  color: red;
+#btn-r {
+  right: 20px;
+  border-top-left-radius: 5px;
+}
+
+
+/* LEFT D-PAD (Movement) - Cross Shape */
+/* Matching Right Camera Cross Design & Position */
+#dpad-container {
+  position: absolute;
+  bottom: -20px;
+  /* Matched to Right Side */
+  left: 30px;
+  width: 140px;
+  height: 140px;
+  transform: scale(0.8);
+  /* Matched Size */
+  pointer-events: none;
+}
+
+/* D-Pad individual buttons */
+.dpad-btn {
+  width: 40px;
+  height: 40px;
+  font-size: 24px;
+  border: none;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 5px;
+}
+
+#btn-up {
+  top: 10px;
+  left: 50px;
+}
+
+#btn-down {
+  bottom: 10px;
+  left: 50px;
+}
+
+#btn-left {
+  top: 50px;
+  left: 10px;
+}
+
+#btn-right {
+  top: 50px;
+  right: 10px;
+}
+
+/* D-Pad Backing visual - mimicking stick center style if desired, or keeping cross center */
+#dpad-center {
+  position: absolute;
+  top: 50px;
+  left: 50px;
+  width: 40px;
+  height: 40px;
+  background: rgba(255, 255, 255, 0.05);
+  /* Lighter/Transparent like Right Side */
+  border-radius: 50%;
+  /* Match Round Stick Style? User said "same design" */
+  border: 2px solid rgba(255, 255, 255, 0.1);
+}
+
+
+/* ACTION SHAPES (Triangle, Circle, X, Square) - Top Right */
+#shapes-container {
+  position: absolute;
+  bottom: 120px;
+  right: 30px;
+  width: 140px;
+  height: 140px;
+}
+
+.shape-btn {
+  width: 40px;
+  height: 40px;
+  font-size: 32px;
+  /* Large Icons */
+  border: none !important;
+  /* NO BORDER/CIRCLE */
+  background: transparent !important;
+  text-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
+}
+
+/* Tighter Diamond Layout */
+#btn-tri {
+  top: 10px;
+  left: 50px;
+  color: rgba(0, 255, 170, 0.8);
+}
+
+#btn-cir {
+  top: 50px;
+  right: 10px;
+  color: rgba(255, 85, 85, 0.8);
+}
+
+#btn-x {
+  bottom: 10px;
+  left: 50px;
+  color: rgba(85, 85, 255, 0.8);
+}
+
+#btn-sq {
+  top: 50px;
+  left: 10px;
+  color: rgba(255, 85, 255, 0.8);
+}
+
+
+/* RIGHT CAMERA CROSS (Stick Simulation) - Lower Right */
+#camera-cross-container {
+  position: absolute;
+  bottom: -20px;
+  /* Pushed down */
+  right: 30px;
+  width: 140px;
+  height: 140px;
+  transform: scale(0.8);
+  pointer-events: none;
+}
+
+/* Stick styling */
+#camera-center {
+  position: absolute;
+  top: 50px;
+  left: 50px;
+  width: 40px;
+  height: 40px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 50%;
+  /* Stick is round */
+  border: 2px solid rgba(255, 255, 255, 0.1);
+}
+
+#btn-cam-up {
+  top: 10px;
+  left: 50px;
+  border: none;
+}
+
+#btn-cam-down {
+  bottom: 10px;
+  left: 50px;
+  border: none;
+}
+
+#btn-cam-left {
+  top: 50px;
+  left: 10px;
+  border: none;
+}
+
+#btn-cam-right {
+  top: 50px;
+  right: 10px;
+  border: none;
+}
+
+/* Center piece for Camera Cross */
+#camera-center {
+  position: absolute;
+  top: 52px;
+  left: 52px;
+  width: 46px;
+  height: 46px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  /* Square cross center match */
+  border: none;
+}
+
+
+/* CENTER BAR (Select / Start) - Bottom Center */
+#center-bar {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 15px;
+}
+
+.center-btn {
+  position: relative;
+  width: 60px;
+  height: 25px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: transparent;
+  border-radius: 2px;
+  font-size: 10px;
+  font-family: sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+
+/* TOGGLES (Chat, Map) - Top Center */
+#toggles-container {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 20px;
+}
+
+.toggle-btn {
+  width: 40px;
+  height: 40px;
+  border: none;
+  background: transparent;
+  font-size: 24px;
+}
+
+/* Keep zone_joystick display:none as we use D-Pad */
+#zone_joystick {
+  display: none;
+}
+
+/* Right Look Zone (Background) - Restored */
+#zone_right {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 40%;
+  /* Right 40% (Avoids Center Buttons at 50%) */
+  height: 100%;
+  z-index: 5;
+  /* Below PSP controls */
+  touch-action: none;
 }
 
 /* Chat UI */
 #chat-container {
   position: absolute;
-  top: 10px;
-  left: 10px;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
   width: 300px;
   max-width: 80%;
-  height: 200px;
+  height: 150px;
   display: flex;
   flex-direction: column;
   pointer-events: none;
-  /* Let clicks pass through empty areas */
   z-index: 1000;
-  /* Ensure it's on top of everything */
 }
 
 #chat-messages {
@@ -164,4 +363,23 @@ body {
 
 #chat-input::placeholder {
   color: #aaa;
+}
+
+/* Crosshair */
+#crosshair {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 20px;
+  height: 20px;
+  pointer-events: none;
+  /* Let clicks pass through */
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 24px;
+  font-family: monospace;
+  text-align: center;
+  line-height: 20px;
+  z-index: 2000;
+  text-shadow: 0 0 2px black;
 }

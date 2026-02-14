@@ -68,8 +68,10 @@ export class RemotePlayer {
 
                 // 2. Add Emissive (Glow) to prevent being pitch black in shadows
                 // Use the same color but dimmer
-                child.material.emissive.set(colorHex);
-                child.material.emissiveIntensity = 0.4; // Valid glow
+                if (child.material.emissive) {
+                    child.material.emissive.set(colorHex);
+                    child.material.emissiveIntensity = 0.4; // Valid glow
+                }
 
                 // 3. Ensure map is preserved but colored
                 // If the texture is white/grayscale, this tints it.
@@ -122,7 +124,8 @@ export class RemotePlayer {
         this.mesh.position.lerp(new THREE.Vector3(data.x, data.y, data.z), 0.3);
 
         // Rotation (Shortest path interpolation could be better, but direct set is OK for now)
-        this.mesh.rotation.y = data.rot;
+        // FIX: Add Math.PI because GLB models face +Z (backwards) by default
+        this.mesh.rotation.y = data.rot + Math.PI;
 
         if (this.state !== data.state) {
             this.state = data.state;
