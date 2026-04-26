@@ -2,6 +2,143 @@ import * as THREE from 'three';
 import { Bullet } from './Bullet.js';
 import { SoundManager } from './SoundManager.js';
 
+class TankShell {
+    constructor(scene, position, direction, speed, onHit) {
+        this.scene = scene;
+        this.position = position.clone();
+        this.direction = direction.clone();
+        this.speed = speed;
+        this.onHit = onHit;
+        this.alive = true;
+        this.distanceTraveled = 0;
+        this.maxDistance = 1000;
+
+        // Visual Mesh
+        const geom = new THREE.SphereGeometry(0.3, 8, 8);
+        const mat = new THREE.MeshBasicMaterial({ color: 0xffaa00 });
+        this.mesh = new THREE.Mesh(geom, mat);
+        this.mesh.position.copy(this.position);
+
+        // Add point light for glow
+        this.light = new THREE.PointLight(0xffaa00, 2, 10);
+        this.mesh.add(this.light);
+
+        this.scene.add(this.mesh);
+    }
+
+    update(dt) {
+        if (!this.alive) return;
+
+        const step = this.speed * dt;
+        this.position.add(this.direction.clone().multiplyScalar(step));
+        this.mesh.position.copy(this.position);
+        this.distanceTraveled += step;
+
+        if (this.distanceTraveled >= this.maxDistance) {
+            this.destroy();
+            return;
+        }
+
+        // Simple proximity check for hit
+        if (this.hitPoint && this.position.distanceTo(this.hitPoint) < step * 1.5) {
+            this.onHit(this.hitPoint, this.hitNormal, this.hitObject);
+            this.destroy();
+        }
+    }
+
+    destroy() {
+        this.alive = false;
+        this.scene.remove(this.mesh);
+        this.mesh.geometry.dispose();
+        this.mesh.material.dispose();
+    }
+}
+
+class HeliMissile {
+    constructor(scene, position, direction, speed, onHit) {
+        this.scene = scene;
+        this.position = position.clone();
+        this.direction = direction.clone();
+        this.speed = speed;
+        this.onHit = onHit;
+        this.alive = true;
+        this.distanceTraveled = 0;
+        this.maxDistance = 1500;
+
+        // Visual Mesh: Cylinder (Missile shape)
+        const geom = new THREE.CylinderGeometry(0.15, 0.15, 2.0, 8);
+        geom.rotateX(Math.PI / 2); // Align with velocity
+        const mat = new THREE.MeshStandardMaterial({ color: 0x333333, emissive: 0x111111 });
+        this.mesh = new THREE.Mesh(geom, mat);
+        this.mesh.position.copy(this.position);
+        this.mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), this.direction);
+
+        // Exhaust Flame
+        const flameGeom = new THREE.SphereGeometry(0.2, 8, 8);
+        const flameMat = new THREE.MeshBasicMaterial({ color: 0xff4400 });
+        this.flame = new THREE.Mesh(flameGeom, flameMat);
+        this.flame.position.set(0, 0, -1.2); // At the back
+        this.mesh.add(this.flame);
+
+        // Point light for glow
+        this.light = new THREE.PointLight(0xffaa00, 3, 15);
+        this.mesh.add(this.light);
+
+        this.scene.add(this.mesh);
+    }
+
+    update(dt) {
+        if (!this.alive) return;
+
+        // HOMING MECHANIC (LOCK-ON)
+        if (this.targetVehicle && this.targetVehicle.mesh) {
+            const targetPos = this.targetVehicle.mesh.position.clone();
+            // Aim slightly above ground
+            targetPos.y += 1.5;
+
+            const toTarget = targetPos.clone().sub(this.position).normalize();
+            // Steer towards target (turn rate: 3.0 radians per second)
+            this.direction.lerp(toTarget, dt * 3.0).normalize();
+
+            // Align mesh
+            this.mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), this.direction);
+
+            // Update hit point dynamically
+            this.hitPoint = targetPos;
+        }
+
+        const step = this.speed * dt;
+        this.position.add(this.direction.clone().multiplyScalar(step));
+        this.mesh.position.copy(this.position);
+        this.distanceTraveled += step;
+
+        // Visual flicker for flame
+        if (this.flame) {
+            const scale = 0.8 + Math.random() * 0.4;
+            this.flame.scale.set(scale, scale, scale * 2);
+        }
+
+        if (this.distanceTraveled >= this.maxDistance) {
+            // Trigger area explosion anyway
+            this.onHit(this.position, new THREE.Vector3(0, 1, 0), null);
+            this.destroy();
+            return;
+        }
+
+        if (this.hitPoint && this.position.distanceTo(this.hitPoint) < step * 2.0) {
+            this.onHit(this.hitPoint, this.hitNormal, this.hitObject);
+            this.destroy();
+        }
+    }
+
+    destroy() {
+        this.alive = false;
+        this.scene.remove(this.mesh);
+        this.mesh.geometry.dispose();
+        this.mesh.material.dispose();
+    }
+}
+
 export class WeaponManager {
     constructor(scene, characterController, camera, assets) {
         this.scene = scene;
@@ -17,6 +154,7 @@ export class WeaponManager {
         this.currentWeaponMesh = null;
         this.currentWeaponType = null; // 'pistol' | 'rifle'
         this.remotePlayers = []; // List of remote players for hit detection
+        this.tankShells = []; // List of active tank shells
 
         // Weapon Configs (Offsets for valid hand placement)
         // Weapon Configs (Offsets for valid hand placement)
@@ -67,12 +205,45 @@ export class WeaponManager {
         this.laserActive = true;
         this.laserMesh = this.createLaser();
         this.scene.add(this.laserMesh);
+
+        // --- AR TACTICAL OVERLAY (Tank Mode) ---
+        this.arMarkers = new Map(); // Map: UUID -> DOM Element
+        this.arContainer = document.createElement('div');
+        this.arContainer.id = 'ar-tactical-hud';
+        this.arContainer.style.position = 'absolute';
+        this.arContainer.style.top = '0';
+        this.arContainer.style.left = '0';
+        this.arContainer.style.width = '100%';
+        this.arContainer.style.height = '100%';
+        this.arContainer.style.pointerEvents = 'none';
+        this.arContainer.style.zIndex = '9999';
+        this.arContainer.style.overflow = 'hidden';
+        this.arContainer.style.display = 'none';
+        document.body.appendChild(this.arContainer);
     }
 
     isSelf(obj) {
+        if (!this.character) return false;
+        let temp = obj;
+
+        // Ensure current weapon and driven vehicle are evaluated as self 
+        const checkWeapon = this.currentWeaponMesh || null;
+        const checkVehicle = (this.characterController && this.characterController.vehicle) ? this.characterController.vehicle.mesh : null;
+
+        while (temp) {
+            if (temp === this.character) return true;
+            if (checkWeapon && temp === checkWeapon) return true;
+            if (checkVehicle && temp === checkVehicle) return true;
+            temp = temp.parent;
+        }
+        return false;
+    }
+
+    isVehiclePart(obj, vehicleMesh) {
+        if (!vehicleMesh) return false;
         let temp = obj;
         while (temp) {
-            if (temp === this.character || temp === this.currentWeaponMesh) return true;
+            if (temp === vehicleMesh) return true;
             temp = temp.parent;
         }
         return false;
@@ -122,6 +293,11 @@ export class WeaponManager {
         if (this.crosshairEl) this.crosshairEl.style.display = display;
         if (this.debugEl) this.debugEl.style.display = display;
         if (this.rangeEl) this.rangeEl.style.display = display;
+
+        // Hide AR if UI is hidden
+        if (!visible) {
+            this.arContainer.style.display = 'none';
+        }
     }
 
     cycleWeapon() {
@@ -150,6 +326,7 @@ export class WeaponManager {
             // Weapon Switching
             if (e.key === '1') this.equip('pistol');
             if (e.key === '2') this.equip('rifle');
+            if (e.code === 'KeyT') this.holster();
 
             // ROTATION CONTROLS (Only if weapon equipped)
             if (this.currentWeaponMesh) {
@@ -225,8 +402,12 @@ export class WeaponManager {
 
         // Intersect
         const visualObjects = [];
+        const currentVehMesh = (this.characterController && this.characterController.vehicle) ? this.characterController.vehicle.mesh : null;
+
         this.scene.traverse(c => {
-            if (c.isMesh && c !== this.currentWeaponMesh && c !== this.character) {
+            if (c.isMesh && c !== this.currentWeaponMesh && !this.isSelf(c)) {
+                // Ignore current vehicle parts
+                if (this.isVehiclePart(c, currentVehMesh)) return;
                 visualObjects.push(c);
             }
         });
@@ -306,290 +487,626 @@ export class WeaponManager {
         }
     }
 
-    shoot() {
-        if (!this.currentWeaponMesh) return;
+    holster() {
+        console.log("WeaponManager: Holstering weapon.");
+        this.isFiring = false;
 
-        // Reset Timer
-        this.timeSinceLastShot = 0;
-
-        console.log("Bang! Bullet Time!");
-
-        // Sound
-        if (this.soundManager) {
-            this.soundManager.playShoot(this.currentWeaponType);
+        if (this.currentWeaponMesh) {
+            if (this.currentWeaponMesh.parent) {
+                this.currentWeaponMesh.parent.remove(this.currentWeaponMesh);
+            }
+            this.currentWeaponMesh = null;
         }
 
-        console.log("DEBUG: VERSION 9005");
-        if (this.currentWeaponMesh && this.currentWeaponMesh.parent) {
-            console.log("Weapon Parent:", this.currentWeaponMesh.parent.name);
-            const bonePos = new THREE.Vector3();
-            this.currentWeaponMesh.parent.getWorldPosition(bonePos);
-            console.log("Bone World Pos:", bonePos);
+        this.currentWeaponType = null;
+
+        // Hide UI
+        if (this.crosshairEl) this.crosshairEl.style.display = 'none';
+        if (this.rangeEl) this.rangeEl.innerText = "---";
+
+        // Hide Laser
+        if (this.laserMesh) this.laserMesh.visible = false;
+
+        if (this.characterController) {
+            console.log("WeaponManager: Character returning to idle stance.");
+        }
+    }
+
+    fireTankCannon() {
+        const v = this.characterController.vehicle;
+        if (!v || !v.mesh) return;
+        const now = Date.now();
+        if (this.lastTankShot && (now - this.lastTankShot < 2000)) return;
+        this.lastTankShot = now;
+
+        // Dynamic Muzzle Position & Direction
+        let muzzlePos = new THREE.Vector3();
+        let bulletDir = new THREE.Vector3();
+
+        if (v.canon) {
+            v.canon.getWorldPosition(muzzlePos);
+
+            // Get Camera Crosshair target point
+            const camDir = new THREE.Vector3();
+            const camPos = new THREE.Vector3();
+            this.camera.getWorldDirection(camDir);
+            this.camera.getWorldPosition(camPos);
+
+            const camRay = new THREE.Raycaster(camPos, camDir);
+            const camHits = camRay.intersectObjects(this.scene.children, true);
+
+            let targetPoint = camPos.clone().add(camDir.clone().multiplyScalar(500));
+            if (camHits.length > 0) {
+                // Ignore hits too close to the tank itself
+                const validHit = camHits.find(h => h.distance > 8);
+                if (validHit) targetPoint = validHit.point;
+            }
+
+            // ORIGIN: From the turret center, projected along the barrel axis.
+            // This avoids issues where the 'mount' node might have an offset pivot.
+            const origin = new THREE.Vector3();
+            v.turret.getWorldPosition(origin);
+
+            // Add height to match the barrel position relative to the turret base
+            origin.y += 0.8;
+
+            const barrelQuat = new THREE.Quaternion();
+            v.canon.getWorldQuaternion(barrelQuat);
+
+            // FORWARD: Based on 'gauge' feedback, Z is the forward axis of the barrel.
+            const forwardAxis = new THREE.Vector3(0, 0, 1).applyQuaternion(barrelQuat);
+
+            // Move origin forward by 5.5 meters along the barrel
+            origin.add(forwardAxis.clone().multiplyScalar(5.5));
+            muzzlePos.copy(origin);
+
+            bulletDir.copy(targetPoint).sub(muzzlePos).normalize();
+
+            console.log(`🔥 Tank Shot from ${v.canon.name} barrel tip!`);
         } else {
-            console.log("Weapon Parent: NULL/NONE");
+            // Fallback to hull center if nodes aren't found
+            muzzlePos.copy(v.mesh.position).add(new THREE.Vector3(0, 3, 0));
+            this.camera.getWorldDirection(bulletDir);
         }
 
-        // 1. Muzzle Position
-        const gunPos = new THREE.Vector3();
-        this.currentWeaponMesh.getWorldPosition(gunPos);
+        this.flashLight.position.copy(muzzlePos);
+        this.flashLight.intensity = 50;
+        this.flashLight.color.setHex(0xffaa00);
+        setTimeout(() => { this.flashLight.intensity = 0; }, 100);
+        if (this.soundManager) this.soundManager.playTankShot();
 
-        console.log(`Gun World Pos: X=${gunPos.x.toFixed(2)}, Y=${gunPos.y.toFixed(2)}, Z=${gunPos.z.toFixed(2)}`);
+        const raycaster = new THREE.Raycaster(muzzlePos, bulletDir);
+        raycaster.far = 2000;
 
-        // 2. Aim Direction (Converge on Crosshair)
-        // Get point 1000 units in front of camera (Increased from 100 for better long range accuracy)
-        const targetPoint = new THREE.Vector3();
-        this.camera.getWorldDirection(targetPoint);
-        const camDir = targetPoint.clone(); // Save direction for raycast
-        targetPoint.multiplyScalar(1000); // 1000m range
-        targetPoint.add(this.camera.position);
+        const hits = raycaster.intersectObjects(this.scene.children, true);
+        const externalHits = hits.filter(h => {
+            let isSelf = false;
+            h.object.traverseAncestors(a => { if (a === v.mesh) isSelf = true; });
+            if (h.object === v.mesh) isSelf = true;
+            return !isSelf;
+        });
 
-        // Calculate direction from Gun Muzzle to Target Point
-        const bulletDir = new THREE.Vector3().subVectors(targetPoint, gunPos).normalize();
+        const hit = externalHits.length > 0 ? externalHits[0] : null;
+        const targetDist = hit ? hit.distance : 200;
+        const targetPoint = hit ? hit.point : muzzlePos.clone().add(bulletDir.clone().multiplyScalar(200));
 
-        // Spawn Bullet (slightly forward to avoid self-collision)
-        const spawnPos = gunPos.clone().add(bulletDir.multiplyScalar(0.5));
+        // SPAWN VISUAL SHELL
+        const shell = new TankShell(this.scene, muzzlePos, bulletDir, 150.0, (pos, norm, obj) => {
+            console.log("💥 TANK SHELL IMPACT:", pos);
+            this.createExplosion(pos, 5.0);
+            this.createImpact(pos, norm || new THREE.Vector3(0, 1, 0), 'spark', 5.0); // 5x Scale (up from 4)
 
-        // Flash
-        this.flashLight.position.copy(gunPos);
-        this.flashLight.intensity = 5;
-        setTimeout(() => { this.flashLight.intensity = 0; }, 50);
-
-        // 3. Create Bullet
-        // Speed: 100.0 (Faster)
-        const bullet = new Bullet(this.scene, spawnPos, bulletDir, 100.0);
-        this.bullets.push(bullet);
-
-        // 4. HIT SCAN (Instant Hit Detection)
-        // Use a Raycaster from the camera to see what we hit
-        const raycaster = new THREE.Raycaster();
-        raycaster.set(this.camera.position, camDir); // Use camera forward direction
-        raycaster.far = 1000; // 1000 meters range
-
-        // Intersect everything except the local player and current weapon
-        let visualObjects = [];
-        this.scene.traverse(c => {
-            if (c.isMesh && !this.isSelf(c)) {
-                visualObjects.push(c);
+            // DAMAGE LOGIC
+            if (obj && this.characterController.world && this.characterController.world.vehicleManager) {
+                const targetVeh = this.characterController.world.vehicleManager.findVehicleByMesh(obj);
+                if (targetVeh) {
+                    this.characterController.world.vehicleManager.damageVehicle(targetVeh, 1);
+                }
             }
         });
 
-        // Add Remote Players Explicitly
-        if (this.remotePlayers && Array.isArray(this.remotePlayers)) {
-            this.remotePlayers.forEach(p => {
-                if (!p) return;
-                // Support both RemotePlayer instances and direct Meshes
-                const mesh = p.mesh || (p.isMesh ? p : null);
-                if (mesh) {
-                    mesh.traverse(c => {
-                        if (c.isMesh) visualObjects.push(c);
-                    });
-                }
-            });
+        if (hit) {
+            shell.hitPoint = hit.point;
+            shell.hitNormal = hit.face ? hit.face.normal.clone().applyQuaternion(hit.object.quaternion) : new THREE.Vector3(0, 1, 0);
+            shell.hitObject = hit.object;
+        } else {
+            shell.hitPoint = targetPoint;
         }
 
-        console.log(`[COMBAT] Raycasting against ${visualObjects.length} meshes`);
-        const hits = raycaster.intersectObjects(visualObjects, false);
+        this.tankShells.push(shell);
+    }
 
-        if (hits.length > 0) {
-            const hit = hits[0];
+    createExplosion(position, radius) {
+        const boomLight = new THREE.PointLight(0xff4400, 10, radius * 3);
+        boomLight.position.copy(position);
+        this.scene.add(boomLight);
+        setTimeout(() => this.scene.remove(boomLight), 200);
 
-            // Determine Impact Type
-            let impactType = 'spark';
+        if (this.soundManager) this.soundManager.playTankShot();
 
-            // Check if hit object is a player
-            let obj = hit.object;
-            let isPlayer = false;
-            while (obj) {
-                if (obj.type === 'SkinnedMesh' || obj.name === 'RemotePlayerHitBox' || (obj.name && obj.name.toLowerCase().includes('body'))) {
-                    isPlayer = true;
-                    break;
-                }
-                // Also check if this mesh belongs to a RemotePlayer instance
-                if (this.remotePlayers) {
-                    const found = Array.isArray(this.remotePlayers) ?
-                        this.remotePlayers.find(p => p && (p.mesh === obj || p === obj)) : null;
-
-                    if (found) {
-                        isPlayer = true;
-                        break;
-                    }
-                }
-                obj = obj.parent;
-            }
-
-            if (isPlayer) impactType = 'blood';
-
-            console.log(`[COMBAT] Impact at ${hit.point.x.toFixed(2)}, ${hit.point.y.toFixed(2)}, Type: ${impactType}, Object: ${hit.object.name}`);
-
-            // Create Impact Effect at hit point
-            this.createImpact(hit.point, impactType);
-
-            // NETWORK SYNC: Tell everyone about the hit
-            if (this.characterController && this.characterController.world && this.characterController.world.networkManager) {
-                console.log("WeaponManager: Sending Hit Sync!", impactType);
-                this.characterController.world.networkManager.sendHit(hit.point, impactType);
-            }
+        // Cinder particles
+        for (let i = 0; i < 15; i++) {
+            const p = new THREE.Mesh(new THREE.SphereGeometry(0.2, 4, 4), new THREE.MeshBasicMaterial({ color: 0xffaa00 }));
+            p.position.copy(position);
+            const vel = new THREE.Vector3((Math.random() - 0.5) * 15, Math.random() * 15, (Math.random() - 0.5) * 15);
+            this.scene.add(p);
+            const start = Date.now();
+            const anim = () => {
+                if (Date.now() - start > 1000) { this.scene.remove(p); return; }
+                p.position.add(vel.clone().multiplyScalar(0.016));
+                vel.y -= 0.5;
+                requestAnimationFrame(anim);
+            };
+            anim();
         }
-        // 4. HIT SCAN (Instant Hit Detection)
-        // ... (Hit scan logic remains)
+    }
 
-        // 5. BULLET CAM (Disabled)
-        // this.setupBulletTime(bullet);
-
-        // 6. NETWORK SYNC
-        if (this.characterController && this.characterController.world && this.characterController.world.networkManager) {
-            // Send Shoot Event (Origin + Direction + WeaponType)
-            this.characterController.world.networkManager.sendShoot(gunPos, bulletDir, this.currentWeaponType);
-        }
-
+    shoot() {
         // 7. AUDIO
         if (this.soundManager) {
             this.soundManager.playShoot(this.currentWeaponType);
         }
     }
 
-    createImpact(point, type = 'spark') {
-        // Spark or Blood
-        const color = type === 'blood' ? 0xff0000 : 0xffff88;
-        const scaleMax = type === 'blood' ? 1.5 : 1.0;
+    fireHeliGuns() {
+        const now = Date.now();
+        if (this.lastHeliGunTime && (now - this.lastHeliGunTime < 100)) return; // 10 rounds per second
+        this.lastHeliGunTime = now;
 
-        const geom = new THREE.SphereGeometry(0.2, 8, 8);
-        const mat = new THREE.MeshBasicMaterial({
-            color: color,
-            transparent: true,
-            opacity: 0.9
+        const v = this.characterController.vehicle;
+        if (!v) return;
+
+        // Spawns from side guns of UH-60 (approximate offsets)
+        const leftGun = new THREE.Vector3(-1.5, 0.5, 2.0).applyQuaternion(v.mesh.quaternion).add(v.mesh.position);
+        const rightGun = new THREE.Vector3(1.5, 0.5, 2.0).applyQuaternion(v.mesh.quaternion).add(v.mesh.position);
+        const spawnPos = (Math.random() > 0.5) ? leftGun : rightGun;
+
+        const camDir = new THREE.Vector3();
+        this.camera.getWorldDirection(camDir);
+
+        // Target point far away (2km)
+        const targetPoint = this.camera.position.clone().add(camDir.clone().multiplyScalar(2000));
+        const bulletDir = targetPoint.clone().sub(spawnPos).normalize();
+
+        // Visual Bullet (LARGE as requested)
+        const bullet = new Bullet(this.scene, spawnPos, bulletDir, 300.0);
+        bullet.mesh.scale.set(3, 3, 1); // Make it thick
+        bullet.maxDistance = 2000;
+        this.bullets.push(bullet);
+
+        this.flashLight.position.copy(spawnPos);
+        this.flashLight.intensity = 5;
+        setTimeout(() => { if (this.flashLight) this.flashLight.intensity = 0; }, 50);
+
+        if (this.soundManager) this.soundManager.playShoot('rifle');
+
+        // Instant Hitscan for gameplay
+        const ray = new THREE.Raycaster(this.camera.position, camDir);
+        ray.far = 2000;
+        const targets = [];
+        this.scene.traverse(c => {
+            if (c.isMesh && !this.isSelf(c) && !this.isVehiclePart(c, v.mesh)) targets.push(c);
         });
-        const spark = new THREE.Mesh(geom, mat);
-        spark.position.copy(point);
-        this.scene.add(spark);
+        const hits = ray.intersectObjects(targets, false);
 
-        // Animate Scale/Fade
-        let scale = 0.5;
-        const animateSpark = () => {
-            scale += 0.1;
-            spark.scale.set(scale, scale, scale);
-            spark.material.opacity -= 0.1; // Faster fade
-            if (spark.material.opacity > 0) {
-                requestAnimationFrame(animateSpark);
-            } else {
-                this.scene.remove(spark);
-                geom.dispose();
-                mat.dispose();
+        if (hits.length > 0) {
+            const hit = hits[0];
+            // Scale 2.0 for big gun impacts
+            this.createImpact(hit.point, hit.face ? hit.face.normal.clone().applyQuaternion(hit.object.quaternion) : null, 'spark', 2.0);
+
+            // Damage 
+            const obj = hit.object;
+            const targetVeh = this.characterController.world.vehicleManager.findVehicleByMesh(obj);
+            if (targetVeh) this.characterController.world.vehicleManager.damageVehicle(targetVeh, 0.1);
+        }
+    }
+
+    fireHeliMissiles() {
+        const now = Date.now();
+        if (this.lastHeliMissileTime && (now - this.lastHeliMissileTime < 1000)) return; // 1 missile per second
+        this.lastHeliMissileTime = now;
+
+        const v = this.characterController.vehicle;
+        if (!v) return;
+
+        // Spawns from pylons - Offset further out to avoid self-hit from cockpit
+        const leftPylon = new THREE.Vector3(-3.0, -0.5, 1.5).applyQuaternion(v.mesh.quaternion).add(v.mesh.position);
+        const rightPylon = new THREE.Vector3(3.0, -0.5, 1.5).applyQuaternion(v.mesh.quaternion).add(v.mesh.position);
+        const spawnPos = (this.missileToggle = !this.missileToggle) ? leftPylon : rightPylon;
+
+        const camDir = new THREE.Vector3();
+        this.camera.getWorldDirection(camDir);
+        const targetPoint = this.camera.position.clone().add(camDir.clone().multiplyScalar(2000));
+
+        // Raycast to find exact target
+        const ray = new THREE.Raycaster(this.camera.position, camDir);
+        ray.far = 2000;
+        const targets = [];
+        this.scene.traverse(c => {
+            if (c.isMesh && !this.isSelf(c) && !this.isVehiclePart(c, v.mesh)) targets.push(c);
+        });
+        const hits = ray.intersectObjects(targets, false);
+        const hitPoint = hits.length > 0 ? hits[0].point : targetPoint;
+
+        // Homing Target Detection (Lock-On)
+        let lockedVehicle = null;
+
+        if (hits.length > 0) {
+            const hitObj = hits[0].object;
+            lockedVehicle = this.characterController.world.vehicleManager.findVehicleByMesh(hitObj);
+        }
+
+        // If no direct hit, try to find a vehicle near the center of the screen ray
+        if (!lockedVehicle) {
+            const searchRay = new THREE.Raycaster(this.camera.position, camDir);
+            const vehManager = this.characterController.world.vehicleManager;
+            if (vehManager) {
+                // Collect all colliders of vehicles
+                const vehColliders = [];
+                vehManager.vehicles.forEach(veh => {
+                    if (veh.mesh !== v.mesh) vehColliders.push(veh.mesh);
+                });
+
+                // Add some tolerance (raycast against slightly larger bounding boxes or just check distance to ray)
+                let bestDist = 15.0; // lock-on tolerance
+                vehManager.vehicles.forEach(veh => {
+                    if (veh.mesh === v.mesh) return;
+                    const vehPos = veh.mesh.position.clone();
+                    // Distance from point to line (ray)
+                    const v1 = vehPos.clone().sub(this.camera.position);
+                    const v2 = v1.clone().projectOnVector(camDir);
+                    const distToRay = v1.sub(v2).length();
+
+                    if (distToRay < bestDist) {
+                        bestDist = distToRay;
+                        lockedVehicle = veh;
+                    }
+                });
             }
-        };
-        animateSpark();
+        }
+
+        const missileDir = hitPoint.clone().sub(spawnPos).normalize();
+        const missile = new HeliMissile(this.scene, spawnPos, missileDir, 180.0, (pos, norm, obj) => {
+            // Massive Impact
+            this.createExplosion(pos, 8.0);
+            this.createImpact(pos, norm, 'spark', 5.0); // Very large scale
+
+            // AREA DAMAGE (SPLASH DAMAGE)
+            const splashRadius = 15.0;
+            const vehManager = this.characterController.world.vehicleManager;
+            if (vehManager) {
+                vehManager.vehicles.forEach(veh => {
+                    if (veh.mesh === v.mesh) return; // Don't damage self
+                    const dist = veh.mesh.position.distanceTo(pos);
+                    if (dist <= splashRadius) {
+                        // PREVENT DOUBLE DAMAGE BUG IN SAME FRAME/EXPLOSION
+                        if (veh.lastMissileHit && Date.now() - veh.lastMissileHit < 500) return;
+                        veh.lastMissileHit = Date.now();
+
+                        // Daño plano: 1.0 por misil sin importar si le dio en el centro o en el borde.
+                        vehManager.damageVehicle(veh, 1.0);
+                    }
+                });
+
+                // Damage NPC Cars as well
+                if (this.characterController.world.npcManager) {
+                    this.characterController.world.npcManager.cars.forEach(car => {
+                        const dist = car.position.distanceTo(pos);
+                        if (dist <= splashRadius) {
+                            if (car.lastMissileHit && Date.now() - car.lastMissileHit < 500) return;
+                            car.lastMissileHit = Date.now();
+
+                            vehManager.damageVehicle(car, 1.0);
+                        }
+                    });
+                }
+            }
+        });
+
+        if (lockedVehicle) {
+            missile.targetVehicle = lockedVehicle;
+            console.log("🔒 HELI MISSILE LOCKED ON TARGET!");
+        }
+
+        if (hits.length > 0) {
+            missile.hitPoint = hits[0].point;
+            missile.hitNormal = hits[0].face ? hits[0].face.normal.clone().applyQuaternion(hits[0].object.quaternion) : new THREE.Vector3(0, 1, 0);
+            missile.hitObject = hits[0].object;
+        } else {
+            missile.hitPoint = targetPoint;
+        }
+
+        this.tankShells.push(missile); // Use same update loop
+
+        if (this.soundManager) this.soundManager.playTankShot(); // Reuse heavy sound
+    }
+
+    createImpact(point, normal, type = 'spark', scale = 1.0) {
+        const color = type === 'blood' ? 0xff0000 : 0xffff88;
+
+        // 1. SPARKS / PARTICLES (Temporary bits that fly off)
+        const sparkCount = (type === 'blood' ? 20 : 25) * scale; // Increased density
+        for (let i = 0; i < sparkCount; i++) {
+            const pSize = 0.08 * scale; // Slightly larger particles
+            const pGeom = new THREE.SphereGeometry(pSize, 4, 4);
+            const pMat = new THREE.MeshBasicMaterial({ color: color, transparent: true });
+            const p = new THREE.Mesh(pGeom, pMat);
+            p.position.copy(point);
+            this.scene.add(p);
+
+            // Random Velocity based on normal (if available) or random if not
+            const vel = normal ? normal.clone() : new THREE.Vector3(0, 1, 0);
+            vel.x += (Math.random() - 0.5) * 1.5;
+            vel.y += (Math.random() - 0.5) * 1.5;
+            vel.z += (Math.random() - 0.5) * 1.5;
+            vel.normalize().multiplyScalar(Math.random() * 5 + 2);
+
+            let gravity = -9.8;
+            let time = 0;
+            const startPos = p.position.clone();
+
+            const animateParticle = () => {
+                time += 0.03;
+                p.position.x = startPos.x + vel.x * time;
+                p.position.z = startPos.z + vel.z * time;
+                p.position.y = startPos.y + vel.y * time + 0.5 * gravity * time * time;
+
+                p.material.opacity -= 0.04;
+                if (p.material.opacity > 0) {
+                    requestAnimationFrame(animateParticle);
+                } else {
+                    this.scene.remove(p);
+                    pGeom.dispose();
+                    pMat.dispose();
+                }
+            };
+            animateParticle();
+        }
+
+        // 2. PERMANENT BULLET HOLE (DECALS)
+        if (type !== 'blood' && normal) {
+            const holeSize = 0.5 * scale;
+            const holeGeom = new THREE.PlaneGeometry(holeSize, holeSize);
+
+            const canvas = document.createElement('canvas');
+            canvas.width = 64; canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+            const grad = ctx.createRadialGradient(32, 32, 2, 32, 32, 25);
+            grad.addColorStop(0, 'rgba(0,0,0,1)');
+            grad.addColorStop(0.3, 'rgba(30,30,30,0.8)');
+            grad.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, 64, 64);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            const holeMat = new THREE.MeshBasicMaterial({
+                map: texture,
+                transparent: true,
+                depthWrite: false,
+                polygonOffset: true,
+                polygonOffsetFactor: -4
+            });
+
+            const hole = new THREE.Mesh(holeGeom, holeMat);
+            hole.position.copy(point).add(normal.clone().multiplyScalar(0.01));
+            hole.lookAt(point.clone().add(normal));
+            this.scene.add(hole);
+        }
+
+        // 3. SMOKE PUFFS (NEW)
+        const smokeCount = 3 * scale;
+        for (let i = 0; i < smokeCount; i++) {
+            const sGeom = new THREE.SphereGeometry(0.3 * scale, 8, 8);
+            const sMat = new THREE.MeshBasicMaterial({ color: 0x888888, transparent: true, opacity: 0.5 });
+            const s = new THREE.Mesh(sGeom, sMat);
+            s.position.copy(point);
+            this.scene.add(s);
+
+            const vel = new THREE.Vector3((Math.random() - 0.5) * 2, Math.random() * 2 + 1, (Math.random() - 0.5) * 2);
+            let time = 0;
+            const anim = () => {
+                time += 0.05;
+                s.position.add(vel.clone().multiplyScalar(0.05));
+                s.scale.multiplyScalar(1.05);
+                s.material.opacity -= 0.01;
+                if (s.material.opacity > 0) requestAnimationFrame(anim);
+                else {
+                    this.scene.remove(s);
+                    sGeom.dispose();
+                    sMat.dispose();
+                }
+            };
+            anim();
+        }
     }
 
 
     update(dt) {
         this.updateRangeFinder();
 
+        // Update Tank Shells
+        for (let i = this.tankShells.length - 1; i >= 0; i--) {
+            const shell = this.tankShells[i];
+            shell.update(dt);
+            if (!shell.alive) this.tankShells.splice(i, 1);
+        }
+
         // Update Laser Sight
         if (this.laserActive && this.currentWeaponMesh && this.laserMesh.visible) {
-            // Start: Gun Muzzle Position
             const start = new THREE.Vector3();
             this.currentWeaponMesh.getWorldPosition(start);
-            // Height adjustment for barrel (approx 0.1m up from pivot depending on model)
-            // We can improve this with a specific 'muzzle' bone later if needed
             start.y += 0.1;
 
-            // End: Raycast Hit (Aim Point)
             const raycaster = new THREE.Raycaster();
             const direction = new THREE.Vector3();
-            // Get camera direction
             this.camera.getWorldDirection(direction);
             raycaster.set(this.camera.position, direction);
             raycaster.far = 1000;
 
-            // Intersect Checks (Same as shoot: ignore self/weapon)
             let targets = [];
+            const currentVehMesh = (this.characterController && this.characterController.vehicle) ? this.characterController.vehicle.mesh : null;
             this.scene.traverse(c => {
                 if (c.isMesh && !this.isSelf(c) && c.visible) {
+                    if (this.isVehiclePart(c, currentVehMesh)) return;
                     targets.push(c);
                 }
             });
-            // Add Remote Players
             if (this.remotePlayers && Array.isArray(this.remotePlayers)) {
                 this.remotePlayers.forEach(p => {
-                    if (!p) return;
                     const mesh = p.mesh || (p.isMesh ? p : null);
-                    if (mesh) {
-                        mesh.traverse(c => {
-                            if (c.isMesh) targets.push(c);
-                        });
-                    }
+                    if (mesh) mesh.traverse(c => { if (c.isMesh) targets.push(c); });
                 });
             }
 
             const hits = raycaster.intersectObjects(targets, false);
             const end = new THREE.Vector3();
+            if (hits.length > 0) end.copy(hits[0].point);
+            else end.copy(this.camera.position).add(direction.multiplyScalar(100));
 
-            if (hits.length > 0) {
-                end.copy(hits[0].point);
-            } else {
-                // Max Range point
-                end.copy(this.camera.position).add(direction.multiplyScalar(100)); // 100m default length
-            }
-
-            // Update Geometry
             const positions = this.laserMesh.geometry.attributes.position.array;
             positions[0] = start.x; positions[1] = start.y; positions[2] = start.z;
             positions[3] = end.x; positions[4] = end.y; positions[5] = end.z;
             this.laserMesh.geometry.attributes.position.needsUpdate = true;
-
-            // Critical: Update bounding sphere so it doesn't disappear when camera turns
             this.laserMesh.geometry.computeBoundingSphere();
         }
 
-
-        // Retry finding bone if missing
         if (!this.rightHandBone && this.character) {
             this.findHandBone();
-            if (this.rightHandBone && !this.currentWeaponMesh) {
-                this.equip('pistol');
-            }
+            if (this.rightHandBone && !this.currentWeaponMesh) this.equip('pistol');
         }
 
-        // Auto-Fire Logic
         this.timeSinceLastShot += dt;
         if (this.isFiring && this.currentWeaponType) {
             const rate = this.configs[this.currentWeaponType].fireRate || 0.5;
-            if (this.timeSinceLastShot >= rate) {
-                this.shoot();
-            }
+            if (this.timeSinceLastShot >= rate) this.shoot();
         }
 
-        // Update Bullets
         for (let i = this.bullets.length - 1; i >= 0; i--) {
             const b = this.bullets[i];
             b.update(dt);
-            if (!b.active) {
-                this.bullets.splice(i, 1);
-            }
+            if (!b.active) this.bullets.splice(i, 1);
         }
 
-        // Bullet Camera Logic (Currently Disabled/Unused if shoot() doesn't set activeBullet)
         if (this.activeBullet && this.activeBullet.active) {
-            // Override Camera Position
-            // Position camera slightly behind and up from bullet
             const offset = this.activeBullet.direction.clone().multiplyScalar(-2.0).add(new THREE.Vector3(0, 0.5, 0));
             this.camera.position.copy(this.activeBullet.mesh.position).add(offset);
             this.camera.lookAt(this.activeBullet.mesh.position);
-
             this.bulletCamTimer -= dt;
-
-            // Enforce Override on every frame of bullet time
             if (this.characterController) this.characterController.overrideCamera = true;
-
             if (this.bulletCamTimer <= 0) {
-                this.activeBullet.speed = 50.0; // Resume speed
-                this.activeBullet = null; // Release camera
+                this.activeBullet.speed = 50.0;
+                this.activeBullet = null;
                 if (this.characterController) this.characterController.overrideCamera = false;
             }
+        } else if (this.characterController) {
+            this.characterController.overrideCamera = false;
+        }
+
+        // 8. TACTICAL AR UPDATE (Tank only)
+        const isTank = this.characterController && this.characterController.isDriving && this.characterController.vehicle && this.characterController.vehicle.type === 'tank';
+        if (isTank && this.scene.userData.world && this.scene.userData.world.uiVisible) {
+            this.arContainer.style.display = 'block';
+            this.updateARTargets();
         } else {
-            // Ensure override is released if we lost bullet
-            // But don't spam it if already false (optional optimization)
-            if (this.characterController) this.characterController.overrideCamera = false;
+            this.arContainer.style.display = 'none';
+        }
+    }
+
+    updateARTargets() {
+        const world = this.scene.userData.world;
+        if (!world) return;
+
+        // Collect all potential targets
+        const potentialTargets = [];
+
+        // 1. Remote Players
+        if (this.remotePlayers) {
+            this.remotePlayers.forEach(p => {
+                if (p.mesh) potentialTargets.push({ pos: p.mesh.position, name: `PLR_${p.id.substring(0, 4)}`, type: 'PLAYER' });
+            });
+        }
+
+        // 2. NPC Cars & Pedestrians
+        if (world.npcManager) {
+            if (world.npcManager.cars) {
+                world.npcManager.cars.forEach((car, i) => {
+                    potentialTargets.push({ pos: car.position, name: `VEH_${i}`, type: 'NPC' });
+                });
+            }
+        }
+
+        // 3. Vehicles
+        if (world.vehicleManager && world.vehicleManager.vehicles) {
+            world.vehicleManager.vehicles.forEach((v, i) => {
+                if (v.mesh && v !== this.characterController.vehicle) {
+                    potentialTargets.push({ pos: v.mesh.position, name: v.type.toUpperCase(), type: 'VEHICLE' });
+                }
+            });
+        }
+
+        // Update DOM elements
+        const currentIds = new Set();
+        potentialTargets.forEach(target => {
+            const id = `${target.name}_${target.pos.x}_${target.pos.z}`;
+            currentIds.add(id);
+
+            // Re-identify NPC tanks in HUD
+            let displayName = target.name;
+            if (target.type === 'NPC' && world.vehicleManager && world.vehicleManager.isArmor) {
+                // Find matching mesh in npcManager.cars
+                const carIndex = parseInt(target.name.split('_')[1]);
+                const carMesh = world.npcManager.cars[carIndex];
+                if (carMesh && world.vehicleManager.isArmor(carMesh)) {
+                    displayName = 'TANK';
+                }
+            }
+
+            // Distance Check (only show targets within 150m)
+            const dist = this.camera.position.distanceTo(target.pos);
+            if (dist > 150) return;
+
+            // Project to screen - WITH VERTICAL OFFSET
+            // Offset world point upward (e.g. 5m for a tank/car) to put label ABOVE
+            const vector = target.pos.clone().add(new THREE.Vector3(0, 4.0, 0));
+            vector.project(this.camera);
+
+            const x = (vector.x * 0.5 + 0.5) * window.innerWidth;
+            const y = (vector.y * -0.5 + 0.5) * window.innerHeight;
+
+            // Only show if in front of camera
+            if (vector.z > 0 && vector.z < 1) {
+                let el = this.arMarkers.get(id);
+                if (!el) {
+                    el = document.createElement('div');
+                    el.style.position = 'absolute';
+                    el.style.padding = '4px';
+                    el.style.border = '2px solid #00ffff';
+                    el.style.color = '#00ffff';
+                    el.style.fontFamily = 'monospace';
+                    el.style.fontSize = '12px';
+                    el.style.pointerEvents = 'none';
+                    el.style.whiteSpace = 'nowrap';
+                    el.style.boxShadow = '0 0 10px rgba(0,255,255,0.5)';
+                    el.style.background = 'rgba(0, 50, 50, 0.4)'; // Subtle background
+                    this.arContainer.appendChild(el);
+                    this.arMarkers.set(id, el);
+                }
+
+                el.style.display = 'block';
+                el.style.transform = `translate(-50%, -100%) translate(${x}px, ${y}px)`; // Offset -100% Y to put it ABOVE point
+                el.innerHTML = `<span style="font-weight:bold;">[</span> ${displayName} <span style="font-weight:bold;">]</span><br>${dist.toFixed(1)}m`;
+            } else {
+                const el = this.arMarkers.get(id);
+                if (el) el.style.display = 'none';
+            }
+        });
+
+        // Cleanup old markers
+        for (const [id, el] of this.arMarkers.entries()) {
+            if (!currentIds.has(id)) {
+                el.remove();
+                this.arMarkers.delete(id);
+            }
         }
     }
 }

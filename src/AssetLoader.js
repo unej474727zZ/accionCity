@@ -21,6 +21,8 @@ export class AssetLoader {
       { name: 'car2', url: '/models/car2.glb' },
       { name: 'car3', url: '/models/car3.glb' },
       { name: 'motorcycle', url: '/models/motorcycle.glb' },
+      { name: 'tank', url: '/models/tank.glb' },
+      { name: 'helicopter', url: '/models/helicoptero.glb' },
 
       // Vehicle Animations
       { name: 'driving', url: '/models/driving.glb' },

@@ -38,46 +38,63 @@ export class SoundManager {
         // Load Rifle
         this.audioLoader.load('/sounds/rifleSoundUno.mp3', (buffer) => {
             this.sounds.rifle = buffer;
-            this.createPool('rifle', buffer);
-            console.log("SoundManager: Rifle sound loaded + Pool created.");
+            this.createPool('rifle', buffer, 0.3);
+            console.log("SoundManager: Rifle sound loaded.");
+        });
+
+        // TANK: Shots and Crush
+        this.audioLoader.load('/sounds/tank-shots.mp3', (buffer) => {
+            this.sounds['tank-shot'] = buffer;
+            this.createPool('tank-shot', buffer, 2, 3);
+        });
+        this.audioLoader.load('/sounds/tank-crush.mp3', (buffer) => {
+            this.sounds['tank-crush'] = buffer;
+            this.createPool('tank-crush', buffer, 0.6, 3);
         });
     }
 
-    createPool(type, buffer) {
-        for (let i = 0; i < this.poolSize; i++) {
+    createPool(type, buffer, volume = 0.4, size = 5) {
+        if (!this.pools[type]) this.pools[type] = [];
+        for (let i = 0; i < size; i++) {
             const sound = new THREE.Audio(this.listener);
             sound.setBuffer(buffer);
-            sound.setVolume(type === 'rifle' ? 0.3 : 0.4);
+            sound.setVolume(volume);
             this.pools[type].push(sound);
         }
+        this.poolIndex[type] = 0;
     }
 
     playShoot(type) {
-        // Ensure AudioContext is running (Mobile requirement)
+        this.playPool(type, 1.0 + (Math.random() * 0.1 - 0.05));
+    }
+
+    playTankShot() {
+        this.playPool('tank-shot', 1.0);
+    }
+
+    playTankCrush() {
+        this.playPool('tank-crush', 1.0 + (Math.random() * 0.2 - 0.1));
+    }
+
+    playPool(type, pitch = 1.0) {
         if (this.listener.context.state === 'suspended') {
             this.listener.context.resume();
         }
 
-        if (!this.pools[type] || this.pools[type].length === 0) {
-            // Fallback if not loaded yet
-            // console.warn(`SoundManager: Pool for ${type} not ready.`);
-            return;
-        }
+        if (!this.pools[type] || this.pools[type].length === 0) return;
 
-        // Cycle through pool
         const index = this.poolIndex[type];
         const sound = this.pools[type][index];
 
-        // Stop if currently playing to restart (rapid fire)
         if (sound.isPlaying) sound.stop();
-
-        // Randomize pitch slightly for realism
-        const detune = 1.0 + (Math.random() * 0.1 - 0.05);
-        sound.setPlaybackRate(detune);
-
+        sound.setPlaybackRate(pitch);
         sound.play();
 
-        // Advance index
-        this.poolIndex[type] = (index + 1) % this.poolSize;
+        this.poolIndex[type] = (index + 1) % this.pools[type].length;
+    }
+
+    // LEGACY / UTILITY
+    playExplosion(pos) {
+        this.playTankShot();
     }
 }
