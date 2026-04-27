@@ -276,11 +276,14 @@ export class CharacterController {
                 if (!data || !data.vector) return;
                 const threshold = 0.2; // Deadzone
                 // NippleJS vector: UP is positive Y, RIGHT is positive X
-                this.keys.forward = data.vector.y > threshold;
-                this.keys.backward = data.vector.y < -threshold;
+                const vx = isFinite(data.vector.x) ? data.vector.x : 0;
+                const vy = isFinite(data.vector.y) ? data.vector.y : 0;
+                
+                this.keys.forward = vy > threshold;
+                this.keys.backward = vy < -threshold;
                 // Changed from Right/Left strafing to Turn Right/Left
-                this.keys.turnRight = data.vector.x > threshold;
-                this.keys.turnLeft = data.vector.x < -threshold;
+                this.keys.turnRight = vx > threshold;
+                this.keys.turnLeft = vx < -threshold;
                 // Keep strafe false for joystick
                 this.keys.right = false;
                 this.keys.left = false;
@@ -669,7 +672,13 @@ export class CharacterController {
                 if (!this.keys.spaceHeld) {
                     if (this.isDriving) {
                         if (this.world && this.world.vehicleManager) {
-                            this.world.vehicleManager.exitVehicle();
+                            // SAFETY: If we think we are driving but the manager has no vehicle, force reset
+                            if (!this.world.vehicleManager.currentVehicle) {
+                                console.warn("Character stuck in driving state without vehicle. Forcing reset.");
+                                this.setDriving(false);
+                            } else {
+                                this.world.vehicleManager.exitVehicle();
+                            }
                         }
                     } else {
                         let enteredVehicle = false;
@@ -797,6 +806,25 @@ export class CharacterController {
             return;
         }
 
+        // --- SANITY CHECK (Anti-Crash) ---
+        if (!isFinite(this.yaw)) {
+            console.warn("[CharacterController] Yaw was NaN, resetting.");
+            this.yaw = 0;
+        }
+        if (!isFinite(this.pitch)) this.pitch = 0;
+        if (!isFinite(this.aimYaw)) this.aimYaw = this.yaw;
+        if (!isFinite(this.aimPitch)) this.aimPitch = this.pitch;
+
+        if (!isFinite(this.mesh.position.x) || !isFinite(this.mesh.position.y) || !isFinite(this.mesh.position.z)) {
+             console.warn("[CharacterController] Position was NaN, rescuing.");
+             // Try to find current vehicle or fallback to origin
+             if (this.isDriving && this.vehicle && this.vehicle.mesh) {
+                 this.mesh.position.set(0, 0, 0); // Local pos is 0 when child of vehicle
+             } else {
+                 this.mesh.position.set(0, 5, 0);
+             }
+        }
+
         // 1. CLEAR PREVIOUS INPUT STATE
         this.inputVector = { x: 0, y: 0 };
         this.isRunning = this.keys.run || this.keys.isShiftPressed;
@@ -869,7 +897,13 @@ export class CharacterController {
             if (gamepad && gamepad.buttons[3] && gamepad.buttons[3].pressed) {
                 if (!this._gamepadJumpHeld) {
                     if (this.isDriving) {
-                        if (this.world && this.world.vehicleManager) this.world.vehicleManager.exitVehicle();
+                        if (this.world && this.world.vehicleManager) {
+                            if (!this.world.vehicleManager.currentVehicle) {
+                                this.setDriving(false);
+                            } else {
+                                this.world.vehicleManager.exitVehicle();
+                            }
+                        }
                     } else {
                         let enteredVehicle = false;
                         if (this.world && this.world.vehicleManager) {
@@ -1298,7 +1332,8 @@ PTR LOCK: ${plStatus}
     setDriving(isDriving, vehicle, exitPos) {
         this.isDriving = isDriving;
         this._vehicle = vehicle;
-        if (exitPos) this.mesh.position.copy(exitPos);
+        // Removed: this.mesh.position.copy(exitPos) here. 
+        // It's now handled after unparenting to ensure world space correctness.
 
         const radarUI = document.getElementById('heli-radar');
         if (radarUI) {
@@ -1309,38 +1344,53 @@ PTR LOCK: ${plStatus}
         if (isDriving && vehicle) {
             vehicle.mesh.add(this.mesh);
 
-            // Offset for visual placement inside cockpit/seat
-            if (vehicle.type === 'tank') {
-                this.mesh.position.set(0, 0, 0);
-                this.mesh.visible = false;
-
-                // Sync AIM and YAW with Tank heading on entry
-                const forward = new THREE.Vector3(1, 0, 0).applyQuaternion(vehicle.mesh.quaternion);
-                const vehicleYaw = Math.atan2(-forward.x, -forward.z);
-                this.yaw = vehicleYaw;
-                this.aimYaw = vehicleYaw;
-                this.pitch = 0;
-                this.aimPitch = 0;
-            } else if (vehicle.type === 'helicopter') {
-                this.mesh.position.set(0, 0.5, 2.5); // Cockpit approx pos
-                this.mesh.visible = false; // Completely hide for clear Nose Cam
+            // Use seatOffset from vehicle settings if available, else fallback
+            const cfg = this.world?.vehicleManager?.settings?.[vehicle.type];
+            if (cfg && cfg.seatOffset) {
+                this.mesh.position.copy(cfg.seatOffset);
             } else {
                 this.mesh.position.set(0, 0, 0);
+            }
+
+            if (vehicle.type === 'tank' || vehicle.type === 'helicopter') {
+                this.mesh.visible = false;
+                
+                if (vehicle.type === 'tank') {
+                    // Sincronización a prueba de fallos:
+                    // En lugar de calcular atan2 que puede fallar si los vectores son NaN,
+                    // simplemente copiamos la rotación Y del vehículo directamente.
+                    let vehicleYaw = 0;
+                    if (vehicle.mesh && isFinite(vehicle.mesh.rotation.y)) {
+                        // Convertir la rotación del tanque (basada en el eje X original) a la orientación de la cámara
+                        vehicleYaw = vehicle.mesh.rotation.y + (Math.PI / 2); 
+                    }
+                    
+                    if (!isFinite(vehicleYaw)) vehicleYaw = 0;
+                    
+                    this.yaw = vehicleYaw;
+                    this.aimYaw = vehicleYaw;
+                    this.pitch = 0;
+                    this.aimPitch = 0;
+                }
+            } else {
                 this.mesh.visible = true;
             }
             this.mesh.quaternion.set(0, 0, 0, 1);
         } else {
-            // Unparent
+            // Unparent FIRST before setting world position
             if (this.world && this.world.scene) {
                 this.world.scene.add(this.mesh);
             }
+            
+            if (exitPos) {
+                this.mesh.position.copy(exitPos);
+            }
+            
             this.mesh.visible = true;
 
-            // Also sync aim for other vehicles
-            if (isDriving) {
-                this.aimYaw = this.yaw;
-                this.aimPitch = this.pitch;
-            }
+            // Also sync aim for other vehicles when exiting
+            this.aimYaw = this.yaw;
+            this.aimPitch = this.pitch;
         }
 
         // Reset movement states
@@ -1438,7 +1488,9 @@ PTR LOCK: ${plStatus}
 
         // Increase viewOrigin height if driving to avoid seat/tank
         const headHeight = this.isDriving ? 1.7 : 1.5;
-        const viewOrigin = this.mesh.position.clone().add(new THREE.Vector3(0, headHeight, 0));
+        const viewOrigin = new THREE.Vector3();
+        this.mesh.getWorldPosition(viewOrigin);
+        viewOrigin.y += headHeight;
 
         // Dynamic Camera Distance (Wheel Zoom)
         let distance = this.cameraDistance;

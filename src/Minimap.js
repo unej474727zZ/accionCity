@@ -111,42 +111,61 @@ export class Minimap {
             vehicleManager.vehicles.forEach(v => {
                 const pos = this.projectToCanvas(v.mesh.position, activeCamera);
                 if (pos.z < 1.0 && pos.x >= 0 && pos.x <= width && pos.y >= 0 && pos.y <= height) {
+                    ctx.save();
+                    ctx.translate(pos.x, pos.y);
+                    // Rotar el canvas para que coincida con la orientación del vehículo
+                    ctx.rotate(-v.mesh.rotation.y - Math.PI / 2);
+
                     if (v.type === 'motorcycle') {
-                        ctx.fillStyle = 'rgba(255, 153, 0, 0.7)'; 
-                        ctx.fillRect(pos.x - 3, pos.y - 3, 6, 6);
+                        ctx.fillStyle = 'rgba(255, 153, 0, 0.9)'; 
+                        // Dibujar un rectángulo alargado (moto)
+                        ctx.fillRect(-2, -4, 4, 8);
                     } else if (v.type === 'tank') {
-                        ctx.fillStyle = 'rgba(255, 0, 0, 0.8)'; 
-                        ctx.fillRect(pos.x - 4, pos.y - 4, 8, 8);
+                        ctx.fillStyle = 'rgba(255, 0, 0, 0.9)'; 
+                        // Dibujar un chasis de tanque
+                        ctx.fillRect(-4, -5, 8, 10);
+                        // Dibujar el cañón (frente)
+                        ctx.fillStyle = '#ffffff';
+                        ctx.fillRect(-1, -8, 2, 4);
                     } else if (v.type === 'helicopter') {
-                        ctx.fillStyle = 'rgba(204, 153, 255, 0.8)'; // Lila para helicópteros
-                        ctx.fillRect(pos.x - 4, pos.y - 4, 8, 8);
+                        ctx.fillStyle = 'rgba(204, 153, 255, 0.9)';
+                        // Dibujar forma de helicóptero (cruz)
+                        ctx.fillRect(-4, -2, 8, 4);
+                        ctx.fillRect(-1, -6, 2, 12);
                     }
+                    ctx.restore();
                 }
             });
         }
 
         // 4. JUGADOR LOCAL (Flecha Blanca)
         const playerMesh = character.mesh;
-        const footPos = this.projectToCanvas(playerMesh.position, activeCamera);
+        const worldPos = new THREE.Vector3();
+        playerMesh.getWorldPosition(worldPos); // Extraer posición real global
+        
+        const footPos = this.projectToCanvas(worldPos, activeCamera);
         if (footPos.z < 1.0) {
             ctx.save();
             ctx.translate(footPos.x, footPos.y);
-            // Usamos character.yaw en lugar de rotation local del mesh, 
-            // ya que al subir a un vehículo el mesh hereda rotación local 0
-            // Sumar Math.PI / 2 o ajustar según necesidad. El yaw es ángulo en eje Y.
-            // En Three.js default cámara mira a -Z. Minimap "norte" es -Z. 
-            // character.yaw = 0 significa mirar a -Z.
-            // Para que apunte arriba (0 rad) cuando yaw es 0:
-            ctx.rotate(-character.yaw); 
             
-            ctx.fillStyle = '#ffffff';
-            ctx.beginPath();
-            ctx.moveTo(0, -10);
-            ctx.lineTo(8, 8);
-            ctx.lineTo(0, 3);
-            ctx.lineTo(-8, 8);
-            ctx.closePath();
-            ctx.fill();
+            // Si está conduciendo un tanque/heli, ocultamos la flecha blanca
+            // (porque el icono del vehículo ya muestra dónde estamos)
+            // Si es moto, sí la mostramos para saber hacia dónde miramos.
+            const hidePlayerIcon = character.isDriving && character.vehicle && character.vehicle.type !== 'motorcycle';
+            
+            if (!hidePlayerIcon) {
+                let displayYaw = character.yaw;
+                ctx.rotate(-displayYaw); 
+                
+                ctx.fillStyle = character.isDriving ? '#00ffff' : '#ffffff'; // Cian si conduce moto
+                ctx.beginPath();
+                ctx.moveTo(0, -10);
+                ctx.lineTo(8, 8);
+                ctx.lineTo(0, 3);
+                ctx.lineTo(-8, 8);
+                ctx.closePath();
+                ctx.fill();
+            }
             ctx.restore();
         }
     }

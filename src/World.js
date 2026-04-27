@@ -11,6 +11,21 @@ import { WeaponManager } from './WeaponManager.js';
 import { Minimap } from './Minimap.js';
 import { SoundManager } from './SoundManager.js';
 
+// --- CRITICAL AUDIO PATCH (Anti-Crash) ---
+// Prevents browser thread lock when Three.js sends non-finite numbers to Web Audio
+(function() {
+    const originalRamp = AudioParam.prototype.linearRampToValueAtTime;
+    AudioParam.prototype.linearRampToValueAtTime = function(value, time) {
+        if (!isFinite(value) || !isFinite(time)) return this;
+        return originalRamp.call(this, value, time);
+    };
+    const originalSetValue = AudioParam.prototype.setValueAtTime;
+    AudioParam.prototype.setValueAtTime = function(value, time) {
+        if (!isFinite(value) || !isFinite(time)) return this;
+        return originalSetValue.call(this, value, time);
+    };
+})();
+
 export class World {
     constructor(container) {
         this.container = container;
@@ -104,7 +119,6 @@ export class World {
             const assets = await this.assetLoader.loadAll();
 
             // Setup City
-            // Setup City
             const cityParams = assets['city'];
             let city = null;
 
@@ -194,10 +208,6 @@ export class World {
 
             this.teleportCooldown = 0;
 
-            // DEBUG: Add on-screen console for mobile
-            // DEBUG: Console removed
-
-
             // Setup Character
             this.character = new CharacterController(this.scene, this.camera, assets, this);
 
@@ -263,13 +273,11 @@ export class World {
             });
 
             // NPC MANAGER
-            // NPC MANAGER
             this.npcManager = new NPCManager(this.scene, assets);
             // Parked Cars (Static) per user request
             this.npcManager.initParkedCars(50);
 
             // WEAPON MANAGER (EMOTION!!!)
-            // Pass character.mesh (for bones) AND character controller (for animations)
             this.weaponManager = new WeaponManager(this.scene, this.character, this.camera, assets);
 
             // LINK CONTROLLER TO WEAPON MANAGER
@@ -288,29 +296,21 @@ export class World {
             // VEHICLE MANAGER
             this.vehicleManager = new VehicleManager(this.scene, assets, this.character);
 
-            // Spawn Motorcycle at a safe fixed spot if everything else fails
+            // Spawn Motorcycle at a safe fixed spot
             let spawnPos = new THREE.Vector3(-300, 0.5, -40);
             this.vehicleManager.spawnVehicle('motorcycle', spawnPos);
 
-            // ARMAGE DON TANK SPAWN: Safer outskirts (-300) to avoid falling off map
+            // ARMAGE DON TANK SPAWN
             let tankPos = new THREE.Vector3(-300, 0.5, 0);
             this.vehicleManager.spawnVehicle('tank', tankPos);
 
-            // HELICOPTER SPAWN: 20m to the right of the tank
+            // HELICOPTER SPAWN
             let heliPos = new THREE.Vector3(-300, 0.5, -20);
             this.vehicleManager.spawnVehicle('helicopter', heliPos);
 
-            // Start with Pistol equipped? Or wait for input? Let's equip Pistol by default.
-            // But we need to make sure model is ready. Construct it now, call equip later or inside.
-
             // PASS COLLIDERS
-            if (city) {
-                this.character.colliders.push(city);
-            }
-            if (floor) {
-                this.character.colliders.push(floor);
-            }
-
+            if (city) this.character.colliders.push(city);
+            if (floor) this.character.colliders.push(floor);
 
             // NETWORK: Connect and Setup Events
             this.networkManager.connect();
@@ -318,7 +318,6 @@ export class World {
             this.networkManager.onPlayerJoined = (id, data) => {
                 console.log("Player Joined:", id);
                 if (this.remotePlayers[id]) return; // Already exists
-
                 const remotePlayer = new RemotePlayer(this.scene, assets, id, data);
                 this.remotePlayers[id] = remotePlayer;
                 this.updateRemoteColliders(); // Sync with key systems
@@ -326,9 +325,7 @@ export class World {
 
             this.networkManager.onPlayerMoved = (id, data) => {
                 const remotePlayer = this.remotePlayers[id];
-                if (remotePlayer) {
-                    remotePlayer.updateState(data);
-                }
+                if (remotePlayer) remotePlayer.updateState(data);
             };
 
             this.networkManager.onPlayerLeft = (id) => {
@@ -355,7 +352,7 @@ export class World {
             statusEl.style.fontWeight = 'bold';
             statusEl.style.fontSize = '14px';
             statusEl.style.zIndex = '1000';
-            statusEl.style.display = 'none'; // Hide status text for cleaner app UI
+            statusEl.style.display = 'none'; 
             document.body.appendChild(statusEl);
 
             this.networkManager.socket.on('connect', () => {
@@ -371,7 +368,6 @@ export class World {
             });
 
             this.networkManager.onChatMessage = (data) => {
-                console.log("Chat received:", data); // Debug
                 const msg = document.createElement('div');
                 msg.className = 'chat-msg';
                 msg.style.color = data.color || 'white';
@@ -382,47 +378,32 @@ export class World {
 
             // COMBAT EVENTS
             this.networkManager.onPlayerShoot = (data) => {
-                // data: { id, origin, direction, weaponType }
                 if (data.id === this.networkManager.id) return;
-                console.log(`[NET] Received playerShoot from ${data.id}`, data);
-
                 const remotePlayer = this.remotePlayers[data.id];
                 if (remotePlayer) {
-                    console.log(`[COMBAT] Commanding RemotePlayer ${data.id} to shoot`);
                     remotePlayer.shoot(data.origin, data.direction, data.weaponType);
-                } else {
-                    console.warn(`[COMBAT] RemotePlayer ${data.id} NOT FOUND for shoot event`);
                 }
             };
 
             this.networkManager.onPlayerHit = (data) => {
-                // data: { id, position, type }
-                console.log(`[NET] Global Hit Received:`, data);
                 if (this.weaponManager) {
                     this.weaponManager.createImpact(data.position, data.type);
                 }
             };
 
             if (chatInput) {
-                chatInput.addEventListener('keydown', (e) => {
-                    e.stopPropagation(); // Keep reacting to keys but don't propagate to game
-                });
-
+                chatInput.addEventListener('keydown', (e) => e.stopPropagation());
                 chatInput.addEventListener('keyup', (e) => {
                     e.stopPropagation();
                     if (e.key === 'Enter') {
                         const text = chatInput.value.trim();
                         if (text) {
-                            console.log("Sending chat:", text); // Debug
                             this.networkManager.sendChat(text);
                             chatInput.value = '';
-                            chatInput.blur(); // CRITICAL: Release focus so player can move again
+                            chatInput.blur(); 
                         }
                     }
                 });
-
-                // Also prevent clicks on input from moving camera?
-                // (Already handled by pointer-events auto vs none in CSS, usually)
             }
 
             document.getElementById('loading').style.display = 'none';
@@ -430,11 +411,7 @@ export class World {
             // UI Toggle State
             this.uiVisible = true;
             window.addEventListener('keydown', (e) => {
-                if (e.code === 'KeyP') {
-                    this.toggleUI();
-                }
-
-                // Vehicle interaction is handled by 'Space' in CharacterController.
+                if (e.code === 'KeyP') this.toggleUI();
 
                 // INSPECTION MODE (I)
                 if (e.code === 'KeyI') {
@@ -442,51 +419,31 @@ export class World {
                     this.orbitControls.enabled = this.isInspectionMode;
 
                     if (this.isInspectionMode) {
-                        console.log("🔍 Inspection Mode: ON. Use Mouse to Rotate/Pan.");
                         document.exitPointerLock();
-
-                        // FIX: Auto-Focus on Character/Vehicle
                         const targetObj = this.character.mesh;
                         if (targetObj) {
-                            // Target slightly above the pivot (which is at feet)
                             const targetPos = targetObj.position.clone().add(new THREE.Vector3(0, 0.5, 0));
                             this.orbitControls.target.copy(targetPos);
-
-                            // Optional: Move camera if it's too far/close? 
-                            // Letting OrbitControls handle current position is usually smoother unless broken.
                             this.orbitControls.update();
                         }
                     } else {
-                        console.log("▶️ Game Mode: ON");
-                        // Attempt to re-lock mouse for game controls
                         document.body.requestPointerLock();
                     }
                 }
                 if (e.code === 'KeyM') {
                     if (this.minimap) {
                         this.minimap.toggleUI();
-                        // Resetear el desplazamiento al cerrar el mapa
-                        if (!this.minimap.isFullMap) {
-                            this.mapPanningOffset.set(0, 0, 0);
-                        }
-                        // Liberar el ratón si el mapa está en pantalla completa
-                        if (this.minimap.isFullMap) {
-                            document.exitPointerLock();
-                        } else {
-                            document.body.requestPointerLock();
-                        }
+                        if (!this.minimap.isFullMap) this.mapPanningOffset.set(0, 0, 0);
+                        if (this.minimap.isFullMap) document.exitPointerLock();
+                        else document.body.requestPointerLock();
                     }
                 }
 
-                if (e.code === 'Equal' || e.code === 'NumpadAdd') {
-                    this.updateMinimap3DZoom(0.2);
-                }
-                if (e.code === 'Minus' || e.code === 'NumpadSubtract') {
-                    this.updateMinimap3DZoom(-0.2);
-                }
+                if (e.code === 'Equal' || e.code === 'NumpadAdd') this.updateMinimap3DZoom(0.2);
+                if (e.code === 'Minus' || e.code === 'NumpadSubtract') this.updateMinimap3DZoom(-0.2);
             });
 
-            // MOUSE DRAGGING FOR MAP PANNING (Robust version)
+            // MOUSE DRAGGING FOR MAP PANNING
             const handleMouseDown = (e) => {
                 if (this.minimap && this.minimap.isFullMap) {
                     this.isDraggingMap = true;
@@ -499,38 +456,28 @@ export class World {
                 if (this.isDraggingMap && this.minimap && this.minimap.isFullMap) {
                     const dx = e.clientX - this.lastMouseX;
                     const dy = e.clientY - this.lastMouseY;
-
-                    const sens = this.minimapSpan / 400; // Ajustada para ser más suave
+                    const sens = this.minimapSpan / 400; 
                     this.mapPanningOffset.x -= dx * sens;
                     this.mapPanningOffset.z -= dy * sens;
-
                     this.lastMouseX = e.clientX;
                     this.lastMouseY = e.clientY;
-
-                    // Prevenir que otros elementos atrapen el ratón
                     e.preventDefault();
                 }
             };
 
-            const handleMouseUp = () => {
-                this.isDraggingMap = false;
-            };
+            const handleMouseUp = () => { this.isDraggingMap = false; };
 
             document.addEventListener('mousedown', handleMouseDown);
             document.addEventListener('mousemove', handleMouseMove);
             document.addEventListener('mouseup', handleMouseUp);
-            window.addEventListener('blur', handleMouseUp); // Por si se pierde el foco
+            window.addEventListener('blur', handleMouseUp);
 
             window.addEventListener('wheel', (e) => {
                 if (!this.minimap) return;
-
-                const delta = e.deltaY > 0 ? -0.5 : 0.5; // Zoom más fuerte
-
+                const delta = e.deltaY > 0 ? -0.5 : 0.5; 
                 if (this.minimap.isFullMap) {
-                    // Zoom real cambiando la altura del drone (minimapSpan)
                     this.updateMinimap3DZoom(delta);
                 } else {
-                    // Zoom de la cámara en modo tercera persona
                     if (this.character) {
                         const minFOV = (this.character.isDriving && this.character.vehicle && this.character.vehicle.type === 'helicopter') ? 5 : 10;
                         this.character.desiredFOV = THREE.MathUtils.clamp(this.character.desiredFOV - (delta * 50), minFOV, 75);
@@ -548,12 +495,8 @@ export class World {
         }
     }
 
-
-    // Helper: Update 3D Minimap Zoom
     updateMinimap3DZoom(delta) {
         if (!this.minimapCamera) return;
-        // Adjust span based on delta. Zoom IN (delta > 0) means SMALLER span.
-        // We now use this span to determine DRONE HEIGHT as well.
         this.minimapSpan = THREE.MathUtils.clamp(this.minimapSpan - delta * 40, 40, 400);
         this.minimapCamera.left = -this.minimapSpan;
         this.minimapCamera.right = this.minimapSpan;
@@ -562,18 +505,11 @@ export class World {
         this.minimapCamera.updateProjectionMatrix();
     }
 
-    // Helper: Sync Remote Player Meshes to Controllers
     updateRemoteColliders() {
         if (!this.character || !this.weaponManager) return;
-
         const players = Object.values(this.remotePlayers);
-        // For physics (CharacterController), we need Meshes
         const meshes = players.map(p => p.mesh).filter(m => m);
-
-        // Update Character Controller (Physics Collision)
         if (this.character) this.character.remoteColliders = meshes;
-
-        // Update Weapon Manager (Bullet Hits)
         if (this.weaponManager) this.weaponManager.remotePlayers = players;
     }
 
@@ -585,61 +521,25 @@ export class World {
 
     toggleNightVision() {
         const now = Date.now();
-        if (this.lastNVToggle && (now - this.lastNVToggle) < 300) {
-            return; // Debounce: Prevent double-tap within 300ms
-        }
+        if (this.lastNVToggle && (now - this.lastNVToggle) < 300) return;
         this.lastNVToggle = now;
-
         this.isNightVision = !this.isNightVision;
-        console.log("Night Vision Toggle:", this.isNightVision);
     }
 
     toggleUI() {
         this.uiVisible = !this.uiVisible;
-        const display = this.uiVisible ? 'block' : 'none';
-        const displayFlex = this.uiVisible ? 'flex' : 'none';
-
-        // 1. Chat
         const chatInput = document.getElementById('chat-input');
         const chatMessages = document.getElementById('chat-messages');
-        if (chatInput) chatInput.style.display = display;
-        if (chatMessages) chatMessages.style.display = display;
+        if (chatInput) chatInput.style.display = this.uiVisible ? 'block' : 'none';
+        if (chatMessages) chatMessages.style.display = this.uiVisible ? 'block' : 'none';
 
-        // 2. Mobile PSP Controls (Game parts only)
-        // We keep #center-bar (Start/Select) and #toggles-container visible so we can toggle back!
-        const idsToToggle = [
-            'dpad-container',
-            'shapes-container',
-            'camera-cross-container',
-            'btn-l',
-            'btn-r',
-            'minimap-canvas' // Also hide map canvas
-        ];
-
+        const idsToToggle = ['dpad-container', 'shapes-container', 'camera-cross-container', 'btn-l', 'btn-r', 'minimap-canvas'];
         idsToToggle.forEach(id => {
             const el = document.getElementById(id);
-            if (el) {
-                // Check if it was flex or block? Most are absolute/block.
-                // Except shoulder buttons which are flex.
-                // Safest to toggle visibility or display based on original?
-                // For simplicity, display='none' vs ... empty string?
-                // Or just use the 'display' var which is 'block'/'none'.
-                // Shoulder btns and others are okay with block or flex?
-                // .psp-btn is flex.
-                el.style.display = this.uiVisible ? '' : 'none'; // '' reverts to CSS default
-            }
+            if (el) el.style.display = this.uiVisible ? '' : 'none';
         });
 
-        // 3. Status
-        // ...
-
-        // 4. Weapon UI
         if (this.weaponManager) this.weaponManager.toggleUI(this.uiVisible);
-
-        // 5. Minimap Container
-        // if (this.minimap) this.minimap.toggleUI(this.uiVisible); // Handled by ID above
-
-        console.log("UI Visibility:", this.uiVisible);
     }
 
     animate() {
@@ -648,334 +548,194 @@ export class World {
         const dt = Math.min(this.clock.getDelta(), 0.1);
         const time = Date.now() / 1000;
 
-        // --- DAY/NIGHT CYCLE (FROZEN FOR VISUAL TESTS) ---
-        // Forced Noon: Sun at its peak for perfect visibility.
-        const sunAngle = Math.PI / 2; // Fixed at 90 degrees (High Noon)
-
+        const sunAngle = Math.PI / 2; // Fixed at Noon
         const sunRadius = 200;
-        let sunIntensity = 1.5; // Max intensity
+        let sunIntensity = 1.5;
 
-        // Find the directional light
         const dirLight = this.scene.children.find(c => c.isDirectionalLight);
         if (dirLight) {
-            dirLight.position.x = 0; // Directly above
-            dirLight.position.y = sunRadius;
-            dirLight.position.z = 50;
-
-            // Stable light for picnic day
-            const cloudFactor = 1.0;
-
-            dirLight.mask = 1;
-            dirLight.intensity = sunIntensity * cloudFactor;
+            dirLight.position.set(0, sunRadius, 50);
+            dirLight.intensity = sunIntensity;
             dirLight.castShadow = true;
         }
 
-        // Sky Color Interpolation
-        let skyHex = 0x000000;
-        let groundHex = 0x111111;
+        let skyHex = 0x87CEEB;
+        let groundHex = 0x555555;
         let fogDist = 1500;
         let fogColor = null;
 
-        const dayIntensity = Math.max(0, Math.sin(sunAngle));
-
-        if (dayIntensity > 0.8) {
-            skyHex = 0x87CEEB; // Blue
-            groundHex = 0x555555;
-        } else if (dayIntensity > 0.2) {
-            skyHex = 0xFF4500; // Orange
-            groundHex = 0x332222;
-            fogDist = 800;
-        } else {
-            skyHex = 0x050510; // Night
-            groundHex = 0x000000;
-            fogDist = 500;
-        }
-
-        // --- NIGHT VISION OVERRIDE ---
         if (this.isNightVision) {
-            skyHex = 0x002200; // Dark Green
-            groundHex = 0x004400; // Brighter Green Floor
-            fogDist = 200; // See further in dark
-            fogColor = new THREE.Color(0x00FF00); // Bright Green Fog
+            skyHex = 0x002200;
+            groundHex = 0x004400;
+            fogDist = 200;
+            fogColor = new THREE.Color(0x00FF00);
         }
 
-        // --- DRONE MAP FOG & CAMERA OVERRIDE ---
         if (this.minimap && this.minimap.isFullMap && this.character) {
-            // 1. Hide Game UI
             if (this.weaponManager) this.weaponManager.toggleUI(false);
-
-            // 2. Push fog way back based on drone span so ground is always visible
             fogDist = Math.max(1500, this.minimapSpan + 500);
             if (this.camera.far !== fogDist) {
                 this.camera.far = fogDist;
                 this.camera.updateProjectionMatrix();
             }
-
-            // 3. DRONE POSITION: High above player looking down
-            // height is derived from current zoom (minimapSpan)
             const droneHeight = this.minimapSpan * 1.5;
             const targetPos = this.character.mesh.position.clone().add(this.mapPanningOffset);
             this.camera.position.set(targetPos.x, targetPos.y + droneHeight, targetPos.z + 0.1);
             this.camera.lookAt(targetPos);
         } else {
-            // Restore Game UI if general UI is visible
             if (this.uiVisible && this.weaponManager) this.weaponManager.toggleUI(true);
-
             if (this.camera.far !== 250) {
                 this.camera.far = 250;
                 this.camera.updateProjectionMatrix();
             }
         }
 
-        // Smoothly lerp current color to target
         const currentSky = this.scene.background;
-        // Faster lerp for responsiveness (dt * 2.0 instead of 0.5)
-        // If Night Vision is active, snap sky faster (dt * 10.0)
         const skyLerpSpeed = this.isNightVision ? 10.0 : 2.0;
-
-        // Safety check to avoid magenta/invalid colors
-        const safeSkyHex = (typeof skyHex === 'number' && !isNaN(skyHex)) ? skyHex : 0x000000;
+        const safeSkyHex = (typeof skyHex === 'number' && !isNaN(skyHex)) ? skyHex : 0x87CEEB;
         currentSky.lerp(new THREE.Color(safeSkyHex), Math.min(dt * skyLerpSpeed, 1.0));
 
-        // Update Fog
-        if (fogColor) {
-            // Very fast transition for Night Vision
-            this.scene.fog.color.lerp(fogColor, dt * 10.0);
-        } else {
-            this.scene.fog.color.copy(currentSky);
-        }
+        if (fogColor) this.scene.fog.color.lerp(fogColor, dt * 10.0);
+        else this.scene.fog.color.copy(currentSky);
 
         const fogLerpSpeed = this.isNightVision ? 10.0 : 5.0;
         this.scene.fog.far = THREE.MathUtils.lerp(this.scene.fog.far, fogDist, dt * fogLerpSpeed);
 
-        // Update Ambient/Hemi Light
         const hemiLight = this.scene.children.find(c => c.isHemisphereLight);
         if (hemiLight) {
             if (this.isNightVision) {
-                // NV Mode: High ambient light to "see in dark"
                 hemiLight.color.setHex(0x00FF00);
                 hemiLight.groundColor.setHex(0x003300);
-                hemiLight.intensity = 2.0; // Artificial gain
+                hemiLight.intensity = 2.0;
             } else {
-                // Normal Mode
                 hemiLight.color.lerp(new THREE.Color(skyHex), dt * 0.5);
                 hemiLight.groundColor.lerp(new THREE.Color(groundHex), dt * 0.5);
-
-                // Cloud shadows affect ambient too? Maybe slightly
-                // If direct light is blocked by clouds, ambient drops a bit too
-                const cloudAmbient = (sunIntensity < 0.5 && dayIntensity > 0.5) ? 0.5 : 1.0;
-                hemiLight.intensity = (0.2 + (dayIntensity * 0.6)) * cloudAmbient;
+                hemiLight.intensity = 0.8;
             }
         }
-
-        // Sky Sphere Rotation
-        if (this.skySphere) {
-            this.skySphere.rotation.y += 0.01 * dt;
-            this.skySphere.material.color.copy(currentSky);
-        }
-
-        // --- END CYCLE ---
 
         if (this.character) {
             this.character.update(dt);
-
-            // Pass remote colliders (meshes) for Player-Player and Player-Vehicle Collision
             let allColliders = Object.values(this.remotePlayers).map(p => p.mesh).filter(m => m);
-
-            if (this.vehicleManager) {
-                allColliders = allColliders.concat(this.vehicleManager.vehicles.map(v => v.mesh).filter(m => m));
-            }
-            if (this.npcManager && this.npcManager.cars) {
-                allColliders = allColliders.concat(this.npcManager.cars.filter(m => m));
-            }
-
+            if (this.vehicleManager) allColliders = allColliders.concat(this.vehicleManager.vehicles.map(v => v.mesh).filter(m => m));
+            if (this.npcManager && this.npcManager.cars) allColliders = allColliders.concat(this.npcManager.cars.filter(m => m));
             this.character.remoteColliders = allColliders;
         }
 
         if (this.npcManager) this.npcManager.update(dt);
-
         if (this.weaponManager) {
-            // Pass remote players (instances) for Hit Detection
             this.weaponManager.remotePlayers = Object.values(this.remotePlayers);
             this.weaponManager.update(dt);
         }
 
-        // Vehicle System Update
         if (this.vehicleManager && this.character) {
             const input = this.character.inputVector || { x: 0, y: 0 };
             this.vehicleManager.update(dt, input);
-
-            // SAVE MOTORCYCLE POSITION (Throttled or every frame? Let's do every frame for simplicity, or every few frames)
-            // Just find the motorcycle
             const moto = this.vehicleManager.vehicles.find(v => v.type === 'motorcycle');
             if (moto && moto.mesh) {
-                localStorage.setItem('motorcyclePosition', JSON.stringify({
-                    x: moto.mesh.position.x,
-                    y: moto.mesh.position.y,
-                    z: moto.mesh.position.z
-                }));
+                localStorage.setItem('motorcyclePosition', JSON.stringify({ x: moto.mesh.position.x, y: moto.mesh.position.y, z: moto.mesh.position.z }));
             }
         }
 
-        // Camera Update (Must run AFTER character and vehicle physics move the mesh)
-        if (this.character && !this.isInspectionMode) {
-            this.character.updateCamera(dt);
-        } else if (this.isInspectionMode && this.orbitControls) {
-            this.orbitControls.update();
-        }
+        if (this.character && !this.isInspectionMode) this.character.updateCamera(dt);
+        else if (this.isInspectionMode && this.orbitControls) this.orbitControls.update();
 
-        // CAMERA ZOOM LOGIC
         if (this.character && this.camera && this.character.desiredFOV) {
             const targetFOV = this.character.desiredFOV;
             const speed = 5.0;
             const t = 1.0 - Math.pow(0.01, dt * speed);
-
             if (Math.abs(this.camera.fov - targetFOV) > 0.1) {
                 this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFOV, t);
                 this.camera.updateProjectionMatrix();
             }
         }
 
-        // Update Remote Players (Animations & Name Tags)
         Object.values(this.remotePlayers).forEach(p => p.update(dt, this.camera));
 
-        // NETWORK: Send Update (Pulse every frame)
         if (this.character && this.networkManager) {
-            this.networkManager.sendUpdate(
-                this.character.mesh.position,
-                this.character.yaw,
-                this.character.state,
-                this.weaponManager ? this.weaponManager.currentWeaponType : 'pistol'
-            );
-
-            // SAVE CHARACTER POSITION
-            // Save only if not driving (so we don't save the character exactly at the vehicle pos constantly while inside)
-            // Actually, we can save it always. It's fine.
-            localStorage.setItem('characterPosition', JSON.stringify({
-                x: this.character.mesh.position.x,
-                y: this.character.mesh.position.y,
-                z: this.character.mesh.position.z
-            }));
+            this.networkManager.sendUpdate(this.character.mesh.position, this.character.yaw, this.character.state, this.weaponManager ? this.weaponManager.currentWeaponType : 'pistol');
+            localStorage.setItem('characterPosition', JSON.stringify({ x: this.character.mesh.position.x, y: this.character.mesh.position.y, z: this.character.mesh.position.z }));
         }
 
-
-        // --- TELEPORTATION LOGIC ---
+        // Teleportation
         if (this.character && !this.character.isDriving && this.transporters.length > 0) {
-            if (this.teleportCooldown > 0) {
-                this.teleportCooldown -= dt;
-            } else {
-                let onAnyPad = false;
+            if (this.teleportCooldown > 0) this.teleportCooldown -= dt;
+            else {
                 this.transporters.forEach((t, i) => {
                     const dist = this.character.mesh.position.distanceTo(t.pos);
-                    if (dist < 2.0) { // On pad radius
-                        onAnyPad = true;
+                    if (dist < 2.0) {
                         t.timer += dt;
                         if (t.timer >= 2.0) {
-                            // TELEPORT!
                             let targetIdx;
-                            do {
-                                targetIdx = Math.floor(Math.random() * this.transporters.length);
-                            } while (targetIdx === i);
-
+                            do { targetIdx = Math.floor(Math.random() * this.transporters.length); } while (targetIdx === i);
                             const target = this.transporters[targetIdx];
-                            this.character.mesh.position.copy(target.pos);
-                            this.character.mesh.position.y += 0.5; // Avoid clipping
-                            this.teleportCooldown = 3.0; // 3s cooldown
+                            this.character.mesh.position.copy(target.pos).y += 0.5;
+                            this.teleportCooldown = 3.0;
                             t.timer = 0;
-                            console.log(`POOF! Teleported to pad ${targetIdx}`);
-                            if (this.soundManager) {
-                                // this.soundManager.play('teleport'); // If added later
-                            }
                         }
-                    } else {
-                        t.timer = 0;
-                    }
+                    } else t.timer = 0;
                 });
             }
         }
 
-        if (this.vrMode) {
-            this.stereoEffect.render(this.scene, this.camera);
-        } else {
-            // MAIN PASS
-            this.renderer.setViewport(0, 0, window.innerWidth, window.innerHeight);
-            this.renderer.setScissor(0, 0, window.innerWidth, window.innerHeight);
-            this.renderer.setScissorTest(true);
-            this.renderer.render(this.scene, this.camera);
+        // RENDER PASS
+        try {
+            if (this.vrMode) {
+                this.stereoEffect.render(this.scene, this.camera);
+            } else {
+                this.renderer.setViewport(0, 0, window.innerWidth, window.innerHeight);
+                this.renderer.setScissor(0, 0, window.innerWidth, window.innerHeight);
+                this.renderer.setScissorTest(true);
+                this.renderer.render(this.scene, this.camera);
 
-            // 3D CORNER MINIMAP PASS (PiP)
-            const minimapEl = document.getElementById('minimap-canvas');
-            if (this.minimap && !this.minimap.isFullMap && minimapEl && minimapEl.style.display !== 'none') {
-                if (this.minimapCamera && this.character && this.character.mesh) {
-                    this.minimapCamera.position.x = this.character.mesh.position.x;
-                    this.minimapCamera.position.z = this.character.mesh.position.z;
+                // PiP Minimap
+                const minimapEl = document.getElementById('minimap-canvas');
+                if (this.minimap && !this.minimap.isFullMap && minimapEl && minimapEl.style.display !== 'none') {
+                    if (this.minimapCamera && this.character && this.character.mesh) {
+                        this.minimapCamera.position.x = this.character.mesh.position.x;
+                        this.minimapCamera.position.z = this.character.mesh.position.z;
+                        const size = 200;
+                        const glX = window.innerWidth - size - 10;
+                        const glY = window.innerHeight - size - 10;
+                        this.renderer.setViewport(glX, glY, size, size);
+                        this.renderer.setScissor(glX, glY, size, size);
+                        this.renderer.autoClear = false;
+                        this.renderer.clearDepth();
+                        const tempFog = this.scene.fog;
+                        this.scene.fog = null;
+                        this.renderer.render(this.scene, this.minimapCamera);
+                        this.scene.fog = tempFog;
+                        this.renderer.autoClear = true;
+                    }
+                }
 
-                    const size = 200;
-                    const glX = window.innerWidth - size - 10;
-                    // Convertir Top: 10px a coordenadas Bottom-Left de WebGL
-                    const glY = window.innerHeight - size - 10;
-
-                    this.renderer.setViewport(glX, glY, size, size);
-                    this.renderer.setScissor(glX, glY, size, size);
-
-                    this.renderer.autoClear = false;
-                    this.renderer.clearDepth(); // Clear depth buffer so sky doesn't clip
-
-                    // DISABLE FOG TEMPORARILY FOR PiP SO IT DOESN'T GET COVERED IN GREEN
-                    const tempFog = this.scene.fog;
-                    this.scene.fog = null;
-
-                    this.renderer.render(this.scene, this.minimapCamera);
-
-                    this.scene.fog = tempFog; // RESTORE
-                    this.renderer.autoClear = true; // Restaurar
+                if (this.minimap && this.character && this.character.mesh) {
+                    const activeCam = this.minimap.isFullMap ? this.camera : this.minimapCamera;
+                    this.minimap.update(this.character, this.remotePlayers, this.npcManager, this.vehicleManager, activeCam);
                 }
             }
-
-            // --- ACTUALIZAR ICONOS 2D SOBRE EL MAPA (PROYECCIÓN SINCRONIZADA) ---
-            if (this.minimap && this.character && this.character.mesh) {
-                // ELEGIR CÁMARA: Si es pantalla completa usamos la del DRONE (this.camera), si es esquina usamos la CENITAL (this.minimapCamera)
-                const activeCam = this.minimap.isFullMap ? this.camera : this.minimapCamera;
-
-                this.minimap.update(
-                    this.character,
-                    this.remotePlayers,
-                    this.npcManager,
-                    this.vehicleManager,
-                    activeCam
-                );
-            }
+        } catch (e) {
+            console.error("Render Loop Error:", e);
         }
     }
 
     toggleVR() {
         this.vrMode = !this.vrMode;
-        if (this.vrMode) {
-            // Recalculate size to ensure split screen fits
-            this.stereoEffect.setSize(window.innerWidth, window.innerHeight);
-            console.log("VR Side-by-Side Mode Enabled");
-        } else {
-            console.log("VR Mode Disabled");
-        }
+        if (this.vrMode) this.stereoEffect.setSize(window.innerWidth, window.innerHeight);
     }
 
     triggerShake(intensity = 0.5) {
         if (!this.camera) return;
-        const originalPos = this.camera.position.clone();
         const startTime = Date.now();
-        const duration = 500; // ms
-
+        const duration = 500;
         const anim = () => {
             const elapsed = Date.now() - startTime;
             if (elapsed > duration) return;
-
             const progress = 1 - (elapsed / duration);
             const currentIntensity = intensity * progress;
-
             this.camera.position.x += (Math.random() - 0.5) * currentIntensity;
             this.camera.position.y += (Math.random() - 0.5) * currentIntensity;
             this.camera.position.z += (Math.random() - 0.5) * currentIntensity;
-
             requestAnimationFrame(anim);
         };
         anim();

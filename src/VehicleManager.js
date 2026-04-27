@@ -20,6 +20,8 @@ export class VehicleManager {
                 seatOffset: new THREE.Vector3(0, 0, -0.1)
             },
             tank: {
+                speed: 15.0, // Fixed: Missing speed was causing NaN in audio logic
+                turnSpeed: 1.5, // THE ROOT CAUSE: Missing turnSpeed caused NaN on steering!
                 scale: 1.2,
                 seatOffset: new THREE.Vector3(0, 5, 0) // Seat inside hull (doesn't matter since invisible)
             },
@@ -538,7 +540,18 @@ export class VehicleManager {
             const v = this.currentVehicle;
             const cfg = this.settings[v.type];
 
-            // Input: input.y (forward/back), input.x (turn)
+            // --- SANITY CHECK ---
+            if (!isFinite(v.velocity)) v.velocity = 0;
+            if (!isFinite(v.mesh.rotation.y)) v.mesh.rotation.y = 0;
+            if (!isFinite(v.mesh.position.x) || !isFinite(v.mesh.position.z)) {
+                console.warn(`[VehicleManager] ${v.type} position NaN! Rescuing.`);
+                if (this.characterController && this.characterController.mesh && (!this.characterController.isDriving || this.currentVehicle !== v)) {
+                    v.mesh.position.copy(this.characterController.mesh.position);
+                    v.mesh.position.x += 5; // Rescatarlo a 5 metros del jugador
+                } else {
+                    v.mesh.position.set(-300, 0.5, 0); // Posición segura por defecto (donde spawnea)
+                }
+            }
             // Acceleration
             if (input.y !== 0) {
                 v.velocity = THREE.MathUtils.lerp(v.velocity, input.y * cfg.speed, dt * 2);
@@ -569,7 +582,14 @@ export class VehicleManager {
                 const speedMagnitude = Math.abs(v.velocity);
                 const maxSpeed = cfg.speed;
                 // Pitch goes from 1.0 (idle) to 2.5 (top speed)
-                const pitch = 1.0 + (speedMagnitude / maxSpeed) * 1.5;
+                let pitch = 1.0;
+                if (maxSpeed > 0) {
+                    pitch = 1.0 + (speedMagnitude / maxSpeed) * 1.5;
+                }
+                
+                // SAFETY: AudioParam requires a finite number
+                if (!isFinite(pitch)) pitch = 1.0;
+                
                 activeSound.setPlaybackRate(pitch);
             }
 
@@ -925,20 +945,8 @@ export class VehicleManager {
                 v.mesh.translateZ(v.velocity * dt);
             }
 
-            // Sync Character Position/Rotation to Vehicle
-            this.characterController.mesh.position.copy(v.mesh.position);
-            this.characterController.mesh.rotation.copy(v.mesh.rotation);
-
-            // Apply Seat Offset (rotated AND scaled to match vehicle size)
-            // The seatOffset needs to be applied relative to the vehicle's rotated axes
-            const scale = cfg.scale || 1.0;
-            const right = new THREE.Vector3(1, 0, 0).applyQuaternion(v.mesh.quaternion);
-            const up = new THREE.Vector3(0, 1, 0).applyQuaternion(v.mesh.quaternion);
-            const forwardVector = new THREE.Vector3(0, 0, 1).applyQuaternion(v.mesh.quaternion);
-
-            this.characterController.mesh.position.add(right.multiplyScalar(cfg.seatOffset.x * scale));
-            this.characterController.mesh.position.add(up.multiplyScalar(cfg.seatOffset.y * scale));
-            this.characterController.mesh.position.add(forwardVector.multiplyScalar(cfg.seatOffset.z * scale));
+            // Character position and rotation are now handled automatically by parenting
+            // in CharacterController.setDriving(). No per-frame manual sync needed.
         }
     }
 
