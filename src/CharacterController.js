@@ -599,10 +599,10 @@ export class CharacterController {
 
         // --- SINCRONIZACIÓN (Eliminar Cojera) ---
         // Si estamos pasando entre walk/run/backward, sincronizamos el tiempo
-        if (this.currentAction && 
+        if (this.currentAction &&
             (name === 'walk' || name === 'run' || name === 'backward') &&
             (this.state === 'walk' || this.state === 'run' || this.state === 'backward')) {
-            
+
             // Sincronizar el nuevo clip con el actual para que los pies coincidan
             action.time = this.currentAction.time;
         }
@@ -1241,7 +1241,7 @@ export class CharacterController {
                 this.playAnimation('jump', true);
             } else {
                 this.playAnimation(nextState);
-                
+
                 // --- ANIMATION SYNC (Prevent Foot Sliding) ---
                 if (this.currentAction && (nextState === 'walk' || nextState === 'run' || nextState === 'backward')) {
                     const baseSpeed = (nextState === 'run') ? this.runSpeed : this.walkSpeed;
@@ -1452,7 +1452,7 @@ PTR LOCK: ${plStatus}
         if (this.isDriving && this._vehicle && this._vehicle.type === 'helicopter') {
             // "Vista de Morro": Positioned exactly on the nose glass surface for panoramic view
             // Based on visuals, the tail is at +Z, so the nose is at -Z.
-            const noseOffset = new THREE.Vector3(0, 1.5, -5.5); // Negative Z is Forward
+            const noseOffset = new THREE.Vector3(0, 0, -5); // Negative Z is Forward
             noseOffset.applyQuaternion(this.vehicle.mesh.quaternion);
 
             this.camera.position.copy(this.vehicle.mesh.position).add(noseOffset);
@@ -1588,28 +1588,28 @@ PTR LOCK: ${plStatus}
         // Clear old blips
         radarBlips.innerHTML = '';
 
-        const maxRange = 300.0; 
+        const maxRange = 300.0;
         const myPos = new THREE.Vector3();
         this.mesh.getWorldPosition(myPos);
         const vMesh = this.vehicle ? this.vehicle.mesh : null;
 
         // --- UPDATE HEADING & COMPASS ---
         let headingDeg = THREE.MathUtils.radToDeg(-this.yaw);
-        headingDeg = (headingDeg % 360 + 360) % 360; 
-        
+        headingDeg = (headingDeg % 360 + 360) % 360;
+
         if (compassRing) compassRing.style.transform = `rotate(${-headingDeg}deg)`;
 
         // --- UPDATE ALTIMETER ---
         const altitude = Math.max(0, Math.floor(myPos.y));
         if (altReadout) altReadout.innerText = altitude + 'm';
-        if (altTape) altTape.style.transform = `translateY(${altitude % 100}px)`; 
+        if (altTape) altTape.style.transform = `translateY(${altitude % 100}px)`;
 
         // --- UPDATE ATTITUDE INDICATOR ---
         if (vMesh && attitudePitch) {
             const euler = new THREE.Euler().setFromQuaternion(vMesh.quaternion, 'YXZ');
             const pitchDeg = THREE.MathUtils.radToDeg(euler.x);
             const rollDeg = THREE.MathUtils.radToDeg(euler.z);
-            const pitchOffset = pitchDeg * 2.0; 
+            const pitchOffset = pitchDeg * 2.0;
             attitudePitch.style.transform = `rotate(${-rollDeg}deg) translateY(${pitchOffset}px)`;
         }
 
@@ -1618,20 +1618,20 @@ PTR LOCK: ${plStatus}
             const dz = pos.z - myPos.z;
             const dist2D = Math.sqrt(dx * dx + dz * dz);
             const dist3D = pos.distanceTo(myPos);
-            
+
             if (dist2D > maxRange) return;
 
             const localPos = new THREE.Vector3(dx, 0, dz);
             localPos.applyAxisAngle(new THREE.Vector3(0, 1, 0), -this.yaw);
-            
-            const px = 50 + (localPos.x / maxRange) * 50; 
-            const py = 50 + (localPos.z / maxRange) * 50; 
+
+            const px = 50 + (localPos.x / maxRange) * 50;
+            const py = 50 + (localPos.z / maxRange) * 50;
 
             const blip = document.createElement('div');
             blip.className = 'radar-blip ' + typeClass;
             blip.style.left = `${px}%`;
             blip.style.top = `${py}%`;
-            
+
             blip.innerHTML = `
                 <div class="blip-icon">${iconText}</div>
                 <div class="blip-dist">${Math.floor(dist3D)}m</div>
@@ -1643,13 +1643,13 @@ PTR LOCK: ${plStatus}
         if (this.world && this.world.vehicleManager) {
             this.world.vehicleManager.vehicles.forEach(v => {
                 if (v === this.vehicle || v.isCrushed) return;
-                
+
                 if (v.type === 'tank') {
                     addBlip(v.mesh.position, 'tank', '▅▇'); // Retro tank icon
                 } else if (v.type === 'helicopter') {
-                    addBlip(v.mesh.position, 'tank', '🚁'); 
+                    addBlip(v.mesh.position, 'tank', '🚁');
                 } else {
-                    addBlip(v.mesh.position, 'car', '■'); 
+                    addBlip(v.mesh.position, 'car', '■');
                 }
             });
         }
