@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Inspector 3D para IA</title>
+    <style>
+        body { margin: 0; display: flex; height: 100vh; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #1e1e1e; color: #d4d4d4; }
+        .panel { padding: 15px; box-sizing: border-box; overflow-y: auto; }
+        #left-panel { width: 25%; border-right: 1px solid #333; background-color: #252526; }
+        #center-panel { width: 50%; position: relative; }
+        #right-panel { width: 25%; border-left: 1px solid #333; background-color: #252526; display: flex; flex-direction: column; }
+        
+        h2 { font-size: 1.1rem; border-bottom: 1px solid #444; padding-bottom: 5px; margin-top: 0; color: #fff; }
+        input[type="file"] { width: 100%; margin-bottom: 15px; background: #333; color: white; border: 1px solid #555; padding: 5px; }
+        
+        /* Tree View */
+        ul { list-style-type: none; padding-left: 15px; margin: 5px 0; }
+        li { margin: 3px 0; font-size: 0.9rem; }
+        .node-name { cursor: pointer; padding: 2px 5px; border-radius: 3px; display: inline-block; }
+        .node-name:hover { background-color: #2a2d2e; }
+        .type-mesh { color: #4EC9B0; } /* Verde para mallas */
+        .type-bone { color: #DCDCAA; } /* Amarillo para huesos */
+        .type-group { color: #569CD6; } /* Azul para grupos/nodos */
+
+        /* Canvas */
+        canvas { display: block; width: 100%; height: 100%; outline: none; }
+        
+        /* Textarea IA */
+        textarea { flex-grow: 1; width: 100%; background: #1e1e1e; color: #9CDCFE; border: 1px solid #333; padding: 10px; font-family: 'Consolas', monospace; resize: none; font-size: 0.85rem;}
+    </style>
+</head>
+<body>
+
+    <div id="left-panel" class="panel">
+        <h2>Cargar Modelo</h2>
+        <input type="file" id="file-input" accept=".glb,.gltf">
+        <h2>Jerarquía Visual</h2>
+        <div id="tree-container" style="font-family: 'Consolas', monospace;">Selecciona un modelo (.glb) para ver su estructura aquí...</div>
+    </div>
+
+    <div id="center-panel">
+        <!-- ThreeJS Canvas -->
+    </div>
+
+    <div id="right-panel" class="panel">
+        <h2>Datos para la IA</h2>
+        <p style="font-size: 0.8rem; color: #aaa; margin-top: 0;">Copia o pide a la IA que lea este texto para analizar la anatomía y rigging de tu modelo.</p>
+        <textarea id="ai-output" readonly></textarea>
+    </div>
+
+    <!-- Scripts: Usamos jsdelivr porque unpkg parece estar bloqueado en tu red -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+
+    <script>
+        let scene, camera, renderer, controls;
+        let currentModel = null;
+        let aiDataArray = [];
+        let mixamoArmature = null;
+
+        init();
+        animate();
+
+        function init() {
+            const container = document.getElementById('center-panel');
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x2d2d30);
+
+            camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
+            camera.position.set(0, 1.5, 3);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer.outputEncoding = THREE.sRGBEncoding;
+            container.appendChild(renderer.domElement);
+
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.target.set(0, 1, 0);
+            controls.update();
+
+            const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444);
+            hemiLight.position.set(0, 20, 0);
+            scene.add(hemiLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(0, 20, 10);
+            scene.add(dirLight);
+
+            const gridHelper = new THREE.GridHelper(10, 10, 0x888888, 0x444444);
+            scene.add(gridHelper);
+
+            window.addEventListener('resize', onWindowResize);
+            document.getElementById('file-input').addEventListener('change', handleFileUpload);
+        }
+
+        function onWindowResize() {
+            const container = document.getElementById('center-panel');
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        }
+
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const url = URL.createObjectURL(file);
+            const loader = new THREE.GLTFLoader();
+
+            loader.load(url, (gltf) => {
+                if (currentModel) {
+                    scene.remove(currentModel);
+                }
+
+                currentModel = gltf.scene;
+                scene.add(currentModel);
+
+                // Resetear datos
+                aiDataArray = [];
+                
+                // Construir la estructura recursiva
+                const treeHtml = buildTree(currentModel, 0, null);
+                
+                document.getElementById('tree-container').innerHTML = `<ul>${treeHtml}</ul>`;
+                
+                // Generar un formato amigable para la IA
+                let aiText = `=== Análisis del Modelo: ${file.name} ===\n\n`;
+                aiText += `Esta es la jerarquía completa de nodos extraída del modelo. Cada sangría representa un nivel de profundidad (hijo de la línea superior).\n\n`;
+                
+                aiDataArray.forEach(node => {
+                    const indent = "  ".repeat(node.depth);
+                    aiText += `${indent}- [${node.type}] ${node.name}\n`;
+                });
+
+                document.getElementById('ai-output').value = aiText;
+
+            }, undefined, (error) => {
+                console.error(error);
+                alert("Hubo un error cargando el modelo 3D.");
+            });
+        }
+
+        function buildTree(node, depth, parentName) {
+            let html = '';
+            
+            // Determinar tipo
+            let type = "Group";
+            if (node.isBone) type = "Bone";
+            else if (node.isMesh || node.isSkinnedMesh) type = "Mesh";
+            else if (node.type === "Object3D") type = "Obj3D";
+
+            // Guardar para la IA
+            aiDataArray.push({
+                name: node.name || "SinNombre",
+                type: type,
+                depth: depth,
+                parent: parentName
+            });
+
+            // Clases para colorear en la interfaz
+            let typeClass = "type-group";
+            if (type === "Bone") typeClass = "type-bone";
+            else if (type === "Mesh") typeClass = "type-mesh";
+
+            html += `<li>
+                <span class="node-name ${typeClass}">
+                    [${type}] ${node.name || "SinNombre"}
+                </span>
+            `;
+
+            if (node.children && node.children.length > 0) {
+                html += `<ul>`;
+                for (let child of node.children) {
+                    html += buildTree(child, depth + 1, node.name || "SinNombre");
+                }
+                html += `</ul>`;
+            }
+
+            html += `</li>`;
+            return html;
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>

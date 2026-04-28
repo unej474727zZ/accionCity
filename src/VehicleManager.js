@@ -17,7 +17,7 @@ export class VehicleManager {
                 turnSpeed: 2.0,
                 scale: 0.9,
                 // Balanced seat position for the un-folded pose
-                seatOffset: new THREE.Vector3(0, 0, -0.1)
+                seatOffset: new THREE.Vector3(0, 0, -0.2)
             },
             tank: {
                 speed: 15.0, // Fixed: Missing speed was causing NaN in audio logic
@@ -209,7 +209,7 @@ export class VehicleManager {
                 // 1. DETECCIÓN POR NOMBRES ESPECÍFICOS (Visto en el Inspector)
                 // Rotor Principal: Buscamos 'cylinder_10' o 'Object_38'
                 const isMainRotorNode = n.includes('cylinder_10') || n.includes('object_38');
-                
+
                 // Rotor de Cola: Buscamos 'object_47' o el nodo que lo contiene
                 const isTailRotorNode = n.includes('object_47');
 
@@ -559,7 +559,14 @@ export class VehicleManager {
                 v.velocity = THREE.MathUtils.lerp(v.velocity, 0, dt * 5); // Friction
             }
 
-            // Wheel spin disabled at user request for model stability
+            // Rotate wheels
+            if (v.wheels && v.wheels.length > 0) {
+                // Determine rotation based on velocity and average wheel radius (e.g. 0.35m)
+                const wheelRotation = (v.velocity * dt) / 0.35;
+                v.wheels.forEach(wheel => {
+                    wheel.rotation.x += wheelRotation;
+                });
+            }
 
             // Engine Sound Transition & Modulation
             v.soundTimer += dt;
@@ -586,10 +593,10 @@ export class VehicleManager {
                 if (maxSpeed > 0) {
                     pitch = 1.0 + (speedMagnitude / maxSpeed) * 1.5;
                 }
-                
+
                 // SAFETY: AudioParam requires a finite number
                 if (!isFinite(pitch)) pitch = 1.0;
-                
+
                 activeSound.setPlaybackRate(pitch);
             }
 
@@ -599,12 +606,12 @@ export class VehicleManager {
             // Tanks can turn in place (Neutral Steering)
             const isTank = v.type === 'tank';
             let isHeli = v.type === 'helicopter';
-            const minimumVelocityToTurn = (isTank || isHeli) ? -100 : 0.1; 
+            const minimumVelocityToTurn = (isTank || isHeli) ? -100 : 0.1;
 
             if (Math.abs(v.velocity) > minimumVelocityToTurn) {
                 // For neutral steering, if v.velocity is 0, we treat it as 1.0 for directionality
                 const directionality = ((isTank || isHeli) && Math.abs(v.velocity) < 0.1) ? 1.0 : Math.sign(v.velocity);
-                
+
                 if (isHeli) {
                     // MOUSE CONTROLLED HELICOPTER:
                     // The camera freely rotates via mouse, and the helicopter body catches up.
@@ -632,7 +639,7 @@ export class VehicleManager {
                     let turn = input.x * cfg.turnSpeed * dt * directionality;
                     v.mesh.rotation.y -= turn;
                 }
-                
+
                 // Camera Follow: For land vehicles only (Heli camera is independent and leads the way)
                 if (!isHeli && this.characterController) {
                     const actualTurn = input.x * cfg.turnSpeed * dt * directionality;
@@ -760,7 +767,7 @@ export class VehicleManager {
                 let minH = (v.halfHeight || 0) + 0.1;
                 if (this.characterController && this.characterController.colliders) {
                     const downRay = new THREE.Raycaster(
-                        v.mesh.position.clone().add(new THREE.Vector3(0, 1.0, 0)), 
+                        v.mesh.position.clone().add(new THREE.Vector3(0, 1.0, 0)),
                         new THREE.Vector3(0, -1, 0)
                     );
                     const downHits = downRay.intersectObjects(this.characterController.colliders, true);
@@ -777,7 +784,7 @@ export class VehicleManager {
                 if (keys.descend) {
                     v.mesh.position.y -= cfg.liftSpeed * dt;
                 }
-                
+
                 // Prevent falling through roofs/floor
                 if (v.mesh.position.y < minH) v.mesh.position.y = minH;
 
@@ -790,48 +797,48 @@ export class VehicleManager {
                 if (input.y !== 0) {
                     targetPitch += (input.y > 0) ? -Math.PI / 8 : Math.PI / 8;
                 }
-                
+
                 // Clamp pitch so it doesn't flip over completely
                 targetPitch = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, targetPitch));
-                
+
                 // Roll: Dynamic banking based on angular velocity (The faster we turn, the more we lean)
                 // This creates the "Grace and Elegance" requested by the user.
-                const bankingFactor = 0.25; 
+                const bankingFactor = 0.25;
                 targetRoll = (v.angularVelocity || 0) * bankingFactor;
 
                 // HELICOPTER STABILIZATION: Force Euler order to keep axes independent
-                v.mesh.rotation.order = 'YXZ'; 
+                v.mesh.rotation.order = 'YXZ';
 
                 // Smoothly animate the transitions (Increased lerp speeds for responsive grace)
                 v.mesh.rotation.x = THREE.MathUtils.lerp(v.mesh.rotation.x, targetPitch, dt * 5.0);
                 v.mesh.rotation.z = THREE.MathUtils.lerp(v.mesh.rotation.z, targetRoll, dt * 5.0);
 
-            // 1.8 HELICOPTER ROTOR ANIMATION
-            if (v.type === 'helicopter') {
-                // Acelerar si alguien está pilotando, frenar si no
-                const isPiloted = (this.currentVehicle === v);
-                const accelSpeed = isPiloted ? 0.3 : 0.15; // Más rápido al arrancar que al frenar
-                v.rotorAccel = THREE.MathUtils.lerp(v.rotorAccel || 0, isPiloted ? 1.0 : 0, dt * accelSpeed);
+                // 1.8 HELICOPTER ROTOR ANIMATION
+                if (v.type === 'helicopter') {
+                    // Acelerar si alguien está pilotando, frenar si no
+                    const isPiloted = (this.currentVehicle === v);
+                    const accelSpeed = isPiloted ? 0.3 : 0.15; // Más rápido al arrancar que al frenar
+                    v.rotorAccel = THREE.MathUtils.lerp(v.rotorAccel || 0, isPiloted ? 1.0 : 0, dt * accelSpeed);
 
-                if (v.rotorAccel > 0.01) {
-                    const rotorSpeed = 60.0 * v.rotorAccel; 
-                    const dt_scaled = dt * rotorSpeed;
+                    if (v.rotorAccel > 0.01) {
+                        const rotorSpeed = 60.0 * v.rotorAccel;
+                        const dt_scaled = dt * rotorSpeed;
 
-                    if (v.rotors) {
-                        v.rotors.forEach(rotor => {
-                            // En modelos de Sketchfab/Babylon, el eje de rotación suele ser el local Y o Z
-                            // Si 'cylinder_10' es el padre, rotamos sobre su eje vertical
-                            rotor.rotation.y += dt_scaled;
-                        });
-                    }
-                    if (v.tailRotors) {
-                        v.tailRotors.forEach(rotor => {
-                            // Las hélices de cola suelen rotar sobre el eje X o Z local
-                            rotor.rotation.x += dt_scaled;
-                        });
+                        if (v.rotors) {
+                            v.rotors.forEach(rotor => {
+                                // En modelos de Sketchfab/Babylon, el eje de rotación suele ser el local Y o Z
+                                // Si 'cylinder_10' es el padre, rotamos sobre su eje vertical
+                                rotor.rotation.y += dt_scaled;
+                            });
+                        }
+                        if (v.tailRotors) {
+                            v.tailRotors.forEach(rotor => {
+                                // Las hélices de cola suelen rotar sobre el eje X o Z local
+                                rotor.rotation.x += dt_scaled;
+                            });
+                        }
                     }
                 }
-            }
             }
 
             // 2. GRAVITY & GROUND SNAPPING
@@ -863,7 +870,7 @@ export class VehicleManager {
             const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(v.mesh.quaternion);
             const moveDir = forward.clone();
             if (v.velocity < 0) moveDir.negate(); // Check backward if reversing
-            
+
             // Helicopters don't strafe with keys, so moveDir is always forward/back
 
             // Calculate side offsets for whiskers

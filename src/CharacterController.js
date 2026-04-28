@@ -278,7 +278,7 @@ export class CharacterController {
                 // NippleJS vector: UP is positive Y, RIGHT is positive X
                 const vx = isFinite(data.vector.x) ? data.vector.x : 0;
                 const vy = isFinite(data.vector.y) ? data.vector.y : 0;
-                
+
                 this.keys.forward = vy > threshold;
                 this.keys.backward = vy < -threshold;
                 // Changed from Right/Left strafing to Turn Right/Left
@@ -816,13 +816,13 @@ export class CharacterController {
         if (!isFinite(this.aimPitch)) this.aimPitch = this.pitch;
 
         if (!isFinite(this.mesh.position.x) || !isFinite(this.mesh.position.y) || !isFinite(this.mesh.position.z)) {
-             console.warn("[CharacterController] Position was NaN, rescuing.");
-             // Try to find current vehicle or fallback to origin
-             if (this.isDriving && this.vehicle && this.vehicle.mesh) {
-                 this.mesh.position.set(0, 0, 0); // Local pos is 0 when child of vehicle
-             } else {
-                 this.mesh.position.set(0, 5, 0);
-             }
+            console.warn("[CharacterController] Position was NaN, rescuing.");
+            // Try to find current vehicle or fallback to origin
+            if (this.isDriving && this.vehicle && this.vehicle.mesh) {
+                this.mesh.position.set(0, 0, 0); // Local pos is 0 when child of vehicle
+            } else {
+                this.mesh.position.set(0, 5, 0);
+            }
         }
 
         // 1. CLEAR PREVIOUS INPUT STATE
@@ -1291,11 +1291,17 @@ export class CharacterController {
 
         // 5. Update Animation / View
         if (this.mixer) {
-            this.mixer.update(dt);
+            if (!(this.isDriving && this.vehicle && this.vehicle.type === 'motorcycle')) {
+                this.mixer.update(dt);
+            }
         }
         if (this.isDriving && this.vehicle) {
             // Character is parented now, just keep it hidden
             this.mesh.visible = (this.vehicle.type === 'motorcycle'); // Show on motorcycle, hide on tank/heli
+
+            if (this.vehicle.type === 'motorcycle') {
+                this.updateDrivingPose();
+            }
         }
         // Camera update is handled by World.js after the vehicle moves to prevent shuddering
 
@@ -1354,7 +1360,7 @@ PTR LOCK: ${plStatus}
 
             if (vehicle.type === 'tank' || vehicle.type === 'helicopter') {
                 this.mesh.visible = false;
-                
+
                 if (vehicle.type === 'tank') {
                     // Sincronización a prueba de fallos:
                     // En lugar de calcular atan2 que puede fallar si los vectores son NaN,
@@ -1362,11 +1368,11 @@ PTR LOCK: ${plStatus}
                     let vehicleYaw = 0;
                     if (vehicle.mesh && isFinite(vehicle.mesh.rotation.y)) {
                         // Convertir la rotación del tanque (basada en el eje X original) a la orientación de la cámara
-                        vehicleYaw = vehicle.mesh.rotation.y + (Math.PI / 2); 
+                        vehicleYaw = vehicle.mesh.rotation.y + (Math.PI / 2);
                     }
-                    
+
                     if (!isFinite(vehicleYaw)) vehicleYaw = 0;
-                    
+
                     this.yaw = vehicleYaw;
                     this.aimYaw = vehicleYaw;
                     this.pitch = 0;
@@ -1375,17 +1381,22 @@ PTR LOCK: ${plStatus}
             } else {
                 this.mesh.visible = true;
             }
-            this.mesh.quaternion.set(0, 0, 0, 1);
+
+            if (vehicle.type === 'motorcycle') {
+                this.mesh.quaternion.set(0, 0, 0, 1);
+            } else {
+                this.mesh.quaternion.set(0, 0, 0, 1);
+            }
         } else {
             // Unparent FIRST before setting world position
             if (this.world && this.world.scene) {
                 this.world.scene.add(this.mesh);
             }
-            
+
             if (exitPos) {
                 this.mesh.position.copy(exitPos);
             }
-            
+
             this.mesh.visible = true;
 
             // Also sync aim for other vehicles when exiting
@@ -1422,6 +1433,9 @@ PTR LOCK: ${plStatus}
     updateDrivingPose() {
         if (!this.isDriving || !this.mesh) return;
 
+        // Redundant rotation removed to prevent conflict with line 1464
+
+
         // Procedural Bone Adjustment (IK-ish)
         const bones = {};
         this.mesh.traverse(child => {
@@ -1440,34 +1454,63 @@ PTR LOCK: ${plStatus}
                 if (name.endsWith('LeftLeg')) bones.lShin = child;
                 if (name.endsWith('Spine')) bones.spine = child;
                 if (name.endsWith('Neck')) bones.neck = child;
+                if (name.endsWith('Hips')) bones.hips = child;
             }
         });
         this._loggedBones = true;
 
+        if (this.vehicle && this.vehicle.type === 'motorcycle') {
+            // Rotalo: Math.PI aligns his back to camera and face to handlebars
+            this.mesh.rotation.y = 0;
+
+            // Force position every frame to override any unintended offsets
+            const cfg = this.world?.vehicleManager?.settings?.motorcycle;
+            if (cfg && cfg.seatOffset) {
+                this.mesh.position.copy(cfg.seatOffset);
+            }
+
+            if (Math.random() < 0.01) { // Log occasionally to prove it's running
+                const worldPos = new THREE.Vector3();
+                this.mesh.getWorldPosition(worldPos);
+                console.log("🏍️ Rider Local:", this.mesh.position.z.toFixed(2), "World Z:", worldPos.z.toFixed(2));
+            }
+        }
+
+        const applyRel = (bone, pitch, yaw, roll) => {
+            if (!bone) return;
+            if (!bone.userData) bone.userData = {};
+            // Dynamically capture rest pose to survive Hot Reloads!
+            if (!bone.userData.restQuaternion) {
+                bone.userData.restQuaternion = bone.quaternion.clone();
+            }
+            const q = bone.userData.restQuaternion.clone();
+            if (pitch) q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), pitch));
+            if (yaw) q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw));
+            if (roll) q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), roll));
+            bone.quaternion.copy(q);
+        };
+
         // 1. Hands to Model (Handlebars)
-        // User told us: X=-1.5 (arms down), Z=1.5 (arms inward). 
-        // Forearms need to bend so they aren't straight like a zombie. Mixamo elbows usually bend on X or Z.
-        if (bones.rArm) bones.rArm.rotation.set(-1.2, 0, 0);
-        if (bones.lArm) bones.lArm.rotation.set(-1.2, 0, 0);
+        applyRel(bones.rArm, 1.2, 0, 0.05);
+        applyRel(bones.lArm, 1.2, 0, -0.05);
 
-        // Bend elbows inward and up
-        if (bones.rForeArm) bones.rForeArm.rotation.set(0, 0, 0);
-        if (bones.lForeArm) bones.lForeArm.rotation.set(0, 0, 0);
+        // Bend elbows inward
+        applyRel(bones.rForeArm, -0.7, 0, 0);
+        applyRel(bones.lForeArm, -0.7, 0, 0);
 
-        // 2. Torso Lean (Extreme Racing Tuck)
-        if (bones.spine) bones.spine.rotation.set(0.5, 0, 0);
+        // 2. Torso Lean (Racing Tuck)
+        applyRel(bones.spine, 0.7, 0, 0);
 
         // 3. Lower Body (Tucked Legs)
-        // If we have the driving animation, we might not need this, but we keep it to ensure they sit.
-        if (bones.rThigh) bones.rThigh.rotation.set(2.2, 0.2, 0.3);
-        if (bones.lThigh) bones.lThigh.rotation.set(2.2, -0.2, -0.3);
+        applyRel(bones.rThigh, 1.4, 0, -0.2);
+        applyRel(bones.lThigh, 1.4, 0, 0.2);
 
-        // Bend knees back
-        if (bones.rShin) bones.rShin.rotation.set(-1.8, 0, 3.22);
-        if (bones.lShin) bones.lShin.rotation.set(-1.8, 0, 3.22);
+        // Bend knees back onto footpegs
+        applyRel(bones.rShin, -2.0, 0, 0);
+        applyRel(bones.lShin, -2.0, 0, 0);
 
         // 4. Head Position
-        if (bones.neck) bones.neck.rotation.set(0, 0, 0);
+        applyRel(bones.neck, -0.4, 0, 0);
 
         // FORCE MATRIX UPDATES AFTER OVERRIDE
         this.mesh.traverse(child => {
