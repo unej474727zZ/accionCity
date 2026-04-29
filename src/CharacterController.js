@@ -181,8 +181,8 @@ export class CharacterController {
             // No animations (mixer stays null)
         }
 
-        // User requested: "Spawn near the tank"
-        this.mesh.position.set(-295, 5, 5);
+        // User requested: "Spawn near the motorcycle"
+        this.mesh.position.set(-298, 0.5, -40);
         this.yaw = 0;
         console.log("Spawned at Cluster:", this.mesh.position);
 
@@ -1492,14 +1492,14 @@ PTR LOCK: ${plStatus}
 
         // 1. Hands to Model (Handlebars)
         applyRel(bones.rArm, 1.2, 0, 0.05);
-        applyRel(bones.lArm, 1.2, 0, 1.2);
+        applyRel(bones.lArm, 0.2, 0, -1.4);      //applyRel(bones.lArm, 1.2, 0, 1.2);-1.6, -1.3, 0
 
         // Bend elbows inward
         applyRel(bones.rForeArm, -1, 1, 0);
-        applyRel(bones.lForeArm, -1, -1, 0);
+        applyRel(bones.lForeArm, 0, -0.5, 0);           //applyRel(bones.lForeArm, -1, -1, 1);0, -1, 0
 
         // 2. Torso Lean (Racing Tuck)
-        applyRel(bones.spine, 0.7, 0, 0);
+        applyRel(bones.spine, 1, 0, 0);
 
         // 3. Lower Body (Tucked Legs)
         applyRel(bones.rThigh, 1.4, 0, -0.2);
