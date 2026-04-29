@@ -838,8 +838,9 @@ export class CharacterController {
         const keyLookSpeed = (this.isRunning ? 3.5 : 2.0) * dt;
 
         // Direcciones unificadas con el ratón:
-        if (this.keys.lookLeft) this.yaw += keyLookSpeed; // Left Arrow -> Turn Left (CCW)
-        if (this.keys.lookRight) this.yaw -= keyLookSpeed; // Right Arrow -> Turn Right (CW)
+        const lookDir = this.isDriving ? -1 : 1;
+        if (this.keys.lookLeft) this.yaw += keyLookSpeed * lookDir; 
+        if (this.keys.lookRight) this.yaw -= keyLookSpeed * lookDir; 
         if (this.keys.lookUp) this.pitch += keyLookSpeed;
         if (this.keys.lookDown) this.pitch -= keyLookSpeed;
 
@@ -1491,12 +1492,12 @@ PTR LOCK: ${plStatus}
         };
 
         // 1. Hands to Model (Handlebars)
-        applyRel(bones.rArm, 1.2, 0, 0.05);
-        applyRel(bones.lArm, 0.2, 0, -1.4);      //applyRel(bones.lArm, 1.2, 0, 1.2);-1.6, -1.3, 0
+        applyRel(bones.rArm, 0, 0, -1.4);
+        applyRel(bones.lArm, 0.2, 0, 1.4);      //applyRel(bones.lArm, 1.2, 0, 1.2);-1.6, -1.3, 0
 
         // Bend elbows inward
-        applyRel(bones.rForeArm, -1, 1, 0);
-        applyRel(bones.lForeArm, 0, -0.5, 0);           //applyRel(bones.lForeArm, -1, -1, 1);0, -1, 0
+        applyRel(bones.rForeArm, 0, 0.5, 0);
+        applyRel(bones.lForeArm, 0, 0.5, 0);           //applyRel(bones.lForeArm, -1, -1, 1);0, -1, 0
 
         // 2. Torso Lean (Racing Tuck)
         applyRel(bones.spine, 1, 0, 0);

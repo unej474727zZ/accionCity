@@ -172,10 +172,10 @@ export class VehicleManager {
                 dFile = 'helicopterHelice1.mp3';
             } else {
                 sFile = 'motorcycle.mp3';
-                dFile = 'motorcycle1.mp3';
+                dFile = 'motorcicle1.mp3';
             }
 
-            this.audioLoader.load(`/sounds/${sFile}`, (buffer) => {
+            this.audioLoader.load(`/sounds/${sFile}?v=${Date.now()}`, (buffer) => {
                 startupSound.setBuffer(buffer);
                 startupSound.setRefDistance(10);
                 startupSound.setMaxDistance(50);
@@ -183,7 +183,7 @@ export class VehicleManager {
                 startupSound.setVolume(0);
             });
 
-            this.audioLoader.load(`/sounds/${dFile}`, (buffer) => {
+            this.audioLoader.load(`/sounds/${dFile}?v=${Date.now()}`, (buffer) => {
                 driveSound.setBuffer(buffer);
                 driveSound.setRefDistance(10);
                 driveSound.setMaxDistance(50);
@@ -636,13 +636,13 @@ export class VehicleManager {
                     v.mesh.rotation.y += v.angularVelocity * dt;
                 } else {
                     // Standard Snappy Turning for Land Vehicles
-                    let turn = input.x * cfg.turnSpeed * dt * directionality;
+                    let turn = input.x * cfg.turnSpeed * dt;
                     v.mesh.rotation.y -= turn;
                 }
 
                 // Camera Follow: For land vehicles only (Heli camera is independent and leads the way)
                 if (!isHeli && this.characterController) {
-                    const actualTurn = input.x * cfg.turnSpeed * dt * directionality;
+                    const actualTurn = input.x * cfg.turnSpeed * dt;
                     this.characterController.yaw -= actualTurn;
                     this.characterController.aimYaw -= actualTurn;
                 }
