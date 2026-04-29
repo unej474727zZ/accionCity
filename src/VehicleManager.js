@@ -13,11 +13,11 @@ export class VehicleManager {
         // Vehicle Settings
         this.settings = {
             motorcycle: {
-                speed: 20.0,
+                speed: 25,
                 turnSpeed: 2.0,
                 scale: 0.9,
                 // Balanced seat position for the un-folded pose
-                seatOffset: new THREE.Vector3(0, 0, -0.2)
+                seatOffset: new THREE.Vector3(0, 0, 0)
             },
             tank: {
                 speed: 15.0, // Fixed: Missing speed was causing NaN in audio logic

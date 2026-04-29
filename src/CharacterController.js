@@ -1492,11 +1492,11 @@ PTR LOCK: ${plStatus}
 
         // 1. Hands to Model (Handlebars)
         applyRel(bones.rArm, 1.2, 0, 0.05);
-        applyRel(bones.lArm, 1.2, 0, -0.05);
+        applyRel(bones.lArm, 1.2, 0, 1.2);
 
         // Bend elbows inward
-        applyRel(bones.rForeArm, -0.7, 0, 0);
-        applyRel(bones.lForeArm, -0.7, 0, 0);
+        applyRel(bones.rForeArm, -1, 1, 0);
+        applyRel(bones.lForeArm, -1, -1, 0);
 
         // 2. Torso Lean (Racing Tuck)
         applyRel(bones.spine, 0.7, 0, 0);
@@ -1506,8 +1506,8 @@ PTR LOCK: ${plStatus}
         applyRel(bones.lThigh, 1.4, 0, 0.2);
 
         // Bend knees back onto footpegs
-        applyRel(bones.rShin, -2.0, 0, 0);
-        applyRel(bones.lShin, -2.0, 0, 0);
+        applyRel(bones.rShin, -1.7, -0.6, 0);
+        applyRel(bones.lShin, -1.7, 0.6, 0);
 
         // 4. Head Position
         applyRel(bones.neck, -0.4, 0, 0);
