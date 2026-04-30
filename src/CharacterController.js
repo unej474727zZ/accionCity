@@ -839,8 +839,8 @@ export class CharacterController {
 
         // Direcciones unificadas con el ratón:
         const lookDir = this.isDriving ? -1 : 1;
-        if (this.keys.lookLeft) this.yaw += keyLookSpeed * lookDir; 
-        if (this.keys.lookRight) this.yaw -= keyLookSpeed * lookDir; 
+        if (this.keys.lookLeft) this.yaw += keyLookSpeed * lookDir;
+        if (this.keys.lookRight) this.yaw -= keyLookSpeed * lookDir;
         if (this.keys.lookUp) this.pitch += keyLookSpeed;
         if (this.keys.lookDown) this.pitch -= keyLookSpeed;
 
@@ -1492,8 +1492,8 @@ PTR LOCK: ${plStatus}
         };
 
         // 1. Hands to Model (Handlebars)
-        applyRel(bones.rArm, 0, 0, -1.4);
-        applyRel(bones.lArm, 0.2, 0, 1.4);      //applyRel(bones.lArm, 1.2, 0, 1.2);-1.6, -1.3, 0
+        applyRel(bones.rArm, 0, 0.5, -1.4);
+        applyRel(bones.lArm, 0.2, -0.5, 1.4);      //applyRel(bones.lArm, 1.2, 0, 1.2); -1.6, -1.3, 0; 0.2, 0, 1.4
 
         // Bend elbows inward
         applyRel(bones.rForeArm, 0, 0.5, 0);

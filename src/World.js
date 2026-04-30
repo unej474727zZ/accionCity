@@ -13,14 +13,14 @@ import { SoundManager } from './SoundManager.js';
 
 // --- CRITICAL AUDIO PATCH (Anti-Crash) ---
 // Prevents browser thread lock when Three.js sends non-finite numbers to Web Audio
-(function() {
+(function () {
     const originalRamp = AudioParam.prototype.linearRampToValueAtTime;
-    AudioParam.prototype.linearRampToValueAtTime = function(value, time) {
+    AudioParam.prototype.linearRampToValueAtTime = function (value, time) {
         if (!isFinite(value) || !isFinite(time)) return this;
         return originalRamp.call(this, value, time);
     };
     const originalSetValue = AudioParam.prototype.setValueAtTime;
-    AudioParam.prototype.setValueAtTime = function(value, time) {
+    AudioParam.prototype.setValueAtTime = function (value, time) {
         if (!isFinite(value) || !isFinite(time)) return this;
         return originalSetValue.call(this, value, time);
     };
@@ -176,16 +176,16 @@ export class World {
             );
             floor.name = "AsphaltFloor";
             floor.rotation.x = -Math.PI / 2;
-            floor.position.y = 0.05;
+            floor.position.y = 0.01;
             this.scene.add(floor);
 
             // TELEPORTATION PADS
             this.transporters = [];
             const transporterPositions = [
-                new THREE.Vector3(150, 0, 150),
-                new THREE.Vector3(-150, 0, 150),
-                new THREE.Vector3(150, 0, -150),
-                new THREE.Vector3(-150, 0, -150)
+                new THREE.Vector3(430, 0, 430),
+                new THREE.Vector3(-430, 0, 430),
+                new THREE.Vector3(430, 0, -430),
+                new THREE.Vector3(-430, 0, -430)
             ];
 
             const tNames = ['transporter', 'transporter1', 'transporter2', 'transporter3'];
@@ -194,13 +194,16 @@ export class World {
                 if (asset) {
                     const pad = asset.scene.clone();
                     pad.position.copy(transporterPositions[i]);
-                    // Auto-align to ground? For now just place at 0.06 (above floor)
+                    // Adjusted scale: clearly visible but logical (avatar 0.5w -> pad ~2.5w)
+                    pad.scale.set(0.1, 0.2, 0.1);
+                    // Ground level (just above floor at 0.05)
                     pad.position.y = 0.06;
                     this.scene.add(pad);
                     this.transporters.push({
                         mesh: pad,
                         pos: pad.position.clone(),
-                        timer: 0
+                        timer: 2,
+                        triggered: false
                     });
                     console.log(`Transporter ${i} placed at ${pad.position.x}, ${pad.position.z}`);
                 }
@@ -210,6 +213,13 @@ export class World {
 
             // Setup Character
             this.character = new CharacterController(this.scene, this.camera, assets, this);
+
+            // Register transporters as colliders so they are solid
+            this.transporters.forEach(t => {
+                t.mesh.traverse(child => {
+                    if (child.isMesh) this.character.colliders.push(child);
+                });
+            });
 
             // ADD CITY TO COLLISIONS!
             this.cityBlocks = [];
@@ -352,7 +362,7 @@ export class World {
             statusEl.style.fontWeight = 'bold';
             statusEl.style.fontSize = '14px';
             statusEl.style.zIndex = '1000';
-            statusEl.style.display = 'none'; 
+            statusEl.style.display = 'none';
             document.body.appendChild(statusEl);
 
             this.networkManager.socket.on('connect', () => {
@@ -400,7 +410,7 @@ export class World {
                         if (text) {
                             this.networkManager.sendChat(text);
                             chatInput.value = '';
-                            chatInput.blur(); 
+                            chatInput.blur();
                         }
                     }
                 });
@@ -456,7 +466,7 @@ export class World {
                 if (this.isDraggingMap && this.minimap && this.minimap.isFullMap) {
                     const dx = e.clientX - this.lastMouseX;
                     const dy = e.clientY - this.lastMouseY;
-                    const sens = this.minimapSpan / 400; 
+                    const sens = this.minimapSpan / 400;
                     this.mapPanningOffset.x -= dx * sens;
                     this.mapPanningOffset.z -= dy * sens;
                     this.lastMouseX = e.clientX;
@@ -474,7 +484,7 @@ export class World {
 
             window.addEventListener('wheel', (e) => {
                 if (!this.minimap) return;
-                const delta = e.deltaY > 0 ? -0.5 : 0.5; 
+                const delta = e.deltaY > 0 ? -0.5 : 0.5;
                 if (this.minimap.isFullMap) {
                     this.updateMinimap3DZoom(delta);
                 } else {
@@ -660,22 +670,31 @@ export class World {
         // Teleportation
         if (this.character && !this.character.isDriving && this.transporters.length > 0) {
             if (this.teleportCooldown > 0) this.teleportCooldown -= dt;
-            else {
-                this.transporters.forEach((t, i) => {
-                    const dist = this.character.mesh.position.distanceTo(t.pos);
-                    if (dist < 2.0) {
+
+            this.transporters.forEach((t, i) => {
+                const dist = this.character.mesh.position.distanceTo(t.pos);
+                if (dist < 0.6) {
+                    if (!t.triggered && this.teleportCooldown <= 0) {
                         t.timer += dt;
                         if (t.timer >= 2.0) {
                             let targetIdx;
                             do { targetIdx = Math.floor(Math.random() * this.transporters.length); } while (targetIdx === i);
                             const target = this.transporters[targetIdx];
+
+                            // Teleport!
                             this.character.mesh.position.copy(target.pos).y += 0.5;
                             this.teleportCooldown = 3.0;
                             t.timer = 0;
+                            t.triggered = true; // Mark source as triggered
+                            target.triggered = true; // Mark target as triggered so it doesn't loop back
                         }
-                    } else t.timer = 0;
-                });
-            }
+                    }
+                } else {
+                    // Reset when leaving the pad
+                    t.timer = 0;
+                    t.triggered = false;
+                }
+            });
         }
 
         // RENDER PASS

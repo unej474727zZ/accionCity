@@ -28,8 +28,14 @@ export class AssetLoader {
       { name: 'driving', url: '/models/driving.glb' },
 
       // Weapons (Corrected Mapping: Key 1 -> Pistol, Key 2 -> Rifle)
-      { name: 'pistol', url: '/models/pistol.glb' }, // Handgun (was showing as Rifle before?)
-      { name: 'rifle', url: '/models/awp.glb' }      // Sniper Rifle (was showing as Pistol before?)
+      { name: 'pistol', url: '/models/pistol.glb' }, // Handgun
+      { name: 'rifle', url: '/models/awp.glb' },      // Sniper Rifle
+
+      // Transporters (Missing!)
+      { name: 'transporter', url: '/models/transporter.glb' },
+      { name: 'transporter1', url: '/models/transporter1.glb' },
+      { name: 'transporter2', url: '/models/transporter2.glb' },
+      { name: 'transporter3', url: '/models/transporter3.glb' }
     ];
   }
 
