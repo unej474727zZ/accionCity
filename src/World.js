@@ -673,7 +673,7 @@ export class World {
 
             this.transporters.forEach((t, i) => {
                 const dist = this.character.mesh.position.distanceTo(t.pos);
-                if (dist < 0.6) {
+                if (dist < 2) {
                     if (!t.triggered && this.teleportCooldown <= 0) {
                         t.timer += dt;
                         if (t.timer >= 2.0) {
