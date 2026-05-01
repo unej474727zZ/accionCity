@@ -644,7 +644,7 @@ export class WeaponManager {
         // Calculate muzzle position using localToWorld to handle Scale/Rotation correctly
         const localMuzzle = this.currentWeaponType === 'pistol' ? 
             new THREE.Vector3(0, 0.1, -0.4) : // Pistol (Z-forward)
-            new THREE.Vector3(6.48, 0.11, 0); // Rifle (X-forward)
+            new THREE.Vector3(0.0259, 0.0004, 0); // Rifle (X-forward) - Corrected for Scale 250
         
         const muzzlePos = this.currentWeaponMesh.localToWorld(localMuzzle.clone());
 
@@ -1084,7 +1084,7 @@ export class WeaponManager {
                 // Calcular punto de inicio usando localToWorld para manejar ESCALA y rotación
                 const localMuzzle = this.currentWeaponType === 'pistol' ? 
                     new THREE.Vector3(0, 0.1, -0.4) : // Pistol
-                    new THREE.Vector3(6.48, 0.11, 0); // Rifle (AWP)
+                    new THREE.Vector3(0.0259, 0.0004, 0); // Rifle (AWP) - Corrected for Scale 250
                 
                 start = this.currentWeaponMesh.localToWorld(localMuzzle.clone());
             }
