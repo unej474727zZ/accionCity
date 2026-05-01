@@ -94,9 +94,9 @@ export class NetworkManager {
         }
     }
 
-    sendHit(position, type) {
+    sendHit(position, type, scale = 1.0) {
         if (this.socket) {
-            this.socket.emit('playerHit', { position, type });
+            this.socket.emit('playerHit', { position, type, scale });
         }
     }
 

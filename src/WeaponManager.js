@@ -691,7 +691,8 @@ export class WeaponManager {
             let type = 'spark';
             if (this.isRemotePlayer(hit.object)) type = 'blood';
 
-            this.createImpact(hit.point, normal, type);
+            const impactScale = this.currentWeaponType === 'rifle' ? 2.5 : 1.0;
+            this.createImpact(hit.point, normal, type, impactScale);
 
             // Damage Vehicles
             const targetVeh = this.characterController.world.vehicleManager.findVehicleByMesh(hit.object);
@@ -702,7 +703,7 @@ export class WeaponManager {
             
             // Network Hit
             if (this.networkManager) {
-                this.networkManager.sendHit(hit.point, type);
+                this.networkManager.sendHit(hit.point, type, impactScale);
             }
         }
 

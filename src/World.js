@@ -397,7 +397,7 @@ export class World {
 
             this.networkManager.onPlayerHit = (data) => {
                 if (this.weaponManager) {
-                    this.weaponManager.createImpact(data.position, data.type);
+                    this.weaponManager.createImpact(data.position, null, data.type, data.scale || 1.0);
                 }
             };
 
