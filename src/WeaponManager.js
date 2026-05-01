@@ -1055,12 +1055,39 @@ export class WeaponManager {
 
         // Update Laser Sight
         if (this.laserActive && this.currentWeaponMesh && this.laserMesh.visible) {
-            // Calcular punto de inicio usando localToWorld para manejar ESCALA y rotación
-            const localMuzzle = this.currentWeaponType === 'pistol' ? 
-                new THREE.Vector3(0, 0.1, -0.4) : // Pistol
-                new THREE.Vector3(6.48, 0.11, 0); // Rifle (AWP)
+            let start;
             
-            const start = this.currentWeaponMesh.localToWorld(localMuzzle.clone());
+            // Check if we are in First Person or Aiming (ADS)
+            const inFirstPerson = (this.characterController && this.characterController.cameraDistance < 0.8);
+            const isAiming = (this.characterController && this.characterController.keys && this.characterController.keys.ads);
+            
+            if (inFirstPerson || isAiming) {
+                // TRICK: In first person or aiming, start the laser from the camera's perspective 
+                // but offset it slightly to the right and down to look like it comes from the gun.
+                // This "tricks the brain" as requested by the user.
+                const camPos = this.camera.position.clone();
+                const camDir = new THREE.Vector3();
+                this.camera.getWorldDirection(camDir);
+                
+                // Get right and up vectors from camera
+                const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
+                const camUp = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion);
+
+                // Offset the start point: slightly right, slightly down, and slightly forward
+                // so the laser doesn't clip with the camera itself.
+                start = camPos.clone()
+                    .add(camRight.multiplyScalar(0.25)) // 25cm to the right
+                    .add(camUp.multiplyScalar(-0.25))   // 25cm down
+                    .add(camDir.multiplyScalar(0.5));    // 50cm forward
+            } else {
+                // Standard Third Person calculation (Hip fire / Holding)
+                // Calcular punto de inicio usando localToWorld para manejar ESCALA y rotación
+                const localMuzzle = this.currentWeaponType === 'pistol' ? 
+                    new THREE.Vector3(0, 0.1, -0.4) : // Pistol
+                    new THREE.Vector3(6.48, 0.11, 0); // Rifle (AWP)
+                
+                start = this.currentWeaponMesh.localToWorld(localMuzzle.clone());
+            }
 
             const raycaster = new THREE.Raycaster();
             const direction = new THREE.Vector3();
