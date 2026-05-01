@@ -161,9 +161,9 @@ export class WeaponManager {
         this.configs = {
             pistol: { // pistol.glb (Handgun)
                 scale: 15.0,
-                position: new THREE.Vector3(0, -0.2, 0.5),
-                // User: "Rotate half a circumference (180)" -> -90 + 180 = +90 (PI/2)
-                rotation: new THREE.Vector3(Math.PI, Math.PI / 2, 0),
+                position: new THREE.Vector3(0.05, -0.2, 0.4),
+                // Eliminamos la inversión de 180° (Math.PI) que la ponía boca abajo
+                rotation: new THREE.Vector3(0, Math.PI / 2, 0),
                 fireRate: 0.25 // Seconds between shots
             },
             rifle: { // awp.glb (Sniper)
@@ -355,17 +355,6 @@ export class WeaponManager {
 
         // Safety: Stop firing if mouse leaves window
         window.addEventListener('blur', () => { this.isFiring = false; });
-
-        // Toggle Laser Sight (R)
-        window.addEventListener('keydown', (e) => {
-            if (e.code === 'KeyR') {
-                this.laserActive = !this.laserActive;
-                this.laserMesh.visible = this.laserActive;
-                // Play sound?
-                if (this.laserActive) console.log("Laser ON");
-                else console.log("Laser OFF");
-            }
-        });
     }
 
     updateDebugDisplay() {
@@ -484,6 +473,11 @@ export class WeaponManager {
         // Show Crosshair
         if (this.crosshairEl) {
             this.crosshairEl.style.display = 'block';
+        }
+
+        // Show Laser if active
+        if (this.laserMesh) {
+            this.laserMesh.visible = this.laserActive;
         }
     }
 
@@ -642,6 +636,88 @@ export class WeaponManager {
     }
 
     shoot() {
+        if (!this.currentWeaponMesh || !this.currentWeaponType) return;
+
+        this.timeSinceLastShot = 0;
+
+        // 1. MUZZLE POSITION
+        // Calculate muzzle position using localToWorld to handle Scale/Rotation correctly
+        const localMuzzle = this.currentWeaponType === 'pistol' ? 
+            new THREE.Vector3(0, 0.1, -0.4) : // Pistol (Z-forward)
+            new THREE.Vector3(6.48, 0.11, 0); // Rifle (X-forward)
+        
+        const muzzlePos = this.currentWeaponMesh.localToWorld(localMuzzle.clone());
+
+        // 2. RAYCAST FROM CAMERA (Hitscan)
+        const camDir = new THREE.Vector3();
+        this.camera.getWorldDirection(camDir);
+        
+        const raycaster = new THREE.Raycaster(this.camera.position, camDir);
+        raycaster.far = 1000;
+
+        // Targets: All meshes except self
+        const targets = [];
+        const currentVehMesh = (this.characterController && this.characterController.vehicle) ? this.characterController.vehicle.mesh : null;
+        
+        this.scene.traverse(c => {
+            if (c.isMesh && !this.isSelf(c) && c.visible) {
+                if (this.isVehiclePart(c, currentVehMesh)) return;
+                targets.push(c);
+            }
+        });
+
+        // Add remote players
+        if (this.remotePlayers) {
+            this.remotePlayers.forEach(p => {
+                const mesh = p.mesh || (p.isMesh ? p : null);
+                if (mesh) mesh.traverse(c => { if (c.isMesh) targets.push(c); });
+            });
+        }
+
+        const hits = raycaster.intersectObjects(targets, false);
+        const targetPoint = hits.length > 0 ? hits[0].point : this.camera.position.clone().add(camDir.multiplyScalar(1000));
+
+        // 3. VISUAL BULLET
+        const bulletDir = targetPoint.clone().sub(muzzlePos).normalize();
+        const bullet = new Bullet(this.scene, muzzlePos, bulletDir, 350.0);
+        this.bullets.push(bullet);
+
+        // 4. IMPACT EFFECTS
+        if (hits.length > 0) {
+            const hit = hits[0];
+            const normal = hit.face ? hit.face.normal.clone().applyQuaternion(hit.object.quaternion) : new THREE.Vector3(0, 1, 0);
+            
+            // Type of impact
+            let type = 'spark';
+            if (this.isRemotePlayer(hit.object)) type = 'blood';
+
+            this.createImpact(hit.point, normal, type);
+
+            // Damage Vehicles
+            const targetVeh = this.characterController.world.vehicleManager.findVehicleByMesh(hit.object);
+            if (targetVeh) {
+                const dmg = this.currentWeaponType === 'rifle' ? 0.2 : 0.05;
+                this.characterController.world.vehicleManager.damageVehicle(targetVeh, dmg);
+            }
+            
+            // Network Hit
+            if (this.networkManager) {
+                this.networkManager.sendHit(hit.point, type);
+            }
+        }
+
+        // 5. MUZZLE FLASH (Light)
+        if (this.flashLight) {
+            this.flashLight.position.copy(muzzlePos);
+            this.flashLight.intensity = 5.0;
+            setTimeout(() => { if (this.flashLight) this.flashLight.intensity = 0; }, 50);
+        }
+
+        // 6. NETWORK SYNC
+        if (this.networkManager) {
+            this.networkManager.sendShoot(muzzlePos, bulletDir, this.currentWeaponType);
+        }
+
         // 7. AUDIO
         if (this.soundManager) {
             this.soundManager.playShoot(this.currentWeaponType);
@@ -920,6 +996,52 @@ export class WeaponManager {
         }
     }
 
+    createExplosion(point, scale = 1.0) {
+        // 1. Core Flash
+        const flashGeom = new THREE.SphereGeometry(2.0 * scale, 16, 16);
+        const flashMat = new THREE.MeshBasicMaterial({ color: 0xffcc00, transparent: true, opacity: 1.0 });
+        const flash = new THREE.Mesh(flashGeom, flashMat);
+        flash.position.copy(point);
+        this.scene.add(flash);
+
+        // 2. Light Pulse
+        const light = new THREE.PointLight(0xffaa00, 50 * scale, 30 * scale);
+        light.position.copy(point);
+        this.scene.add(light);
+
+        // Animate Flash and Light
+        let time = 0;
+        const anim = () => {
+            time += 0.05;
+            flash.scale.multiplyScalar(1.1);
+            flash.material.opacity -= 0.1;
+            light.intensity -= 2.0;
+
+            if (flash.material.opacity > 0) requestAnimationFrame(anim);
+            else {
+                this.scene.remove(flash);
+                this.scene.remove(light);
+                flashGeom.dispose();
+                flashMat.dispose();
+            }
+        };
+        anim();
+
+        // 3. Debris/Sparks
+        this.createImpact(point, new THREE.Vector3(0, 1, 0), 'spark', scale * 2);
+    }
+
+    isRemotePlayer(obj) {
+        if (!obj || !this.remotePlayers) return false;
+        for (const p of this.remotePlayers) {
+            let temp = obj;
+            while (temp) {
+                if (temp === p.mesh || temp === p) return true;
+                temp = temp.parent;
+            }
+        }
+        return false;
+    }
 
     update(dt) {
         this.updateRangeFinder();
@@ -933,9 +1055,12 @@ export class WeaponManager {
 
         // Update Laser Sight
         if (this.laserActive && this.currentWeaponMesh && this.laserMesh.visible) {
-            const start = new THREE.Vector3();
-            this.currentWeaponMesh.getWorldPosition(start);
-            start.y += 0.1;
+            // Calcular punto de inicio usando localToWorld para manejar ESCALA y rotación
+            const localMuzzle = this.currentWeaponType === 'pistol' ? 
+                new THREE.Vector3(0, 0.1, -0.4) : // Pistol
+                new THREE.Vector3(6.48, 0.11, 0); // Rifle (AWP)
+            
+            const start = this.currentWeaponMesh.localToWorld(localMuzzle.clone());
 
             const raycaster = new THREE.Raycaster();
             const direction = new THREE.Vector3();
