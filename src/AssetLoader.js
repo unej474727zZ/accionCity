@@ -35,7 +35,8 @@ export class AssetLoader {
       { name: 'transporter', url: '/models/transporter.glb' },
       { name: 'transporter1', url: '/models/transporter1.glb' },
       { name: 'transporter2', url: '/models/transporter2.glb' },
-      { name: 'transporter3', url: '/models/transporter3.glb' }
+      { name: 'transporter3', url: '/models/transporter3.glb' },
+      { name: 'spiderMech', url: '/models/spiderMech.glb' }
     ];
   }
 

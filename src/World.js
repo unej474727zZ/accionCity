@@ -5,6 +5,7 @@ import { CharacterController } from './CharacterController.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { StereoEffect } from 'three/examples/jsm/effects/StereoEffect.js';
 import { NPCManager } from './NPCManager.js';
+import { SpiderManager } from './SpiderManager.js';
 import { NetworkManager } from './NetworkManager.js';
 import { RemotePlayer } from './RemotePlayer.js';
 import { WeaponManager } from './WeaponManager.js';
@@ -317,6 +318,14 @@ export class World {
             // HELICOPTER SPAWN
             let heliPos = new THREE.Vector3(-300, 0.5, -20);
             this.vehicleManager.spawnVehicle('helicopter', heliPos);
+            
+            // SPIDER MANAGER
+            this.spiderManager = new SpiderManager(this.scene, this.character, assets);
+            // Spawn some spiders at specific city locations
+            this.spiderManager.spawn(new THREE.Vector3(50, 0.5, 50));
+            this.spiderManager.spawn(new THREE.Vector3(-50, 0.5, -50)); 
+            this.spiderManager.spawn(new THREE.Vector3(100, 0.5, -100));
+            this.spiderManager.spawn(new THREE.Vector3(-150, 0.5, 200));
 
             // PASS COLLIDERS
             if (city) this.character.colliders.push(city);
@@ -633,6 +642,7 @@ export class World {
         }
 
         if (this.npcManager) this.npcManager.update(dt);
+        if (this.spiderManager) this.spiderManager.update(dt);
         if (this.weaponManager) {
             this.weaponManager.remotePlayers = Object.values(this.remotePlayers);
             this.weaponManager.update(dt);

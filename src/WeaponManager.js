@@ -715,6 +715,13 @@ export class WeaponManager {
                 const dmg = this.currentWeaponType === 'rifle' ? 0.2 : 0.05;
                 this.characterController.world.vehicleManager.damageVehicle(targetVeh, dmg, hit.object);
             }
+
+            // Damage Spiders
+            const targetSpider = this.findSpiderByMesh(hit.object);
+            if (targetSpider) {
+                const dmg = this.currentWeaponType === 'rifle' ? 50 : 20;
+                this.characterController.world.spiderManager.damage(targetSpider, dmg);
+            }
             
             // Network Hit
             if (this.networkManager) {
@@ -793,6 +800,12 @@ export class WeaponManager {
             const obj = hit.object;
             const targetVeh = this.characterController.world.vehicleManager.findVehicleByMesh(obj);
             if (targetVeh) this.characterController.world.vehicleManager.damageVehicle(targetVeh, 0.1, obj, true);
+
+            // Damage Spiders
+            const targetSpider = this.findSpiderByMesh(obj);
+            if (targetSpider) {
+                this.characterController.world.spiderManager.damage(targetSpider, 35);
+            }
         }
     }
 
@@ -1111,6 +1124,17 @@ export class WeaponManager {
                     }
                 });
             }
+
+            // Push/Damage Spiders
+            if (world.spiderManager && world.spiderManager.spiders) {
+                world.spiderManager.spiders.forEach(spider => {
+                    const dist = spider.mesh.position.distanceTo(point);
+                    if (dist < radius && dist > 0.1) {
+                        const intensity = (1.0 - dist / radius);
+                        world.spiderManager.damage(spider, intensity * 100); // 100 dmg at center
+                    }
+                });
+            }
         }
     }
 
@@ -1124,6 +1148,21 @@ export class WeaponManager {
             }
         }
         return false;
+    }
+
+    findSpiderByMesh(mesh) {
+        if (!mesh || !this.characterController || !this.characterController.world) return null;
+        const spiderManager = this.characterController.world.spiderManager;
+        if (!spiderManager) return null;
+
+        for (const s of spiderManager.spiders) {
+            let temp = mesh;
+            while (temp) {
+                if (temp === s.mesh) return s;
+                temp = temp.parent;
+            }
+        }
+        return null;
     }
 
     update(dt) {
