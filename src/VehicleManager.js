@@ -386,7 +386,7 @@ export class VehicleManager {
         }
     }
 
-    damageVehicle(v, amount = 1, hitMesh = null) {
+    damageVehicle(v, amount = 1, hitMesh = null, isHeli = false) {
         if (!v || v.isCrushed) return;
 
         // PISTOL RESTRICTIONS
@@ -461,7 +461,16 @@ export class VehicleManager {
                 if (v.health <= 0) this.crushNPC(v);
                 else {
                     v.isSmoking = true;
-                    this.flashRed(v);
+                    // Logic for permanent red on NPC tanks
+                    if (isHeli) {
+                        if (amount >= 0.9) v.stayRed = true; // Missile
+                        if (amount === 0.1) {
+                            if (v.heliHits === undefined) v.heliHits = 0;
+                            v.heliHits++;
+                            if (v.heliHits >= 5) v.stayRed = true;
+                        }
+                    }
+                    this.flashRed(v, v.stayRed);
                 }
             } else {
                 // NPC CAR
@@ -490,6 +499,15 @@ export class VehicleManager {
                     }
                     return; // NPC Cars don't explode from random pistol shots to the back
                 } else {
+                    // Logic for permanent red on NPC cars from Heli
+                    if (isHeli) {
+                        if (amount >= 0.9) v.stayRed = true;
+                        if (amount === 0.1) {
+                            if (v.heliHits === undefined) v.heliHits = 0;
+                            v.heliHits++;
+                            if (v.heliHits >= 5) v.stayRed = true;
+                        }
+                    }
                     this.crushNPC(v); // Rifles/Missiles still 1-shot NPC cars
                 }
             }
@@ -502,11 +520,22 @@ export class VehicleManager {
         } else {
             console.log(`[COMBAT] Damage applied to ${v.type}. Health: ${v.health}`);
             v.isSmoking = true;
-            this.flashRed(v.mesh || v);
+            
+            // Logic for permanent red on Managed Vehicles from Heli
+            if (isHeli) {
+                if (amount >= 0.9) v.stayRed = true; // Missile
+                if (amount === 0.1) {
+                    if (v.heliHits === undefined) v.heliHits = 0;
+                    v.heliHits++;
+                    if (v.heliHits >= 5) v.stayRed = true;
+                }
+            }
+
+            this.flashRed(v.mesh || v, v.stayRed);
         }
     }
 
-    flashRed(target) {
+    flashRed(target, stayRed = false) {
         if (!target) return;
         const root = target.isMesh ? target : target.mesh || target;
         if (!root) return;
@@ -526,14 +555,13 @@ export class VehicleManager {
 
                         m.emissive.setHex(0xff0000);
                         
-                        // Clear existing timeout if any? 
-                        // Actually with WeakMap, we can just let multiple timeouts run, 
-                        // they will all revert to the same original color.
-                        setTimeout(() => {
-                            if (m.emissive && this.originalEmissives.has(m)) {
-                                m.emissive.copy(this.originalEmissives.get(m));
-                            }
-                        }, 2000);
+                        if (!stayRed) {
+                            setTimeout(() => {
+                                if (m.emissive && this.originalEmissives.has(m)) {
+                                    m.emissive.copy(this.originalEmissives.get(m));
+                                }
+                            }, 2000);
+                        }
                     }
                 });
             }

@@ -792,7 +792,7 @@ export class WeaponManager {
             // Damage 
             const obj = hit.object;
             const targetVeh = this.characterController.world.vehicleManager.findVehicleByMesh(obj);
-            if (targetVeh) this.characterController.world.vehicleManager.damageVehicle(targetVeh, 0.1, obj);
+            if (targetVeh) this.characterController.world.vehicleManager.damageVehicle(targetVeh, 0.1, obj, true);
         }
     }
 
@@ -882,7 +882,7 @@ export class WeaponManager {
                         if (worldPos.distanceTo(pos) < splashRadius) {
                             const targetVeh = vehManager.findVehicleByMesh(c);
                             if (targetVeh && !affectedVehicles.has(targetVeh) && targetVeh.mesh !== v.mesh) {
-                                vehManager.damageVehicle(targetVeh, 1.0, c);
+                                vehManager.damageVehicle(targetVeh, 1.0, c, true);
                                 affectedVehicles.add(targetVeh);
                             }
                         }
