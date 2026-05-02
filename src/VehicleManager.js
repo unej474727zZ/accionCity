@@ -92,7 +92,7 @@ export class VehicleManager {
                 turretNode = child;
             }
 
-            if (child.isMesh && (name.includes('wheel') || name.includes('tire') || name.includes('roda'))) {
+            if (type !== 'tank' && child.isMesh && (name.includes('wheel') || name.includes('tire') || name.includes('roda'))) {
                 vehicleWheels.push(child);
             }
         });
@@ -147,9 +147,15 @@ export class VehicleManager {
             originalScaleY: model.scale.y,
             health: type === 'tank' ? 2 : 1,
             isSmoking: false,
+            isPunctured: { front: false, back: false },
+            isTippedOver: false,
+            glassHits: 0,
+            isGlassBroken: false,
             halfHeight: model.userData.halfHeight || 0,
             angularVelocity: 0 // For smooth helicopter turns
         };
+        // Use a WeakMap for original emissives to handle shared materials globally
+        if (!this.originalEmissives) this.originalEmissives = new WeakMap();
 
         // Attach Engine Sound Tracker (3D Positional Audio)
         if (this.characterController && this.characterController.world && this.characterController.world.audioListener) {
@@ -380,38 +386,112 @@ export class VehicleManager {
         }
     }
 
-    damageVehicle(v, amount = 1) {
+    damageVehicle(v, amount = 1, hitMesh = null) {
         if (!v || v.isCrushed) return;
 
-        // NPC DETECTION: If v is a THREE object (Group/Mesh) and NOT in our tracked objects with health
+        // PISTOL RESTRICTIONS
+        const isPistol = (amount < 0.1); // Pistol dmg is 0.05
+        
+        // Tanks and Helicopters are IMMUNE to pistol damage to the body
+        if (isPistol && (v.type === 'tank' || v.type === 'helicopter')) {
+            console.log(`🛡️ ${v.type} is immune to pistol damage!`);
+            
+            // SPECIAL CASE: Helicopter Glass
+            if (v.type === 'helicopter' && hitMesh) {
+                const name = hitMesh.name.toLowerCase();
+                const isTransparent = hitMesh.material && (hitMesh.material.transparent || hitMesh.material.opacity < 0.9);
+                
+                if (name.includes('object_8') || name.includes('object_9') || isTransparent) {
+                    if (!v.isGlassBroken) {
+                        v.glassHits++;
+                        console.log(`💎 Heli Glass Hit: ${v.glassHits}/5`);
+                        this.flashRed(hitMesh); // Flash only the glass
+                        if (v.glassHits >= 5) {
+                            v.isGlassBroken = true;
+                            hitMesh.visible = false; 
+                            console.log("💎 CABIN GLASS SHATTERED!");
+                        }
+                    }
+                    return; // Return here to avoid body damage
+                }
+            }
+            
+            // Still flash red on body to show we hit it, but don't take health
+            this.flashRed(v.mesh || v);
+            return; 
+        }
+
+        // SPECIFIC PART DETECTION: MOTORCYCLE
+        if (hitMesh && v.type === 'motorcycle') {
+            const name = hitMesh.name.toLowerCase();
+            
+            // 1. GAS TANK (Instant Explosion)
+            if (name.includes('azul_0')) {
+                console.log("💥 FUEL TANK HIT! KABOOM!");
+                this.crushVehicle(v);
+                return;
+            }
+
+            // 2. WHEELS (Punctures)
+            if (name.includes('tire') || name.includes('negro_0')) {
+                if (name.includes('f_tire')) v.isPunctured.front = true;
+                if (name.includes('b_tire')) v.isPunctured.back = true;
+                console.log("🛞 TIRE PUNCTURED!");
+                this.spawnSmokeParticle(hitMesh.getWorldPosition(new THREE.Vector3()), 0.5);
+            }
+        }
+
+        // 3. TIPPING OVER (If parked)
+        if (!this.currentVehicle || this.currentVehicle !== v) {
+            if (amount > 0.1 && v.type === 'motorcycle' && !v.isTippedOver) {
+                v.isTippedOver = true;
+                console.log("🏍️ Motorcycle tipped over!");
+            }
+        }
+
+        // NPC DETECTION & ENGINE LOGIC
         const isManaged = this.vehicles.find(veh => veh === v);
 
         if (!isManaged) {
-            // It's an NPC car mesh
-            // Check if it's an NPC TANK (needs armor detection)
+            // NPC car or tank
             if (this.isArmor(v)) {
+                if (isPistol) return; // NPC Tanks immune to pistols too
                 if (v.health === undefined) v.health = 2;
                 v.health -= amount;
-                if (v.health <= 0) {
-                    this.crushNPC(v);
-                } else {
-                    console.log(`[COMBAT] NPC Tank damaged. Health: ${v.health}`);
-                    // Trigger PERMANENT smoke for NPC tank
+                if (v.health <= 0) this.crushNPC(v);
+                else {
                     v.isSmoking = true;
-                    // Visual feedback: Permanent Red Emissive while damaged
-                    v.traverse(c => {
-                        if (c.isMesh && c.material) {
-                            const mats = Array.isArray(c.material) ? c.material : [c.material];
-                            mats.forEach(m => {
-                                if (m.emissive) {
-                                    m.emissive.setHex(0xff0000);
-                                }
-                            });
-                        }
-                    });
+                    this.flashRed(v);
                 }
             } else {
-                this.crushNPC(v);
+                // NPC CAR
+                // Check if hit tires
+                if (hitMesh && hitMesh.name.toLowerCase().includes('object_')) {
+                    const n = hitMesh.name.toLowerCase();
+                    if (n === 'object_15' || n === 'object_18' || n === 'object_21' || n === 'object_24') {
+                        v.isPunctured = true; // NPC cars just stop
+                        console.log("🛞 NPC Car Tire Punctured!");
+                        return;
+                    }
+                }
+
+                // ENGINE DETECTION (Object_7 front part)
+                if (isPistol) {
+                    if (hitMesh && hitMesh.name.toLowerCase().includes('object_7')) {
+                        // Check if hit is in the front half of the car
+                        const worldPos = hitMesh.getWorldPosition(new THREE.Vector3());
+                        // Simple check: we need the impact point, but we don't have it here.
+                        // Let's assume hitting Object_7 with a pistol requires ~30 shots if it's the engine.
+                        if (v.pistolHits === undefined) v.pistolHits = 0;
+                        v.pistolHits++;
+                        console.log(`🚗 NPC Engine Hit: ${v.pistolHits}/30`);
+                        if (v.pistolHits >= 30) this.crushNPC(v);
+                        else this.flashRed(v);
+                    }
+                    return; // NPC Cars don't explode from random pistol shots to the back
+                } else {
+                    this.crushNPC(v); // Rifles/Missiles still 1-shot NPC cars
+                }
             }
             return;
         }
@@ -421,24 +501,43 @@ export class VehicleManager {
             this.crushVehicle(v);
         } else {
             console.log(`[COMBAT] Damage applied to ${v.type}. Health: ${v.health}`);
-            v.isSmoking = true; // Activate smoke on first hit
+            v.isSmoking = true;
+            this.flashRed(v.mesh || v);
+        }
+    }
 
-            // Visual feedback (Flash red)
-            if (v.mesh) {
-                v.mesh.traverse(c => {
-                    if (c.isMesh && c.material) {
-                        const originalMaterials = Array.isArray(c.material) ? c.material : [c.material];
-                        originalMaterials.forEach(m => {
-                            if (m.emissive) {
-                                const oldEmissive = m.emissive.clone();
-                                m.emissive.setHex(0xff0000);
-                                setTimeout(() => { if (m.emissive) m.emissive.copy(oldEmissive); }, 200);
+    flashRed(target) {
+        if (!target) return;
+        const root = target.isMesh ? target : target.mesh || target;
+        if (!root) return;
+
+        root.traverse(c => {
+            // SKIP bullet holes so they don't disappear or turn red
+            if (c.userData.type === 'impact_part') return;
+
+            if (c.isMesh && c.material) {
+                const mats = Array.isArray(c.material) ? c.material : [c.material];
+                mats.forEach((m) => {
+                    if (m.emissive) {
+                        // Use the global WeakMap on this instance to store original colors
+                        if (!this.originalEmissives.has(m)) {
+                            this.originalEmissives.set(m, m.emissive.clone());
+                        }
+
+                        m.emissive.setHex(0xff0000);
+                        
+                        // Clear existing timeout if any? 
+                        // Actually with WeakMap, we can just let multiple timeouts run, 
+                        // they will all revert to the same original color.
+                        setTimeout(() => {
+                            if (m.emissive && this.originalEmissives.has(m)) {
+                                m.emissive.copy(this.originalEmissives.get(m));
                             }
-                        });
+                        }, 2000);
                     }
                 });
             }
-        }
+        });
     }
 
     crushNPC(car) {
@@ -529,8 +628,14 @@ export class VehicleManager {
                     }
                 }
                 // Apply Smoke for damaged NPC tanks
-                if (car.health === 1 || car.isSmoking) {
+                if (car.health === 1 || car.isSmoking || car.pistolHits > 15) {
                     this.spawnSmokeParticle(car.position);
+                }
+                
+                // Stop NPC car if punctured
+                if (car.isPunctured) {
+                    if (!car.pushVelocity) car.pushVelocity = new THREE.Vector3();
+                    // NPCs just stop moving under their own power (if they had any, currently they are mostly static or pushed)
                 }
             }
         }
@@ -553,8 +658,17 @@ export class VehicleManager {
                 }
             }
             // Acceleration
+            let maxSpeed = cfg.speed;
+            
+            // Penalty for punctured wheels
+            if (v.type === 'motorcycle') {
+                if (v.isPunctured.front) maxSpeed *= 0.6;
+                if (v.isPunctured.back) maxSpeed *= 0.6;
+                if (v.isTippedOver) maxSpeed = 0; // Cannot move if tipped over
+            }
+
             if (input.y !== 0) {
-                v.velocity = THREE.MathUtils.lerp(v.velocity, input.y * cfg.speed, dt * 2);
+                v.velocity = THREE.MathUtils.lerp(v.velocity, input.y * maxSpeed, dt * 2);
             } else {
                 v.velocity = THREE.MathUtils.lerp(v.velocity, 0, dt * 5); // Friction
             }
@@ -657,7 +771,9 @@ export class VehicleManager {
             }
 
             // Smoothly animate the lean (lerp)
-            v.mesh.rotation.z = THREE.MathUtils.lerp(v.mesh.rotation.z, targetLean, dt * 5.0);
+            // If tipped over, lock to 90 degrees (Math.PI / 2)
+            const finalLean = v.isTippedOver ? (Math.PI / 2.2) : targetLean; 
+            v.mesh.rotation.z = THREE.MathUtils.lerp(v.mesh.rotation.z, finalLean, dt * 5.0);
 
             // Tank Mechanics: Enhanced Crushing and Pushing
             if (isTank) {

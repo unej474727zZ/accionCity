@@ -572,13 +572,15 @@ export class WeaponManager {
         const raycaster = new THREE.Raycaster(muzzlePos, bulletDir);
         raycaster.far = 2000;
 
-        const hits = raycaster.intersectObjects(this.scene.children, true);
-        const externalHits = hits.filter(h => {
-            let isSelf = false;
-            h.object.traverseAncestors(a => { if (a === v.mesh) isSelf = true; });
-            if (h.object === v.mesh) isSelf = true;
-            return !isSelf;
+        const targets = [];
+        this.scene.traverse(c => {
+            if (c.isMesh && !this.isSelf(c) && c.visible) {
+                if (c.userData.type === 'bullet' || c.userData.type === 'impact_part') return;
+                targets.push(c);
+            }
         });
+        const hits = raycaster.intersectObjects(targets, false);
+        const externalHits = hits; // Already filtered by targets logic
 
         const hit = externalHits.length > 0 ? externalHits[0] : null;
         const targetDist = hit ? hit.distance : 200;
@@ -588,20 +590,32 @@ export class WeaponManager {
         const shell = new TankShell(this.scene, muzzlePos, bulletDir, 150.0, (pos, norm, obj) => {
             console.log("💥 TANK SHELL IMPACT:", pos);
             this.createExplosion(pos, 5.0);
-            this.createImpact(pos, norm || new THREE.Vector3(0, 1, 0), 'spark', 5.0); // 5x Scale (up from 4)
+            this.createImpact(pos, norm || new THREE.Vector3(0, 1, 0), 'spark', 5.0, obj); // 5x Scale (up from 4)
 
-            // DAMAGE LOGIC
-            if (obj && this.characterController.world && this.characterController.world.vehicleManager) {
-                const targetVeh = this.characterController.world.vehicleManager.findVehicleByMesh(obj);
-                if (targetVeh) {
-                    this.characterController.world.vehicleManager.damageVehicle(targetVeh, 1);
+            // AREA DAMAGE (SPLASH DAMAGE)
+            const splashRadius = 15.0;
+            const affectedVehicles = new Set();
+            const worldPos = new THREE.Vector3();
+            
+            this.scene.traverse(c => {
+                if (c.isMesh) {
+                    c.getWorldPosition(worldPos);
+                    if (worldPos.distanceTo(pos) < splashRadius) {
+                        const targetVeh = this.characterController.world.vehicleManager.findVehicleByMesh(c);
+                        if (targetVeh && !affectedVehicles.has(targetVeh)) {
+                            this.characterController.world.vehicleManager.damageVehicle(targetVeh, 1.0, c);
+                            affectedVehicles.add(targetVeh);
+                        }
+                    }
                 }
-            }
+            });
         });
 
         if (hit) {
             shell.hitPoint = hit.point;
-            shell.hitNormal = hit.face ? hit.face.normal.clone().applyQuaternion(hit.object.quaternion) : new THREE.Vector3(0, 1, 0);
+            // Correct normal calculation: transform from local face normal to world space
+            const worldNormal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
+            shell.hitNormal = worldNormal;
             shell.hitObject = hit.object;
         } else {
             shell.hitPoint = targetPoint;
@@ -662,6 +676,7 @@ export class WeaponManager {
         this.scene.traverse(c => {
             if (c.isMesh && !this.isSelf(c) && c.visible) {
                 if (this.isVehiclePart(c, currentVehMesh)) return;
+                if (c.userData.type === 'bullet' || c.userData.type === 'impact_part') return;
                 targets.push(c);
             }
         });
@@ -692,13 +707,13 @@ export class WeaponManager {
             if (this.isRemotePlayer(hit.object)) type = 'blood';
 
             const impactScale = this.currentWeaponType === 'rifle' ? 2.5 : 1.0;
-            this.createImpact(hit.point, normal, type, impactScale);
+            this.createImpact(hit.point, normal, type, impactScale, hit.object);
 
             // Damage Vehicles
             const targetVeh = this.characterController.world.vehicleManager.findVehicleByMesh(hit.object);
             if (targetVeh) {
                 const dmg = this.currentWeaponType === 'rifle' ? 0.2 : 0.05;
-                this.characterController.world.vehicleManager.damageVehicle(targetVeh, dmg);
+                this.characterController.world.vehicleManager.damageVehicle(targetVeh, dmg, hit.object);
             }
             
             // Network Hit
@@ -762,19 +777,22 @@ export class WeaponManager {
         ray.far = 2000;
         const targets = [];
         this.scene.traverse(c => {
-            if (c.isMesh && !this.isSelf(c) && !this.isVehiclePart(c, v.mesh)) targets.push(c);
+            if (c.isMesh && !this.isSelf(c) && !this.isVehiclePart(c, v.mesh) && c.visible) {
+                if (c.userData.type === 'bullet' || c.userData.type === 'impact_part') return;
+                targets.push(c);
+            }
         });
         const hits = ray.intersectObjects(targets, false);
 
         if (hits.length > 0) {
             const hit = hits[0];
-            // Scale 2.0 for big gun impacts
-            this.createImpact(hit.point, hit.face ? hit.face.normal.clone().applyQuaternion(hit.object.quaternion) : null, 'spark', 2.0);
+            const worldNormal = hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld) : new THREE.Vector3(0, 1, 0);
+            this.createImpact(hit.point, worldNormal, 'spark', 2.0, hit.object);
 
             // Damage 
             const obj = hit.object;
             const targetVeh = this.characterController.world.vehicleManager.findVehicleByMesh(obj);
-            if (targetVeh) this.characterController.world.vehicleManager.damageVehicle(targetVeh, 0.1);
+            if (targetVeh) this.characterController.world.vehicleManager.damageVehicle(targetVeh, 0.1, obj);
         }
     }
 
@@ -800,7 +818,10 @@ export class WeaponManager {
         ray.far = 2000;
         const targets = [];
         this.scene.traverse(c => {
-            if (c.isMesh && !this.isSelf(c) && !this.isVehiclePart(c, v.mesh)) targets.push(c);
+            if (c.isMesh && !this.isSelf(c) && !this.isVehiclePart(c, v.mesh) && c.visible) {
+                if (c.userData.type === 'bullet' || c.userData.type === 'impact_part') return;
+                targets.push(c);
+            }
         });
         const hits = ray.intersectObjects(targets, false);
         const hitPoint = hits.length > 0 ? hits[0].point : targetPoint;
@@ -846,37 +867,27 @@ export class WeaponManager {
         const missile = new HeliMissile(this.scene, spawnPos, missileDir, 180.0, (pos, norm, obj) => {
             // Massive Impact
             this.createExplosion(pos, 8.0);
-            this.createImpact(pos, norm, 'spark', 5.0); // Very large scale
+            this.createImpact(pos, norm, 'spark', 5.0, obj); // Very large scale
 
             // AREA DAMAGE (SPLASH DAMAGE)
-            const splashRadius = 15.0;
+            const splashRadius = 20.0; // Slightly larger for missiles
             const vehManager = this.characterController.world.vehicleManager;
             if (vehManager) {
-                vehManager.vehicles.forEach(veh => {
-                    if (veh.mesh === v.mesh) return; // Don't damage self
-                    const dist = veh.mesh.position.distanceTo(pos);
-                    if (dist <= splashRadius) {
-                        // PREVENT DOUBLE DAMAGE BUG IN SAME FRAME/EXPLOSION
-                        if (veh.lastMissileHit && Date.now() - veh.lastMissileHit < 500) return;
-                        veh.lastMissileHit = Date.now();
-
-                        // Daño plano: 1.0 por misil sin importar si le dio en el centro o en el borde.
-                        vehManager.damageVehicle(veh, 1.0);
+                const affectedVehicles = new Set();
+                const worldPos = new THREE.Vector3();
+                
+                this.scene.traverse(c => {
+                    if (c.isMesh) {
+                        c.getWorldPosition(worldPos);
+                        if (worldPos.distanceTo(pos) < splashRadius) {
+                            const targetVeh = vehManager.findVehicleByMesh(c);
+                            if (targetVeh && !affectedVehicles.has(targetVeh) && targetVeh.mesh !== v.mesh) {
+                                vehManager.damageVehicle(targetVeh, 1.0, c);
+                                affectedVehicles.add(targetVeh);
+                            }
+                        }
                     }
                 });
-
-                // Damage NPC Cars as well
-                if (this.characterController.world.npcManager) {
-                    this.characterController.world.npcManager.cars.forEach(car => {
-                        const dist = car.position.distanceTo(pos);
-                        if (dist <= splashRadius) {
-                            if (car.lastMissileHit && Date.now() - car.lastMissileHit < 500) return;
-                            car.lastMissileHit = Date.now();
-
-                            vehManager.damageVehicle(car, 1.0);
-                        }
-                    });
-                }
             }
         });
 
@@ -908,6 +919,7 @@ export class WeaponManager {
             const pGeom = new THREE.SphereGeometry(pSize, 4, 4);
             const pMat = new THREE.MeshBasicMaterial({ color: color, transparent: true });
             const p = new THREE.Mesh(pGeom, pMat);
+            p.userData.type = 'impact_part';
             p.position.copy(point);
             this.scene.add(p);
 
@@ -940,7 +952,7 @@ export class WeaponManager {
             animateParticle();
         }
 
-        // 2. PERMANENT BULLET HOLE (DECALS)
+        // 2. PERMANENT BULLET HOLE (DECALS) - Now with 20s lifetime
         if (type !== 'blood' && normal) {
             const holeSize = 0.5 * scale;
             const holeGeom = new THREE.PlaneGeometry(holeSize, holeSize);
@@ -964,10 +976,42 @@ export class WeaponManager {
                 polygonOffsetFactor: -4
             });
 
+            if (type === 'scorch') {
+                holeMat.color.setHex(0x111111);
+            }
+
             const hole = new THREE.Mesh(holeGeom, holeMat);
+            hole.userData.type = 'impact_part';
+            
+            // Initial positioning
             hole.position.copy(point).add(normal.clone().multiplyScalar(0.01));
             hole.lookAt(point.clone().add(normal));
-            this.scene.add(hole);
+            
+            // Parenting logic: Follow the object!
+            if (arguments[4] && arguments[4].isMesh) {
+                const object = arguments[4];
+                object.attach(hole);
+            } else {
+                this.scene.add(hole);
+            }
+
+            // Lifetime: fade out and remove after 20 seconds
+            setTimeout(() => {
+                let fadeTime = 0;
+                const fadeAnim = () => {
+                    fadeTime += 0.05;
+                    hole.material.opacity -= 0.05;
+                    if (hole.material.opacity > 0) {
+                        requestAnimationFrame(fadeAnim);
+                    } else {
+                        if (hole.parent) hole.parent.remove(hole);
+                        holeGeom.dispose();
+                        holeMat.dispose();
+                        texture.dispose();
+                    }
+                };
+                fadeAnim();
+            }, type === 'scorch' ? 60000 : 20000); // Scorch lasts 60s, holes 20s
         }
 
         // 3. SMOKE PUFFS (NEW)
@@ -976,6 +1020,7 @@ export class WeaponManager {
             const sGeom = new THREE.SphereGeometry(0.3 * scale, 8, 8);
             const sMat = new THREE.MeshBasicMaterial({ color: 0x888888, transparent: true, opacity: 0.5 });
             const s = new THREE.Mesh(sGeom, sMat);
+            s.userData.type = 'impact_part';
             s.position.copy(point);
             this.scene.add(s);
 
@@ -1030,6 +1075,43 @@ export class WeaponManager {
 
         // 3. Debris/Sparks
         this.createImpact(point, new THREE.Vector3(0, 1, 0), 'spark', scale * 2);
+
+        // 4. PERMANENT SCORCH MARK (Burn)
+        // Raycast down to find ground
+        const ray = new THREE.Raycaster(point.clone().add(new THREE.Vector3(0, 1, 0)), new THREE.Vector3(0, -1, 0));
+        const hits = ray.intersectObjects(this.scene.children, true);
+        const groundHit = hits.find(h => h.object.name === "AsphaltFloor" || h.object.name.toLowerCase().includes('city'));
+        if (groundHit) {
+            this.createImpact(groundHit.point, groundHit.face ? groundHit.face.normal.clone().transformDirection(groundHit.object.matrixWorld) : new THREE.Vector3(0, 1, 0), 'scorch', scale * 3.0, groundHit.object);
+        }
+
+        // 5. SHOCKWAVE (Push nearby objects)
+        const radius = 15.0 * scale;
+        const force = 40.0 * scale;
+        const world = this.scene.userData.world;
+        if (world && world.vehicleManager) {
+            // Push Managed Vehicles
+            world.vehicleManager.vehicles.forEach(v => {
+                const dist = v.mesh.position.distanceTo(point);
+                if (dist < radius && dist > 0.1) {
+                    const dir = v.mesh.position.clone().sub(point).normalize();
+                    const intensity = (1.0 - dist / radius) * force;
+                    world.vehicleManager.pushVehicle(v, dir, intensity);
+                }
+            });
+
+            // Push NPC Cars
+            if (world.npcManager && world.npcManager.cars) {
+                world.npcManager.cars.forEach(car => {
+                    const dist = car.position.distanceTo(point);
+                    if (dist < radius && dist > 0.1) {
+                        const dir = car.position.clone().sub(point).normalize();
+                        const intensity = (1.0 - dist / radius) * force;
+                        world.vehicleManager.pushVehicleNPC(car, dir, intensity);
+                    }
+                });
+            }
+        }
     }
 
     isRemotePlayer(obj) {
@@ -1101,6 +1183,7 @@ export class WeaponManager {
             this.scene.traverse(c => {
                 if (c.isMesh && !this.isSelf(c) && c.visible) {
                     if (this.isVehiclePart(c, currentVehMesh)) return;
+                    if (c.userData.type === 'bullet' || c.userData.type === 'impact_part') return;
                     targets.push(c);
                 }
             });

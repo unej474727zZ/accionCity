@@ -837,8 +837,8 @@ export class CharacterController {
         // Rotación más rápida al correr para compensar la inercia visual
         const keyLookSpeed = (this.isRunning ? 3.5 : 2.0) * dt;
 
-        // Direcciones unificadas con el ratón:
-        const lookDir = this.isDriving ? -1 : 1;
+        // Direcciones unificadas con el ratón (ya no se invierten al conducir)
+        const lookDir = 1;
         if (this.keys.lookLeft) this.yaw += keyLookSpeed * lookDir;
         if (this.keys.lookRight) this.yaw -= keyLookSpeed * lookDir;
         if (this.keys.lookUp) this.pitch += keyLookSpeed;

@@ -21,6 +21,7 @@ export class Bullet {
         // const light = new THREE.PointLight(0xffaa00, 2, 10);
         // this.mesh.add(light);
 
+        this.mesh.userData.type = 'bullet';
         this.scene.add(this.mesh);
 
         this.active = true;
