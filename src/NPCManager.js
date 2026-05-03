@@ -10,7 +10,7 @@ export class NPCManager {
     }
 
     initParkedCars(count) {
-        const carKeys = ['car1', 'car2', 'car3'];
+        const carKeys = ['car1', 'car2', 'car3', 'tank'];
         const availableCars = carKeys.filter(k => this.assets[k]);
 
         if (availableCars.length === 0) return;
@@ -45,6 +45,11 @@ export class NPCManager {
         });
 
         car.position.set(x, 0.5, z);
+        
+        // Scale adjustment per model
+        const scale = (key === 'tank') ? 1.2 : 0.6;
+        car.scale.set(scale, scale, scale);
+        
         car.rotation.y = Math.random() * Math.PI * 2;
 
         this.scene.add(car);

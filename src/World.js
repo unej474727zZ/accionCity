@@ -1,3 +1,4 @@
+console.log('World.js loaded');
 import * as THREE from 'three';
 import { VehicleManager } from './VehicleManager.js';
 import { AssetLoader } from './AssetLoader.js';
@@ -5,7 +6,7 @@ import { CharacterController } from './CharacterController.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { StereoEffect } from 'three/examples/jsm/effects/StereoEffect.js';
 import { NPCManager } from './NPCManager.js';
-import { SpiderManager } from './SpiderManager.js';
+
 import { NetworkManager } from './NetworkManager.js';
 import { RemotePlayer } from './RemotePlayer.js';
 import { WeaponManager } from './WeaponManager.js';
@@ -56,6 +57,7 @@ export class World {
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.renderer.setPixelRatio(1);
         this.renderer.shadowMap.enabled = false;
+        this.renderer.xr.enabled = true; // Enable WebXR
         container.appendChild(this.renderer.domElement);
 
         // VR Stereo Effect Setup
@@ -103,6 +105,11 @@ export class World {
         this.isNightVision = false;
         this.uiVisible = true;
         this.vrMode = false;
+        this.arMode = false;
+        this.arHitTestSource = null;
+        this.arHitTestSourceRequested = false;
+        this.arWorldScale = 0.01; // 1:100 scale for the "diorama" effect (Fits on a table)
+        this.arOriginalPositions = new Map(); // To restore after AR
 
         // MAP PANNING STATE
         this.mapPanningOffset = new THREE.Vector3(0, 0, 0);
@@ -111,6 +118,19 @@ export class World {
         this.lastMouseY = 0;
 
         // DEBUG: Floor/Grid removed to see City clearly
+        
+        // PERFORMANCE: Reuse common geometries/materials
+        this._sharedSmokeGeom = new THREE.BoxGeometry(0.5, 0.5, 0.5);
+        this._sharedSmokeMat = new THREE.MeshBasicMaterial({ color: 0x333333, transparent: true, opacity: 0.6 });
+        this.particles = []; 
+
+        // AR RETICLE (Ring to show where the city will be placed)
+        this.arReticle = new THREE.Mesh(
+            new THREE.RingGeometry(0.15, 0.2, 32).rotateX(-Math.PI / 2),
+            new THREE.MeshBasicMaterial({ color: 0x00ffaa, transparent: true, opacity: 0.8 })
+        );
+        this.arReticle.visible = false;
+        this.scene.add(this.arReticle);
     }
 
     async start() {
@@ -189,6 +209,7 @@ export class World {
                 new THREE.Vector3(-430, 0, -430)
             ];
 
+            const carKeys = ['car1', 'car2', 'car3', 'car1', 'car2', 'car3', 'tank']; // Tanks are now 1 in 7 probability
             const tNames = ['transporter', 'transporter1', 'transporter2', 'transporter3'];
             tNames.forEach((name, i) => {
                 const asset = assets[name];
@@ -222,34 +243,34 @@ export class World {
                 });
             });
 
-            // ADD CITY TO COLLISIONS!
+            // ADD CITY TO COLLISIONS! (Optimized)
             this.cityBlocks = [];
             if (city) {
+                this._cityMeshCount = 0;
                 city.traverse((child) => {
                     if (child.isMesh) {
-                        this.character.colliders.push(child);
-
-                        // Extract bounds for dynamic 2D Hacker Map
+                        if (this._cityMeshCount < 800) {
+                            this.character.colliders.push(child);
+                            this._cityMeshCount++;
+                        }
+                        
+                        // Extract bounds for minimap
                         if (!child.geometry.boundingBox) child.geometry.computeBoundingBox();
                         child.updateMatrixWorld(true);
                         const bbox = new THREE.Box3().setFromObject(child);
                         this.cityBlocks.push({
-                            minX: bbox.min.x,
-                            maxX: bbox.max.x,
-                            minZ: bbox.min.z,
-                            maxZ: bbox.max.z
+                            minX: bbox.min.x, maxX: bbox.max.x,
+                            minZ: bbox.min.z, maxZ: bbox.max.z
                         });
                     }
                 });
-                console.log(`Registered city meshes to player colliders and extracted ${this.cityBlocks.length} map blocks!`);
+                console.log(`Registered ${this._cityMeshCount} city colliders (Optimized).`);
             }
 
             // LOAD CHARACTER POSITION
-            // RESCUE PROTOCOL: User is stuck in a wall! Wipe the save so they spawn at origin.
-            localStorage.removeItem('characterPosition');
-            localStorage.removeItem('playerPos');
-            localStorage.removeItem('motorcyclePosition');
-            console.log("Rescued character. All Saves wiped.");
+            // RESCUE PROTOCOL: Force a fresh safe spawn once to get out of buildings
+            localStorage.removeItem('characterPosition'); 
+            console.log("World: System Ready. Forced Reset for Rescue.");
 
             this.camera.lookAt(this.character.mesh.position);
 
@@ -285,8 +306,8 @@ export class World {
 
             // NPC MANAGER
             this.npcManager = new NPCManager(this.scene, assets);
-            // Parked Cars (Static) per user request
-            this.npcManager.initParkedCars(50);
+            // Reduced density: from 80 to 30 for performance recovery
+            this.npcManager.initParkedCars(30);
 
             // WEAPON MANAGER (EMOTION!!!)
             this.weaponManager = new WeaponManager(this.scene, this.character, this.camera, assets);
@@ -307,25 +328,105 @@ export class World {
             // VEHICLE MANAGER
             this.vehicleManager = new VehicleManager(this.scene, assets, this.character);
 
-            // Spawn Motorcycle at a safe fixed spot
-            let spawnPos = new THREE.Vector3(-300, 0.5, -40);
-            this.vehicleManager.spawnVehicle('motorcycle', spawnPos);
+            // SCENERY GROUP FOR SPAWN CHECKS
+            this.spawnTargets = [];
+            if (city) this.spawnTargets.push(city);
+            if (floor) this.spawnTargets.push(floor);
 
-            // ARMAGE DON TANK SPAWN
-            let tankPos = new THREE.Vector3(-300, 0.5, 0);
-            this.vehicleManager.spawnVehicle('tank', tankPos);
+            // DEBUG SPAWN
+            const getSafeCityPos = () => {
+                const x = (Math.random() - 0.5) * 400;
+                const z = (Math.random() - 0.5) * 400;
+                console.log(`Spawn: Simple point at ${x}, ${z}`);
+                return new THREE.Vector3(x, 0.5, z);
+            };
 
-            // HELICOPTER SPAWN
-            let heliPos = new THREE.Vector3(-300, 0.5, -20);
-            this.vehicleManager.spawnVehicle('helicopter', heliPos);
+            // Sync collisions
+            this.updateRemoteColliders();
             
-            // SPIDER MANAGER
-            this.spiderManager = new SpiderManager(this.scene, this.character, assets);
-            // Spawn some spiders at specific city locations
-            this.spiderManager.spawn(new THREE.Vector3(50, 0.5, 50));
-            this.spiderManager.spawn(new THREE.Vector3(-50, 0.5, -50)); 
-            this.spiderManager.spawn(new THREE.Vector3(100, 0.5, -100));
-            this.spiderManager.spawn(new THREE.Vector3(-150, 0.5, 200));
+
+
+            this.trashCans = [];
+            this.explosiveCanisters = [];
+            this.particles = [];
+            this.spawnTargets = this.spawnTargets || [];
+
+            // --- WAR ZONE ENVIRONMENT SATURATION ---
+            const addScenery = (name, pos, rot = new THREE.Euler(), scale = 1.0, isExplosive = false) => {
+                const asset = assets[name];
+                if (!asset) return null;
+                const mesh = asset.scene.clone();
+                mesh.position.copy(pos);
+                mesh.rotation.copy(rot);
+                mesh.scale.set(scale, scale, scale);
+                
+                // --- CRITICAL FIX: MAKE OBJECTS SOLID ---
+                this.scene.add(mesh);
+                this.character.colliders.push(mesh); // No more passing through!
+                this.spawnTargets.push(mesh);
+
+                if (isExplosive) {
+                    mesh.userData.isExplosive = true;
+                    mesh.userData.hp = 1;
+                    const canisterData = { mesh, exploded: false };
+                    this.explosiveCanisters.push(canisterData);
+                    if (this.weaponManager) {
+                        this.weaponManager.canisters.push(canisterData);
+                    }
+
+                    // FORCE RED COLOR (Bombonas Rojas)
+                    if (name === 'canister') {
+                        mesh.traverse(child => {
+                            if (child.isMesh) {
+                                child.material = child.material.clone();
+                                child.material.color.setHex(0xff0000);
+                                if (child.material.emissive) child.material.emissive.setHex(0x440000);
+                            }
+                        });
+                    }
+                }
+                return mesh;
+            };
+
+            // 1. Trash Cans (Solid and Pushable, NOT Explosive)
+            for (let i = 0; i < 60; i++) {
+                const x = (Math.random() - 0.5) * 450;
+                const z = (Math.random() - 0.5) * 450;
+                const mesh = addScenery('trash_can', new THREE.Vector3(x, 0, z), new THREE.Euler(0, Math.random() * Math.PI, 0), 0.6, false);
+                if (mesh) {
+                    mesh.userData.isTrashCan = true;
+                    mesh.userData.hp = 5; // 5 shots with pistol
+                }
+            }
+
+            // 2. Dumpsters Snapped to Walls (19.95 offset for Parkour)
+            for (let x = -5; x <= 5; x++) {
+                for (let z = -5; z <= 5; z++) {
+                    if (Math.random() > 0.3) {
+                        const side = Math.random() > 0.5 ? 1 : -1;
+                        const axis = Math.random() > 0.5 ? 'x' : 'z';
+                        const pos = new THREE.Vector3(x * 40, 0, z * 40);
+                        let rot = 0;
+                        if (axis === 'x') { pos.x += 19.98 * side; rot = (side > 0) ? 1.57 : -1.57; }
+                        else { pos.z += 19.98 * side; rot = (side > 0) ? 0 : 3.14; }
+                        addScenery(Math.random() > 0.5 ? 'dumpster1' : 'dumpster2', pos, new THREE.Euler(0, rot, 0), 0.8);
+                    }
+                }
+            }
+
+            // 3. Wrecks (Solid)
+            for (let i = 0; i < 25; i++) {
+                const pos = new THREE.Vector3((Math.random() - 0.5) * 450, 0, (Math.random() - 0.5) * 450);
+                addScenery('tank_wreck', pos, new THREE.Euler(0, Math.random() * Math.PI, 0), 0.05);
+                addScenery('car_wreck_fsc', pos.clone().add(new THREE.Vector3(5, 0, 5)), new THREE.Euler(0, Math.random() * Math.PI, 0), 0.1);
+            }
+
+            // 4. Explosive Canisters (Bombonas Rojas)
+            for (let i = 0; i < 80; i++) {
+                const x = (Math.random() - 0.5) * 440;
+                const z = (Math.random() - 0.5) * 440;
+                addScenery('canister', new THREE.Vector3(x, 0.4, z), new THREE.Euler(0, 0, 0), 0.6, true);
+            }
 
             // PASS COLLIDERS
             if (city) this.character.colliders.push(city);
@@ -507,6 +608,24 @@ export class World {
                 }
             }, { passive: true });
 
+            // --- FINAL SPAWN (Safe Street Center) ---
+            const finalSpawn = new THREE.Vector3(0, 0.5, 0); 
+            this.character.mesh.position.copy(finalSpawn);
+            
+            this.vehicleManager.spawnVehicle('motorcycle', new THREE.Vector3(10, 0.5, 10));
+            this.vehicleManager.spawnVehicle('tank', new THREE.Vector3(450, 0.5, 450)); // Further out
+            this.vehicleManager.spawnVehicle('helicopter', new THREE.Vector3(450, 0.5, -450)); // Further out
+
+            // Set camera to player
+            this.camera.position.copy(finalSpawn).add(new THREE.Vector3(0, 5, 10)); 
+            this.camera.lookAt(finalSpawn);
+
+            // CRITICAL: HIDE LOADING SCREEN
+            const loadingScreen = document.getElementById('loading');
+            if (loadingScreen) loadingScreen.style.display = 'none';
+
+            this.animate();
+
             this.animate();
         } catch (err) {
             console.error('Failed to load game:', err);
@@ -526,10 +645,22 @@ export class World {
 
     updateRemoteColliders() {
         if (!this.character || !this.weaponManager) return;
-        const players = Object.values(this.remotePlayers);
-        const meshes = players.map(p => p.mesh).filter(m => m);
-        if (this.character) this.character.remoteColliders = meshes;
-        if (this.weaponManager) this.weaponManager.remotePlayers = players;
+        
+        let dynamicColliders = Object.values(this.remotePlayers).map(p => p.mesh).filter(m => m);
+        if (this.vehicleManager) {
+            dynamicColliders = dynamicColliders.concat(this.vehicleManager.vehicles.map(v => v.mesh).filter(m => m));
+        }
+        if (this.npcManager && this.npcManager.cars) {
+            dynamicColliders = dynamicColliders.concat(this.npcManager.cars.filter(m => m));
+        }
+        
+        this.character.remoteColliders = dynamicColliders;
+        
+        // CONSOLIDATED COLLIDER LIST for Character Physics (Performance!)
+        // Instead of concatenating every frame, we do it here once a second
+        this.character.allPhysicTargets = [...this.character.colliders, ...dynamicColliders];
+        
+        this.weaponManager.remotePlayers = Object.values(this.remotePlayers);
     }
 
     onWindowResize() {
@@ -561,190 +692,308 @@ export class World {
         if (this.weaponManager) this.weaponManager.toggleUI(this.uiVisible);
     }
 
+    async toggleAR() {
+        if (this.arMode) {
+            // Exit AR
+            if (this.renderer.xr.getSession()) {
+                this.renderer.xr.getSession().end();
+            }
+            return;
+        }
+
+        if (!navigator.xr) {
+            alert("Tu dispositivo o navegador no soporta Realidad Aumentada (WebXR).");
+            return;
+        }
+
+        const sessionInit = { requiredFeatures: ['hit-test'] };
+        const session = await navigator.xr.requestSession('immersive-ar', sessionInit);
+
+        this.arMode = true;
+        this.renderer.xr.setReferenceSpaceType('local');
+        this.renderer.xr.setSession(session);
+
+        // Hide UI for AR
+        this.toggleUI(); 
+        
+        // Show Reticle
+        this.arReticle.visible = true;
+
+        session.addEventListener('end', () => {
+            this.arMode = false;
+            this.arHitTestSourceRequested = false;
+            this.arHitTestSource = null;
+            this.arReticle.visible = false;
+            
+            // Restore Scene
+            this.scene.scale.set(1, 1, 1);
+            this.scene.position.set(0, 0, 0);
+            
+            this.uiVisible = false;
+            this.toggleUI(); // Restore UI
+            console.log("AR Session Ended");
+        });
+
+        console.log("AR Session Started");
+    }
+
     animate() {
-        requestAnimationFrame(() => this.animate());
+        try {
+            requestAnimationFrame(() => this.animate());
+            const dt = Math.min(this.clock.getDelta(), 0.1);
+            const time = Date.now() / 1000;
 
-        const dt = Math.min(this.clock.getDelta(), 0.1);
-        const time = Date.now() / 1000;
+            const sunAngle = Math.PI / 2; // Fixed at Noon
+            const sunRadius = 200;
+            let sunIntensity = 1.5;
 
-        const sunAngle = Math.PI / 2; // Fixed at Noon
-        const sunRadius = 200;
-        let sunIntensity = 1.5;
-
-        const dirLight = this.scene.children.find(c => c.isDirectionalLight);
-        if (dirLight) {
-            dirLight.position.set(0, sunRadius, 50);
-            dirLight.intensity = sunIntensity;
-            dirLight.castShadow = true;
-        }
-
-        let skyHex = 0x87CEEB;
-        let groundHex = 0x555555;
-        let fogDist = 1500;
-        let fogColor = null;
-
-        if (this.isNightVision) {
-            skyHex = 0x002200;
-            groundHex = 0x004400;
-            fogDist = 200;
-            fogColor = new THREE.Color(0x00FF00);
-        }
-
-        if (this.minimap && this.minimap.isFullMap && this.character) {
-            if (this.weaponManager) this.weaponManager.toggleUI(false);
-            fogDist = Math.max(1500, this.minimapSpan + 500);
-            if (this.camera.far !== fogDist) {
-                this.camera.far = fogDist;
-                this.camera.updateProjectionMatrix();
+            const dirLight = this.scene.children.find(c => c.isDirectionalLight);
+            if (dirLight) {
+                dirLight.position.set(0, sunRadius, 50);
+                dirLight.intensity = sunIntensity;
+                dirLight.castShadow = false; // CRITICAL: Disabled for performance
             }
-            const droneHeight = this.minimapSpan * 1.5;
-            const targetPos = this.character.mesh.position.clone().add(this.mapPanningOffset);
-            this.camera.position.set(targetPos.x, targetPos.y + droneHeight, targetPos.z + 0.1);
-            this.camera.lookAt(targetPos);
-        } else {
-            if (this.uiVisible && this.weaponManager) this.weaponManager.toggleUI(true);
-            if (this.camera.far !== 250) {
-                this.camera.far = 250;
-                this.camera.updateProjectionMatrix();
-            }
-        }
 
-        const currentSky = this.scene.background;
-        const skyLerpSpeed = this.isNightVision ? 10.0 : 2.0;
-        const safeSkyHex = (typeof skyHex === 'number' && !isNaN(skyHex)) ? skyHex : 0x87CEEB;
-        currentSky.lerp(new THREE.Color(safeSkyHex), Math.min(dt * skyLerpSpeed, 1.0));
+            let skyHex = 0x87CEEB;
+            let groundHex = 0x555555;
+            let fogDist = 250; // Optimized from 1500
+            let fogColor = null;
 
-        if (fogColor) this.scene.fog.color.lerp(fogColor, dt * 10.0);
-        else this.scene.fog.color.copy(currentSky);
-
-        const fogLerpSpeed = this.isNightVision ? 10.0 : 5.0;
-        this.scene.fog.far = THREE.MathUtils.lerp(this.scene.fog.far, fogDist, dt * fogLerpSpeed);
-
-        const hemiLight = this.scene.children.find(c => c.isHemisphereLight);
-        if (hemiLight) {
             if (this.isNightVision) {
-                hemiLight.color.setHex(0x00FF00);
-                hemiLight.groundColor.setHex(0x003300);
-                hemiLight.intensity = 2.0;
+                skyHex = 0x002200;
+                groundHex = 0x004400;
+                fogDist = 200;
+                fogColor = new THREE.Color(0x00FF00);
+            }
+
+            if (this.minimap && this.minimap.isFullMap && this.character) {
+                if (this.weaponManager) this.weaponManager.toggleUI(false);
+                fogDist = Math.max(1500, this.minimapSpan + 500);
+                if (this.camera.far !== fogDist) {
+                    this.camera.far = fogDist;
+                    this.camera.updateProjectionMatrix();
+                }
+                const droneHeight = this.minimapSpan * 1.5;
+                const targetPos = this.character.mesh.position.clone().add(this.mapPanningOffset);
+                this.camera.position.set(targetPos.x, targetPos.y + droneHeight, targetPos.z + 0.1);
+                this.camera.lookAt(targetPos);
             } else {
-                hemiLight.color.lerp(new THREE.Color(skyHex), dt * 0.5);
-                hemiLight.groundColor.lerp(new THREE.Color(groundHex), dt * 0.5);
-                hemiLight.intensity = 0.8;
+                if (this.uiVisible && this.weaponManager) this.weaponManager.toggleUI(true);
+                if (this.camera.far !== 250) {
+                    this.camera.far = 250;
+                    this.camera.updateProjectionMatrix();
+                }
             }
-        }
 
-        if (this.character) {
-            this.character.update(dt);
-            let allColliders = Object.values(this.remotePlayers).map(p => p.mesh).filter(m => m);
-            if (this.vehicleManager) allColliders = allColliders.concat(this.vehicleManager.vehicles.map(v => v.mesh).filter(m => m));
-            if (this.npcManager && this.npcManager.cars) allColliders = allColliders.concat(this.npcManager.cars.filter(m => m));
-            this.character.remoteColliders = allColliders;
-        }
+            const currentSky = this.scene.background;
+            const skyLerpSpeed = this.isNightVision ? 10.0 : 2.0;
+            const safeSkyHex = (typeof skyHex === 'number' && !isNaN(skyHex)) ? skyHex : 0x87CEEB;
+            currentSky.lerp(new THREE.Color(safeSkyHex), Math.min(dt * skyLerpSpeed, 1.0));
 
-        if (this.npcManager) this.npcManager.update(dt);
-        if (this.spiderManager) this.spiderManager.update(dt);
-        if (this.weaponManager) {
-            this.weaponManager.remotePlayers = Object.values(this.remotePlayers);
-            this.weaponManager.update(dt);
-        }
+            if (fogColor) this.scene.fog.color.lerp(fogColor, dt * 10.0);
+            else this.scene.fog.color.copy(currentSky);
 
-        if (this.vehicleManager && this.character) {
-            const input = this.character.inputVector || { x: 0, y: 0 };
-            this.vehicleManager.update(dt, input);
-            const moto = this.vehicleManager.vehicles.find(v => v.type === 'motorcycle');
-            if (moto && moto.mesh) {
-                localStorage.setItem('motorcyclePosition', JSON.stringify({ x: moto.mesh.position.x, y: moto.mesh.position.y, z: moto.mesh.position.z }));
+            const fogLerpSpeed = this.isNightVision ? 10.0 : 5.0;
+            this.scene.fog.far = THREE.MathUtils.lerp(this.scene.fog.far, fogDist, dt * fogLerpSpeed);
+
+            const hemiLight = this.scene.children.find(c => c.isHemisphereLight);
+            if (hemiLight) {
+                if (this.isNightVision) {
+                    hemiLight.color.setHex(0x00FF00);
+                    hemiLight.groundColor.setHex(0x003300);
+                    hemiLight.intensity = 2.0;
+                } else {
+                    hemiLight.color.lerp(new THREE.Color(skyHex), dt * 0.5);
+                    hemiLight.groundColor.lerp(new THREE.Color(groundHex), dt * 0.5);
+                    hemiLight.intensity = 0.8;
+                }
             }
-        }
 
-        if (this.character && !this.isInspectionMode) this.character.updateCamera(dt);
-        else if (this.isInspectionMode && this.orbitControls) this.orbitControls.update();
+            if (this.character) {
+                this.character.update(dt);
+                if (!this.colliderThrottle) this.colliderThrottle = 0;
+                this.colliderThrottle++;
+                if (this.colliderThrottle % 60 === 0) {
+                    this.updateRemoteColliders();
+                }
 
-        if (this.character && this.camera && this.character.desiredFOV) {
-            const targetFOV = this.character.desiredFOV;
-            const speed = 5.0;
-            const t = 1.0 - Math.pow(0.01, dt * speed);
-            if (Math.abs(this.camera.fov - targetFOV) > 0.1) {
-                this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFOV, t);
-                this.camera.updateProjectionMatrix();
-            }
-        }
+                // --- AR MODE LOGIC (Diorama) ---
+                if (this.arMode) {
+                    const session = this.renderer.xr.getSession();
+                    if (session) {
+                        const frame = this.renderer.xr.getFrame();
+                        if (frame) {
+                            const referenceSpace = this.renderer.xr.getReferenceSpace();
+                            
+                            // Initialize Hit Test Source once
+                            if (this.arHitTestSourceRequested === false) {
+                                session.requestReferenceSpace('viewer').then((viewerSpace) => {
+                                    session.requestHitTestSource({ space: viewerSpace }).then((source) => {
+                                        this.arHitTestSource = source;
+                                    });
+                                });
+                                this.arHitTestSourceRequested = true;
+                            }
 
-        Object.values(this.remotePlayers).forEach(p => p.update(dt, this.camera));
-
-        if (this.character && this.networkManager) {
-            this.networkManager.sendUpdate(this.character.mesh.position, this.character.yaw, this.character.state, this.weaponManager ? this.weaponManager.currentWeaponType : 'pistol');
-            localStorage.setItem('characterPosition', JSON.stringify({ x: this.character.mesh.position.x, y: this.character.mesh.position.y, z: this.character.mesh.position.z }));
-        }
-
-        // Teleportation
-        if (this.character && !this.character.isDriving && this.transporters.length > 0) {
-            if (this.teleportCooldown > 0) this.teleportCooldown -= dt;
-
-            this.transporters.forEach((t, i) => {
-                const dist = this.character.mesh.position.distanceTo(t.pos);
-                if (dist < 2) {
-                    if (!t.triggered && this.teleportCooldown <= 0) {
-                        t.timer += dt;
-                        if (t.timer >= 2.0) {
-                            let targetIdx;
-                            do { targetIdx = Math.floor(Math.random() * this.transporters.length); } while (targetIdx === i);
-                            const target = this.transporters[targetIdx];
-
-                            // Teleport!
-                            this.character.mesh.position.copy(target.pos).y += 0.5;
-                            this.teleportCooldown = 3.0;
-                            t.timer = 0;
-                            t.triggered = true; // Mark source as triggered
-                            target.triggered = true; // Mark target as triggered so it doesn't loop back
+                            // Perform Hit Test
+                            if (this.arHitTestSource) {
+                                const hitTestResults = frame.getHitTestResults(this.arHitTestSource);
+                                if (hitTestResults.length > 0) {
+                                    const hit = hitTestResults[0];
+                                    const pose = hit.getPose(referenceSpace);
+                                    
+                                    // Update Reticle position
+                                    this.arReticle.visible = true;
+                                    this.arReticle.position.set(pose.transform.position.x, pose.transform.position.y, pose.transform.position.z);
+                                    
+                                    // Update World Scale and Position (Follow Reticle)
+                                    // We scale the whole scene (except camera and reticle) down
+                                    // Actually, let's scale the city, character, and other groups
+                                    this.scene.scale.set(this.arWorldScale, this.arWorldScale, this.arWorldScale);
+                                    this.scene.position.set(pose.transform.position.x, pose.transform.position.y, pose.transform.position.z);
+                                    
+                                    // Ensure reticle is NOT scaled by the scene (parenting issue)
+                                    // Since reticle is child of scene, and scene is scaled, reticle is scaled.
+                                    // We need the reticle to stay at real world scale 1.0
+                                    this.arReticle.scale.set(1/this.arWorldScale, 1/this.arWorldScale, 1/this.arWorldScale);
+                                    
+                                    // Add pulse effect to reticle
+                                    const pulse = 1.0 + Math.sin(Date.now() * 0.01) * 0.1;
+                                    this.arReticle.scale.multiplyScalar(pulse);
+                                } else {
+                                    this.arReticle.visible = false;
+                                }
+                            }
                         }
                     }
-                } else {
-                    // Reset when leaving the pad
-                    t.timer = 0;
-                    t.triggered = false;
                 }
-            });
-        }
+            }
 
-        // RENDER PASS
-        try {
-            if (this.vrMode) {
-                this.stereoEffect.render(this.scene, this.camera);
-            } else {
-                this.renderer.setViewport(0, 0, window.innerWidth, window.innerHeight);
-                this.renderer.setScissor(0, 0, window.innerWidth, window.innerHeight);
-                this.renderer.setScissorTest(true);
-                this.renderer.render(this.scene, this.camera);
+            if (this.npcManager) this.npcManager.update(dt);
+            if (this.weaponManager) {
+                this.weaponManager.remotePlayers = Object.values(this.remotePlayers);
+                this.weaponManager.update(dt);
+            }
 
-                // PiP Minimap
-                const minimapEl = document.getElementById('minimap-canvas');
-                if (this.minimap && !this.minimap.isFullMap && minimapEl && minimapEl.style.display !== 'none') {
-                    if (this.minimapCamera && this.character && this.character.mesh) {
-                        this.minimapCamera.position.x = this.character.mesh.position.x;
-                        this.minimapCamera.position.z = this.character.mesh.position.z;
-                        const size = 200;
-                        const glX = window.innerWidth - size - 10;
-                        const glY = window.innerHeight - size - 10;
-                        this.renderer.setViewport(glX, glY, size, size);
-                        this.renderer.setScissor(glX, glY, size, size);
-                        this.renderer.autoClear = false;
-                        this.renderer.clearDepth();
-                        const tempFog = this.scene.fog;
-                        this.scene.fog = null;
-                        this.renderer.render(this.scene, this.minimapCamera);
-                        this.scene.fog = tempFog;
-                        this.renderer.autoClear = true;
+            if (this.vehicleManager && this.character) {
+                const input = this.character.inputVector || { x: 0, y: 0 };
+                this.vehicleManager.update(dt, input);
+                const moto = this.vehicleManager.vehicles.find(v => v.type === 'motorcycle');
+                if (moto && moto.mesh) {
+                    localStorage.setItem('motorcyclePosition', JSON.stringify({ x: moto.mesh.position.x, y: moto.mesh.position.y, z: moto.mesh.position.z }));
+                }
+            }
+
+            if (this.character && !this.isInspectionMode) this.character.updateCamera(dt);
+            else if (this.isInspectionMode && this.orbitControls) this.orbitControls.update();
+
+            if (this.character && this.camera && this.character.desiredFOV) {
+                const targetFOV = this.character.desiredFOV;
+                const speed = 5.0;
+                const t = 1.0 - Math.pow(0.01, dt * speed);
+                if (Math.abs(this.camera.fov - targetFOV) > 0.1) {
+                    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFOV, t);
+                    this.camera.updateProjectionMatrix();
+                }
+            }
+
+            Object.values(this.remotePlayers).forEach(p => p.update(dt, this.camera));
+
+            if (this.character && this.networkManager) {
+                this.networkManager.sendUpdate(this.character.mesh.position, this.character.yaw, this.character.state, this.weaponManager ? this.weaponManager.currentWeaponType : 'pistol');
+                localStorage.setItem('characterPosition', JSON.stringify({ x: this.character.mesh.position.x, y: this.character.mesh.position.y, z: this.character.mesh.position.z }));
+            }
+
+            // Teleportation
+            if (this.character && !this.character.isDriving && this.transporters.length > 0) {
+                if (this.teleportCooldown > 0) this.teleportCooldown -= dt;
+
+                this.transporters.forEach((t, i) => {
+                    const dist = this.character.mesh.position.distanceTo(t.pos);
+                    if (dist < 2) {
+                        if (!t.triggered && this.teleportCooldown <= 0) {
+                            t.timer += dt;
+                            if (t.timer >= 2.0) {
+                                let targetIdx;
+                                do { targetIdx = Math.floor(Math.random() * this.transporters.length); } while (targetIdx === i);
+                                const target = this.transporters[targetIdx];
+                                this.character.mesh.position.copy(target.pos).y += 0.5;
+                                this.teleportCooldown = 3.0;
+                                t.timer = 0;
+                                t.triggered = true;
+                                target.triggered = true;
+                            }
+                        }
+                    } else {
+                        t.timer = 0;
+                        t.triggered = false;
+                    }
+                });
+            }
+
+            // RENDER PASS
+            if (this.renderer) {
+                if (this.smokingHeliPos && Math.random() > 0.8) {
+                    const p = new THREE.Mesh(this._sharedSmokeGeom, this._sharedSmokeMat.clone());
+                    p.position.copy(this.smokingHeliPos).add(new THREE.Vector3((Math.random() - 0.5) * 2, 0, (Math.random() - 0.5) * 2));
+                    p.userData.vel = new THREE.Vector3((Math.random() - 0.5) * 2, 2 + Math.random() * 2, (Math.random() - 0.5) * 2);
+                    p.userData.life = 0;
+                    this.scene.add(p);
+                    this.particles.push(p);
+                }
+
+                for (let i = this.particles.length - 1; i >= 0; i--) {
+                    const p = this.particles[i];
+                    p.userData.life += dt;
+                    if (p.userData.life > 3.0) {
+                        this.scene.remove(p);
+                        p.material.dispose();
+                        this.particles.splice(i, 1);
+                    } else {
+                        p.position.add(p.userData.vel.clone().multiplyScalar(dt));
+                        p.scale.multiplyScalar(1.0 + dt * 0.5);
+                        p.material.opacity = 0.6 * (1 - (p.userData.life / 3.0));
                     }
                 }
 
-                if (this.minimap && this.character && this.character.mesh) {
-                    const activeCam = this.minimap.isFullMap ? this.camera : this.minimapCamera;
-                    this.minimap.update(this.character, this.remotePlayers, this.npcManager, this.vehicleManager, activeCam);
+                if (this.vrMode) {
+                    this.stereoEffect.render(this.scene, this.camera);
+                } else {
+                    this.renderer.setViewport(0, 0, window.innerWidth, window.innerHeight);
+                    this.renderer.setScissor(0, 0, window.innerWidth, window.innerHeight);
+                    this.renderer.setScissorTest(true);
+                    this.renderer.render(this.scene, this.camera);
+
+                    const minimapEl = document.getElementById('minimap-canvas');
+                    if (this.minimap && !this.minimap.isFullMap && minimapEl && minimapEl.style.display !== 'none') {
+                        if (this.minimapCamera && this.character && this.character.mesh) {
+                            this.minimapCamera.position.x = this.character.mesh.position.x;
+                            this.minimapCamera.position.z = this.character.mesh.position.z;
+                            const size = 200;
+                            const glX = window.innerWidth - size - 10;
+                            const glY = window.innerHeight - size - 10;
+                            this.renderer.setViewport(glX, glY, size, size);
+                            this.renderer.setScissor(glX, glY, size, size);
+                            this.renderer.autoClear = false;
+                            this.renderer.clearDepth();
+                            const tempFog = this.scene.fog;
+                            this.scene.fog = null;
+                            this.renderer.render(this.scene, this.minimapCamera);
+                            this.scene.fog = tempFog;
+                            this.renderer.autoClear = true;
+                        }
+                    }
+
+                    if (!this.minimapThrottle) this.minimapThrottle = 0;
+                    this.minimapThrottle++;
+                    if (this.minimap && this.character && this.character.mesh && this.minimapThrottle % 10 === 0) {
+                        const activeCam = this.minimap.isFullMap ? this.camera : this.minimapCamera;
+                        this.minimap.update(this.character, this.remotePlayers, this.npcManager, this.vehicleManager, activeCam);
+                    }
                 }
             }
         } catch (e) {
-            console.error("Render Loop Error:", e);
+            console.error("Main Loop Error:", e);
         }
     }
 

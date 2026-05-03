@@ -155,6 +155,7 @@ export class WeaponManager {
         this.currentWeaponType = null; // 'pistol' | 'rifle'
         this.remotePlayers = []; // List of remote players for hit detection
         this.tankShells = []; // List of active tank shells
+        this.canisters = []; // List of explosive canisters
 
         // Weapon Configs (Offsets for valid hand placement)
         // Weapon Configs (Offsets for valid hand placement)
@@ -220,6 +221,21 @@ export class WeaponManager {
         this.arContainer.style.overflow = 'hidden';
         this.arContainer.style.display = 'none';
         document.body.appendChild(this.arContainer);
+
+        // PERFORMANCE: Target Cache
+        this.raycastTargets = [];
+        this.lastTargetUpdateTime = 0;
+        this.rangeFinderThrottle = 0;
+        
+        // PERFORMANCE: Shared Geometries
+        this._sparkGeom = new THREE.BoxGeometry(0.05, 0.05, 0.05);
+        this._smokeGeom = new THREE.BoxGeometry(0.2, 0.2, 0.2);
+        this._flashGeom = new THREE.BoxGeometry(1, 1, 1); // For explosion core
+
+        // PERFORMANCE: Shared Materials
+        this._sparkMat = new THREE.MeshBasicMaterial({ color: 0xffff88, transparent: true });
+        this._bloodMat = new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true });
+        this._smokeMat = new THREE.MeshBasicMaterial({ color: 0x888888, transparent: true, opacity: 0.5 });
     }
 
     isSelf(obj) {
@@ -307,20 +323,11 @@ export class WeaponManager {
 
     setupInput() {
         // ... (rest of setupInput)
-        // Create Debug Display
-        this.debugEl = document.createElement('div');
-        this.debugEl.style.position = 'absolute';
-        this.debugEl.style.top = '10px';
-        this.debugEl.style.left = '50%';
-        this.debugEl.style.transform = 'translateX(-50%)';
-        this.debugEl.style.color = 'yellow';
-        this.debugEl.style.fontWeight = 'bold';
-        this.debugEl.style.fontSize = '20px';
-        this.debugEl.style.fontFamily = 'monospace';
-        this.debugEl.style.pointerEvents = 'none';
-        this.debugEl.style.zIndex = '9999';
-        this.debugEl.innerText = "CONTROLS: 8/2(X) 4/6(Y) Q/E(Z)";
-        document.body.appendChild(this.debugEl);
+        // Consolidate into the existing Debug Console
+        this.debugEl = document.getElementById('debug-console');
+        if (this.debugEl) {
+            this.debugEl.innerText = "WEAPON SYSTEM ACTIVE";
+        }
 
         window.addEventListener('keydown', (e) => {
             // Weapon Switching
@@ -390,18 +397,22 @@ export class WeaponManager {
         raycaster.far = 2000; // 2km range
 
         // Intersect
-        const visualObjects = [];
-        const currentVehMesh = (this.characterController && this.characterController.vehicle) ? this.characterController.vehicle.mesh : null;
-
-        this.scene.traverse(c => {
-            if (c.isMesh && c !== this.currentWeaponMesh && !this.isSelf(c)) {
-                // Ignore current vehicle parts
-                if (this.isVehiclePart(c, currentVehMesh)) return;
-                visualObjects.push(c);
+        const now = Date.now();
+        if (now - this.lastTargetUpdateTime > 1000) { // Update target list once per second
+            this.lastTargetUpdateTime = now;
+            
+            // PERFORMANCE: Use the consolidated list from CharacterController
+            this.raycastTargets = (this.characterController && this.characterController.allPhysicTargets && this.characterController.allPhysicTargets.length > 0) ? 
+                this.characterController.allPhysicTargets : 
+                (this.characterController.colliders || []);
+            
+            // Add remote players (WeaponManager logic handles them specially too)
+            if (this.remotePlayers) {
+                this.remotePlayers.forEach(p => { if (p.mesh && !this.raycastTargets.includes(p.mesh)) this.raycastTargets.push(p.mesh); });
             }
-        });
+        }
 
-        const hits = raycaster.intersectObjects(visualObjects, false);
+        const hits = raycaster.intersectObjects(this.raycastTargets, true);
         if (hits.length > 0) {
             const dist = hits[0].distance;
             this.rangeEl.innerText = `${dist.toFixed(1)} m`;
@@ -492,6 +503,8 @@ export class WeaponManager {
             this.currentWeaponMesh = null;
         }
 
+        // Store the last type before clearing it
+        if (this.currentWeaponType) this.lastWeaponType = this.currentWeaponType;
         this.currentWeaponType = null;
 
         // Hide UI
@@ -502,7 +515,18 @@ export class WeaponManager {
         if (this.laserMesh) this.laserMesh.visible = false;
 
         if (this.characterController) {
+            this.characterController.state = 'idle';
+            this.characterController.playAnimation('idle', true);
             console.log("WeaponManager: Character returning to idle stance.");
+        }
+    }
+
+    toggleHolster() {
+        if (this.currentWeaponType) {
+            this.holster();
+        } else {
+            // Re-equip last weapon or default to pistol
+            this.equip(this.lastWeaponType || 'pistol');
         }
     }
 
@@ -625,24 +649,31 @@ export class WeaponManager {
     }
 
     createExplosion(position, radius) {
-        const boomLight = new THREE.PointLight(0xff4400, 10, radius * 3);
+        // ULTRA-LEAN EXPLOSION: Low intensity, very short life
+        const boomLight = new THREE.PointLight(0xff6600, 2, radius); 
         boomLight.position.copy(position);
         this.scene.add(boomLight);
-        setTimeout(() => this.scene.remove(boomLight), 200);
+        setTimeout(() => { if (this.scene) this.scene.remove(boomLight); }, 60);
 
         if (this.soundManager) this.soundManager.playTankShot();
 
-        // Cinder particles
-        for (let i = 0; i < 15; i++) {
-            const p = new THREE.Mesh(new THREE.SphereGeometry(0.2, 4, 4), new THREE.MeshBasicMaterial({ color: 0xffaa00 }));
+        // Minimal particles (only 2 boxes) - Using SHARED MATERIAL CLONES to allow independent opacity
+        for (let i = 0; i < 2; i++) {
+            const pMat = this._sparkMat.clone();
+            const p = new THREE.Mesh(this._sparkGeom, pMat);
             p.position.copy(position);
-            const vel = new THREE.Vector3((Math.random() - 0.5) * 15, Math.random() * 15, (Math.random() - 0.5) * 15);
+            const vel = new THREE.Vector3((Math.random() - 0.5) * 8, Math.random() * 8, (Math.random() - 0.5) * 8);
             this.scene.add(p);
             const start = Date.now();
             const anim = () => {
-                if (Date.now() - start > 1000) { this.scene.remove(p); return; }
+                if (Date.now() - start > 300) { 
+                    this.scene.remove(p); 
+                    pMat.dispose(); 
+                    return; 
+                }
                 p.position.add(vel.clone().multiplyScalar(0.016));
-                vel.y -= 0.5;
+                vel.y -= 0.8;
+                pMat.opacity -= 0.05;
                 requestAnimationFrame(anim);
             };
             anim();
@@ -658,7 +689,7 @@ export class WeaponManager {
         // Calculate muzzle position using localToWorld to handle Scale/Rotation correctly
         const localMuzzle = this.currentWeaponType === 'pistol' ? 
             new THREE.Vector3(0, 0.1, -0.4) : // Pistol (Z-forward)
-            new THREE.Vector3(0.0259, 0.0004, 0); // Rifle (X-forward) - Corrected for Scale 250
+            new THREE.Vector3(0.85, 0.05, 0); // Rifle (+X forward tip)
         
         const muzzlePos = this.currentWeaponMesh.localToWorld(localMuzzle.clone());
 
@@ -716,11 +747,48 @@ export class WeaponManager {
                 this.characterController.world.vehicleManager.damageVehicle(targetVeh, dmg, hit.object);
             }
 
-            // Damage Spiders
-            const targetSpider = this.findSpiderByMesh(hit.object);
-            if (targetSpider) {
-                const dmg = this.currentWeaponType === 'rifle' ? 50 : 20;
-                this.characterController.world.spiderManager.damage(targetSpider, dmg);
+
+
+            // Hit Canister?
+            const targetCanister = this.canisters.find(c => {
+                let found = false;
+                c.mesh.traverse(m => { if (m === hit.object) found = true; });
+                return found;
+            });
+            if (targetCanister && !targetCanister.exploded) {
+                this.explodeCanister(targetCanister);
+            }
+
+            // --- TRASH CAN DESTRUCTION ---
+            let trashCan = null;
+            let temp = hit.object;
+            while(temp) {
+                if (temp.userData && temp.userData.isTrashCan) {
+                    trashCan = temp;
+                    break;
+                }
+                temp = temp.parent;
+            }
+
+            if (trashCan) {
+                // Rule: 5 pistol shots (dmg 1) or 1 rifle shot (dmg 5)
+                const dmg = (this.currentWeaponType === 'pistol') ? 1 : 5;
+                trashCan.userData.hp -= dmg;
+                console.log(`Trash Can HP: ${trashCan.userData.hp}`);
+                
+                if (trashCan.userData.hp <= 0) {
+                    // NO EXPLOSION for trash cans as per user request
+                    if (trashCan.parent) trashCan.parent.remove(trashCan);
+                    
+                    // --- CRITICAL: PHYSICS CLEANUP ---
+                    if (this.characterController) {
+                        this.characterController.colliders = this.characterController.colliders.filter(c => c !== trashCan);
+                        // Force immediate update of the physics system to remove the "ghost"
+                        if (this.characterController.world) {
+                            this.characterController.world.updateRemoteColliders();
+                        }
+                    }
+                }
             }
             
             // Network Hit
@@ -801,11 +869,7 @@ export class WeaponManager {
             const targetVeh = this.characterController.world.vehicleManager.findVehicleByMesh(obj);
             if (targetVeh) this.characterController.world.vehicleManager.damageVehicle(targetVeh, 0.1, obj, true);
 
-            // Damage Spiders
-            const targetSpider = this.findSpiderByMesh(obj);
-            if (targetSpider) {
-                this.characterController.world.spiderManager.damage(targetSpider, 35);
-            }
+
         }
     }
 
@@ -923,20 +987,19 @@ export class WeaponManager {
     }
 
     createImpact(point, normal, type = 'spark', scale = 1.0) {
-        const color = type === 'blood' ? 0xff0000 : 0xffff88;
+        const baseMat = type === 'blood' ? this._bloodMat : this._sparkMat;
 
-        // 1. SPARKS / PARTICLES (Temporary bits that fly off)
-        const sparkCount = (type === 'blood' ? 20 : 25) * scale; // Increased density
+        // 1. SPARKS / PARTICLES
+        // Optimized: Reduced count and use shared material clones for independent fade
+        const sparkCount = (type === 'blood' ? 5 : 8) * scale; 
         for (let i = 0; i < sparkCount; i++) {
-            const pSize = 0.08 * scale; // Slightly larger particles
-            const pGeom = new THREE.SphereGeometry(pSize, 4, 4);
-            const pMat = new THREE.MeshBasicMaterial({ color: color, transparent: true });
-            const p = new THREE.Mesh(pGeom, pMat);
+            const pMat = baseMat.clone();
+            const p = new THREE.Mesh(this._sparkGeom, pMat);
             p.userData.type = 'impact_part';
             p.position.copy(point);
+            p.scale.setScalar(scale);
             this.scene.add(p);
 
-            // Random Velocity based on normal (if available) or random if not
             const vel = normal ? normal.clone() : new THREE.Vector3(0, 1, 0);
             vel.x += (Math.random() - 0.5) * 1.5;
             vel.y += (Math.random() - 0.5) * 1.5;
@@ -953,12 +1016,11 @@ export class WeaponManager {
                 p.position.z = startPos.z + vel.z * time;
                 p.position.y = startPos.y + vel.y * time + 0.5 * gravity * time * time;
 
-                p.material.opacity -= 0.04;
-                if (p.material.opacity > 0) {
+                pMat.opacity -= 0.06;
+                if (pMat.opacity > 0) {
                     requestAnimationFrame(animateParticle);
                 } else {
                     this.scene.remove(p);
-                    pGeom.dispose();
                     pMat.dispose();
                 }
             };
@@ -1028,26 +1090,26 @@ export class WeaponManager {
         }
 
         // 3. SMOKE PUFFS (NEW)
-        const smokeCount = 3 * scale;
+        // Optimized: Fewer smoke puffs and use shared material clones
+        const smokeCount = 1 * scale;
         for (let i = 0; i < smokeCount; i++) {
-            const sGeom = new THREE.SphereGeometry(0.3 * scale, 8, 8);
-            const sMat = new THREE.MeshBasicMaterial({ color: 0x888888, transparent: true, opacity: 0.5 });
-            const s = new THREE.Mesh(sGeom, sMat);
+            const sMat = this._smokeMat.clone();
+            const s = new THREE.Mesh(this._smokeGeom, sMat);
             s.userData.type = 'impact_part';
             s.position.copy(point);
+            s.scale.setScalar(scale);
             this.scene.add(s);
 
             const vel = new THREE.Vector3((Math.random() - 0.5) * 2, Math.random() * 2 + 1, (Math.random() - 0.5) * 2);
             let time = 0;
             const anim = () => {
-                time += 0.05;
+                time += 0.06;
                 s.position.add(vel.clone().multiplyScalar(0.05));
                 s.scale.multiplyScalar(1.05);
-                s.material.opacity -= 0.01;
-                if (s.material.opacity > 0) requestAnimationFrame(anim);
+                sMat.opacity -= 0.02;
+                if (sMat.opacity > 0) requestAnimationFrame(anim);
                 else {
                     this.scene.remove(s);
-                    sGeom.dispose();
                     sMat.dispose();
                 }
             };
@@ -1056,15 +1118,15 @@ export class WeaponManager {
     }
 
     createExplosion(point, scale = 1.0) {
-        // 1. Core Flash
-        const flashGeom = new THREE.SphereGeometry(2.0 * scale, 16, 16);
+        // 1. Core Flash (Smaller & Faster)
+        const flashGeom = new THREE.SphereGeometry(1.5 * scale, 8, 8);
         const flashMat = new THREE.MeshBasicMaterial({ color: 0xffcc00, transparent: true, opacity: 1.0 });
         const flash = new THREE.Mesh(flashGeom, flashMat);
         flash.position.copy(point);
         this.scene.add(flash);
 
-        // 2. Light Pulse
-        const light = new THREE.PointLight(0xffaa00, 50 * scale, 30 * scale);
+        // 2. Light Pulse (Reduced intensity/range)
+        const light = new THREE.PointLight(0xffaa00, 20 * scale, 15 * scale);
         light.position.copy(point);
         this.scene.add(light);
 
@@ -1124,17 +1186,6 @@ export class WeaponManager {
                     }
                 });
             }
-
-            // Push/Damage Spiders
-            if (world.spiderManager && world.spiderManager.spiders) {
-                world.spiderManager.spiders.forEach(spider => {
-                    const dist = spider.mesh.position.distanceTo(point);
-                    if (dist < radius && dist > 0.1) {
-                        const intensity = (1.0 - dist / radius);
-                        world.spiderManager.damage(spider, intensity * 100); // 100 dmg at center
-                    }
-                });
-            }
         }
     }
 
@@ -1148,21 +1199,6 @@ export class WeaponManager {
             }
         }
         return false;
-    }
-
-    findSpiderByMesh(mesh) {
-        if (!mesh || !this.characterController || !this.characterController.world) return null;
-        const spiderManager = this.characterController.world.spiderManager;
-        if (!spiderManager) return null;
-
-        for (const s of spiderManager.spiders) {
-            let temp = mesh;
-            while (temp) {
-                if (temp === s.mesh) return s;
-                temp = temp.parent;
-            }
-        }
-        return null;
     }
 
     update(dt) {
@@ -1184,30 +1220,25 @@ export class WeaponManager {
             const isAiming = (this.characterController && this.characterController.keys && this.characterController.keys.ads);
             
             if (inFirstPerson || isAiming) {
-                // TRICK: In first person or aiming, start the laser from the camera's perspective 
-                // but offset it slightly to the right and down to look like it comes from the gun.
-                // This "tricks the brain" as requested by the user.
+                // ADS Mode (Tricks the brain)
                 const camPos = this.camera.position.clone();
                 const camDir = new THREE.Vector3();
                 this.camera.getWorldDirection(camDir);
-                
-                // Get right and up vectors from camera
                 const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
                 const camUp = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion);
 
-                // Offset the start point: slightly right, slightly down, and slightly forward
-                // so the laser doesn't clip with the camera itself.
                 start = camPos.clone()
-                    .add(camRight.multiplyScalar(0.25)) // 25cm to the right
-                    .add(camUp.multiplyScalar(-0.25))   // 25cm down
-                    .add(camDir.multiplyScalar(0.5));    // 50cm forward
+                    .add(camRight.multiplyScalar(0.25))
+                    .add(camUp.multiplyScalar(-0.25))
+                    .add(camDir.multiplyScalar(0.5));
             } else {
-                // Standard Third Person calculation (Hip fire / Holding)
-                // Calcular punto de inicio usando localToWorld para manejar ESCALA y rotación
+                // Hip Fire / 3rd Person
+                // Corrected AWP/Rifle Muzzle: +X orientation, approx 0.85 local
                 const localMuzzle = this.currentWeaponType === 'pistol' ? 
-                    new THREE.Vector3(0, 0.1, -0.4) : // Pistol
-                    new THREE.Vector3(0.0259, 0.0004, 0); // Rifle (AWP) - Corrected for Scale 250
+                    new THREE.Vector3(0, 0.1, -0.4) : 
+                    new THREE.Vector3(0.85, 0.05, 0); // Muzzle at the tip of the barrel
                 
+                this.currentWeaponMesh.updateMatrixWorld(true);
                 start = this.currentWeaponMesh.localToWorld(localMuzzle.clone());
             }
 
@@ -1217,23 +1248,8 @@ export class WeaponManager {
             raycaster.set(this.camera.position, direction);
             raycaster.far = 1000;
 
-            let targets = [];
-            const currentVehMesh = (this.characterController && this.characterController.vehicle) ? this.characterController.vehicle.mesh : null;
-            this.scene.traverse(c => {
-                if (c.isMesh && !this.isSelf(c) && c.visible) {
-                    if (this.isVehiclePart(c, currentVehMesh)) return;
-                    if (c.userData.type === 'bullet' || c.userData.type === 'impact_part') return;
-                    targets.push(c);
-                }
-            });
-            if (this.remotePlayers && Array.isArray(this.remotePlayers)) {
-                this.remotePlayers.forEach(p => {
-                    const mesh = p.mesh || (p.isMesh ? p : null);
-                    if (mesh) mesh.traverse(c => { if (c.isMesh) targets.push(c); });
-                });
-            }
-
-            const hits = raycaster.intersectObjects(targets, false);
+            // PERFORMANCE: Use cached targets from updateRangeFinder instead of traverse
+            const hits = raycaster.intersectObjects(this.raycastTargets, false);
             const end = new THREE.Vector3();
             if (hits.length > 0) end.copy(hits[0].point);
             else end.copy(this.camera.position).add(direction.multiplyScalar(100));
@@ -1251,6 +1267,13 @@ export class WeaponManager {
         }
 
         this.timeSinceLastShot += dt;
+        
+        // THROTTLE PERFORMANCE-HEAVY UPDATES
+        this.rangeFinderThrottle++;
+        if (this.rangeFinderThrottle % 5 === 0) {
+            this.updateRangeFinder(); // This also updates raycastTargets
+        }
+
         if (this.isFiring && this.currentWeaponType) {
             const rate = this.configs[this.currentWeaponType].fireRate || 0.5;
             if (this.timeSinceLastShot >= rate) this.shoot();
@@ -1383,5 +1406,41 @@ export class WeaponManager {
                 this.arMarkers.delete(id);
             }
         }
+    }
+
+
+
+    explodeCanister(canister) {
+        if (canister.exploded) return;
+        canister.exploded = true;
+
+        const pos = canister.mesh.position.clone();
+        // --- CRITICAL: PHYSICS CLEANUP ---
+        if (this.characterController) {
+            this.characterController.colliders = this.characterController.colliders.filter(c => c !== canister.mesh);
+            // Force immediate update of the physics system to remove the "ghost"
+            if (this.characterController.world) {
+                this.characterController.world.updateRemoteColliders();
+            }
+        }
+
+        // Visual & Audio
+        this.createExplosion(pos, 6.0); // Smaller explosion
+        if (this.soundManager) this.soundManager.playTankShot();
+
+        // Area Damage (reduced radius)
+        const radius = 8.0; 
+        
+        // ... (rest of the logic for players remains the same)
+
+
+        // Damage Player
+        if (this.character.position.distanceTo(pos) < radius) {
+            if (this.characterController.damage) this.characterController.damage(20);
+        }
+
+        // Remove mesh
+        this.scene.remove(canister.mesh);
+        this.canisters = this.canisters.filter(c => c !== canister);
     }
 }

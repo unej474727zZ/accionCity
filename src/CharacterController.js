@@ -65,6 +65,7 @@ export class CharacterController {
 
         this.colliders = []; // Will be populated by World
         this.remoteColliders = []; // Remote Players for collision
+        this.allPhysicTargets = []; // CONSOLIDATED LIST for high performance physics lookup
 
         // Camera Shake State
         this.shakeIntensity = 0;
@@ -113,6 +114,7 @@ export class CharacterController {
             this.animations['walk'] = this.getClip(this.assets['walk'], 'walk');
             this.animations['run'] = this.getClip(this.assets['run'], 'run');
             this.animations['backward'] = this.getClip(this.assets['backward'], 'backward');
+            this._lastFiringKey = ''; // State tracking for weapon animations
             this.animations['jump'] = this.getClip(this.assets['jump'], 'jump');
 
             // Fix: Load Driving Animation
@@ -131,32 +133,35 @@ export class CharacterController {
             const upperBodyBones = ['Spine', 'Neck', 'Head', 'Shoulder', 'Arm', 'Hand', 'ForeArm'];
 
             // A) RIFLE MASK (from FiringRifle.glb)
-            const rifleClipRaw = this.getClip(this.assets['firing'], 'firing') || (this.assets['firing'] ? this.assets['firing'].animations[0] : null);
+            const rifleClipRaw = this.getClip(this.assets['firing'], 'firing') || (this.assets['firing'] && this.assets['firing'].animations[0]);
             if (rifleClipRaw) {
+                // Ensure name is consistent
+                rifleClipRaw.name = 'firing';
                 const newTracks = [];
                 rifleClipRaw.tracks.forEach(track => {
                     const boneName = track.name.split('.')[0];
                     if (upperBodyBones.some(b => boneName.includes(b))) newTracks.push(track);
                 });
-                this.animations['firing'] = new THREE.AnimationClip('firing_upper', -1, newTracks);
+                this.animations['firing'] = new THREE.AnimationClip('firing', rifleClipRaw.duration, newTracks);
             }
 
             // B) PISTOL MASK (from shooting.glb)
-            // User reported shooting.glb plays well on upper body but freezes legs. So we filter it too.
-            const pistolClipRaw = this.getClip(this.assets['shooting'], 'shoot_walk') || (this.assets['shooting'] ? this.assets['shooting'].animations[0] : null);
+            const pistolClipRaw = this.getClip(this.assets['shooting'], 'shooting') || (this.assets['shooting'] && this.assets['shooting'].animations[0]);
             if (pistolClipRaw) {
+                // Ensure name is consistent
+                pistolClipRaw.name = 'shooting';
                 const newTracks = [];
                 pistolClipRaw.tracks.forEach(track => {
-                    const boneName = track.name.split('.')[0].toLowerCase();
-                    // Upper body bones + Mixamo prefixes
-                    const isUpper = ['spine', 'neck', 'head', 'shoulder', 'arm', 'hand', 'forearm'].some(b => boneName.includes(b));
-                    if (isUpper) newTracks.push(track);
+                    const boneName = track.name.split('.')[0];
+                    if (upperBodyBones.some(b => boneName.includes(b))) newTracks.push(track);
                 });
-                this.animations['pistol_upper'] = new THREE.AnimationClip('pistol_upper', -1, newTracks);
+                this.animations['shooting'] = new THREE.AnimationClip('shooting', pistolClipRaw.duration, newTracks);
             }
 
+            // Define weapon stances (idle with gun up)
+            this.animations['rifle'] = this.animations['idle']; // Fallback for now
+            this.animations['pistol'] = this.animations['idle']; // Fallback for now
             // Start idle
-            // Start idle (Safe now due to dummy clip)
             this.playAnimation('idle');
 
             // Global Mouse Listeners for Fire/ADS
@@ -481,6 +486,13 @@ export class CharacterController {
             }
         }, null);
 
+        // AR MODE TOGGLE
+        bindBtn('btn-ar', () => {
+            if (this.world && this.world.toggleAR) {
+                this.world.toggleAR();
+            }
+        }, null);
+
         // --- EXTRA TOGGLES ---
 
         // CHAT TOGGLE
@@ -540,40 +552,42 @@ export class CharacterController {
 
     setFiring(isActive) {
         if (!this.mixer) return;
+        
+        // Anti-Loop: Only trigger changes if the firing state OR weapon type flips
+        const weaponType = this.weaponManager ? this.weaponManager.currentWeaponType : 'none';
+        const stateKey = `${isActive}_${weaponType}`;
+        
+        if (this._lastFiringKey === stateKey) return;
+        this._lastFiringKey = stateKey;
 
         // Determine which mask to use based on weapon
-        const isRifle = (this.weaponManager && this.weaponManager.currentWeaponType === 'rifle');
-        const targetClipName = isRifle ? 'firing' : 'pistol_upper'; // 'firing' is the rifle mask key
-        const otherClipName = isRifle ? 'pistol_upper' : 'firing';
+        const isRifle = (weaponType === 'rifle');
+        const targetClipName = isRifle ? 'firing' : 'shooting';
+        const otherClipName = isRifle ? 'shooting' : 'firing';
 
         // Get Actions
         const targetClip = this.animations[targetClipName];
         if (!targetClip) return;
         const targetAction = this.mixer.clipAction(targetClip);
 
-        // Fade OUT the other mask if it's running (e.g. switched weapon while firing)
+        // Fade OUT the other mask if it's running
         const otherClip = this.animations[otherClipName];
         if (otherClip) {
             const otherAction = this.mixer.clipAction(otherClip);
-            if (otherAction.isRunning()) otherAction.fadeOut(0.2);
+            if (otherAction.isRunning()) otherAction.fadeOut(0.1);
         }
 
         if (isActive) {
-            // Only play if not already playing or fading in
-            if (!targetAction.isRunning() || targetAction.getEffectiveWeight() < 0.1) {
-                targetAction.reset();
-                targetAction.enabled = true;
-                targetAction.setLoop(THREE.LoopRepeat);
-                targetAction.clampWhenFinished = false;
-                // High weight to override arms
-                targetAction.setEffectiveWeight(50.0);
-                targetAction.play();
-                targetAction.fadeIn(0.2);
-            }
+            targetAction.reset();
+            targetAction.enabled = true;
+            targetAction.setLoop(THREE.LoopRepeat);
+            targetAction.setEffectiveWeight(1.0); 
+            targetAction.fadeIn(0.05); // Faster entry
+            targetAction.play();
+            console.log(`Animation: Firing Start (${targetClipName})`);
         } else {
-            if (targetAction.isRunning()) {
-                targetAction.fadeOut(0.2);
-            }
+            console.log("Animation: Firing Stop (Fast Recovery)");
+            targetAction.fadeOut(0.15); // Faster recovery (0.3 -> 0.15)
         }
     }
 
@@ -837,10 +851,9 @@ export class CharacterController {
         // Rotación más rápida al correr para compensar la inercia visual
         const keyLookSpeed = (this.isRunning ? 3.5 : 2.0) * dt;
 
-        // Direcciones unificadas con el ratón (ya no se invierten al conducir)
-        const lookDir = 1;
-        if (this.keys.lookLeft) this.yaw += keyLookSpeed * lookDir;
-        if (this.keys.lookRight) this.yaw -= keyLookSpeed * lookDir;
+        // Corregido: Left gira a la izquierda (+), Right a la derecha (-) para el avatar y moto
+        if (this.keys.lookLeft) this.yaw += keyLookSpeed;
+        if (this.keys.lookRight) this.yaw -= keyLookSpeed;
         if (this.keys.lookUp) this.pitch += keyLookSpeed;
         if (this.keys.lookDown) this.pitch -= keyLookSpeed;
 
@@ -857,9 +870,9 @@ export class CharacterController {
         if (gamepad) {
             const dz = 0.1;
 
-            // Left Stick (Movement) - Usually Axes 0 (X) and 1 (Y)
+            // Left Stick (Movement) - Standard FPS: Axis 0 = Strafe, Axis 1 = Move
             if (Math.abs(gamepad.axes[1]) > dz) fInput -= gamepad.axes[1];
-            if (Math.abs(gamepad.axes[0]) > dz) this.yaw -= gamepad.axes[0] * 2.0 * dt;
+            if (Math.abs(gamepad.axes[0]) > dz) sInput += gamepad.axes[0]; // Left Stick X is now Strafe
 
             // Right Stick (Camera Look) 
             // Generic Android controllers often put Right Stick X on 2 or 4. Right Stick Y on 3 or 5.
@@ -1085,6 +1098,18 @@ export class CharacterController {
                 speed = 0;
             }
 
+            // --- SHOOTING PRIORITY ---
+            if (this.weaponManager && this.weaponManager.currentWeaponType) {
+                if (this.keys.fire) {
+                    nextState = 'shooting';
+                } else if (!isMoving && !this.isJumping) {
+                    // Stance based on weapon type when idle
+                    nextState = (this.weaponManager.currentWeaponType === 'rifle') ? 'rifle' : 'pistol';
+                } else if (!isMoving) {
+                    nextState = 'idle'; // Absolute fallback
+                }
+            }
+
             // --- NOCLIP / GHOST MODE ---
             if (this.noclip) {
                 const flySpeed = this.runSpeed * 2;
@@ -1104,7 +1129,12 @@ export class CharacterController {
             const rayOrigin = this.mesh.position.clone();
             rayOrigin.y += 1.0;
             this.groundRaycaster.set(rayOrigin, new THREE.Vector3(0, -1, 0));
-            const intersects = this.groundRaycaster.intersectObjects(this.colliders, true);
+            
+            // OPTIMIZED: Use consolidated list from World.js updateRemoteColliders
+            const groundTargets = this.allPhysicTargets.length > 0 ? this.allPhysicTargets : this.colliders; 
+            
+            // CRITICAL PERFORMANCE: recursive = TRUE for scenery/complex models
+            const intersects = this.groundRaycaster.intersectObjects(groundTargets, true);
 
             let groundHeight = -99999;
             let foundGround = false;
@@ -1161,8 +1191,6 @@ export class CharacterController {
             }
 
             // Add rotation from joystick
-            // Add rotation from joystick
-            // Add rotation from joystick
             if (this.keys.turnLeft) {
                 const turnAmt = 1.5 * dt;
                 this.yaw += turnAmt;
@@ -1203,19 +1231,7 @@ export class CharacterController {
                     this.mesh.position.clone().add(new THREE.Vector3(0, 0.1, 0))
                 ];
 
-                // Combine environment colliders, remote player colliders, AND VEHICLES!
-                const allColliders = [...this.colliders, ...this.remoteColliders];
-                if (this.world && this.world.vehicleManager) {
-                    this.world.vehicleManager.vehicles.forEach(v => {
-                        if (v.mesh) allColliders.push(v.mesh);
-                    });
-                }
-                if (this.world && this.world.npcManager && this.world.npcManager.cars) {
-                    this.world.npcManager.cars.forEach(m => {
-                        if (m) allColliders.push(m);
-                    });
-                }
-
+                const allColliders = this.allPhysicTargets.length > 0 ? this.allPhysicTargets : this.colliders;
                 const dynFar = Math.max(0.6, moveVector.length() + 0.3); // Dynamic length to prevent tunneling
                 let closestDist = 999;
 
@@ -1223,11 +1239,37 @@ export class CharacterController {
                     this.raycaster.set(origin, moveDir);
                     this.raycaster.far = dynFar;
 
+                    // SET RECURSIVE TO TRUE to detect sub-meshes of complex vehicles/buildings
                     const wallHits = this.raycaster.intersectObjects(allColliders, true);
 
                     if (wallHits.length > 0) {
-                        blocked = true;
-                        if (wallHits[0].distance < closestDist) closestDist = wallHits[0].distance;
+                        const hit = wallHits[0];
+                        
+                        // --- PUSHING LOGIC (Trash Cans & Canisters) ---
+                        let pushObj = null;
+                        let t = hit.object;
+                        // Traverse up to find if it's a pushable object
+                        while(t) {
+                            if (t.userData && (t.userData.isTrashCan || t.userData.isExplosive)) { 
+                                pushObj = t; 
+                                break; 
+                            }
+                            t = t.parent;
+                        }
+
+                        if (pushObj) {
+                            // If it's a pushable object, we move it and DON'T block the player fully
+                            const pushForce = dt * 15.0; // Force of the push
+                            pushObj.position.add(moveDir.clone().multiplyScalar(pushForce));
+                            pushObj.position.y = 0; // Keep it on the ground
+                            
+                            // Slight slowdown but not a total block
+                            moveVector.multiplyScalar(0.8);
+                        } else {
+                            blocked = true;
+                        }
+                        
+                        if (hit.distance < closestDist) closestDist = hit.distance;
                     }
                 }
 
@@ -1272,10 +1314,14 @@ export class CharacterController {
             this.mesh.position.add(moveVector);
 
             if (!this.isGrounded) {
-                // Loop jump animation while in air
                 this.playAnimation('jump', true);
             } else {
-                this.playAnimation(nextState);
+                // If the logic above determined we should be shooting, stick to it!
+                if (nextState === 'shooting') {
+                    this.playAnimation('shooting');
+                } else {
+                    this.playAnimation(nextState);
+                }
 
                 // --- ANIMATION SYNC (Prevent Foot Sliding) ---
                 if (this.currentAction && (nextState === 'walk' || nextState === 'run' || nextState === 'backward')) {
@@ -1434,31 +1480,27 @@ PTR LOCK: ${plStatus}
     updateDrivingPose() {
         if (!this.isDriving || !this.mesh) return;
 
-        // Redundant rotation removed to prevent conflict with line 1464
-
-
-        // Procedural Bone Adjustment (IK-ish)
-        const bones = {};
-        this.mesh.traverse(child => {
-            if (child.isBone) {
-                const name = child.name;
-                if (!this._loggedBones) console.log("🦴 Bone Found:", name);
-
-                // Use endsWith to prevent 'RightArm' matching 'RightForeArm' and double-assigning
-                if (name.endsWith('RightArm')) bones.rArm = child;
-                if (name.endsWith('LeftArm')) bones.lArm = child;
-                if (name.endsWith('RightForeArm')) bones.rForeArm = child;
-                if (name.endsWith('LeftForeArm')) bones.lForeArm = child;
-                if (name.endsWith('RightUpLeg')) bones.rThigh = child;
-                if (name.endsWith('LeftUpLeg')) bones.lThigh = child;
-                if (name.endsWith('RightLeg')) bones.rShin = child;
-                if (name.endsWith('LeftLeg')) bones.lShin = child;
-                if (name.endsWith('Spine')) bones.spine = child;
-                if (name.endsWith('Neck')) bones.neck = child;
-                if (name.endsWith('Hips')) bones.hips = child;
-            }
-        });
-        this._loggedBones = true;
+        // OPTIMIZED: Cache bones to avoid traversing every frame
+        if (!this.bones) {
+            this.bones = {};
+            this.mesh.traverse(child => {
+                if (child.isBone) {
+                    const name = child.name;
+                    if (name.endsWith('RightArm')) this.bones.rArm = child;
+                    if (name.endsWith('LeftArm')) this.bones.lArm = child;
+                    if (name.endsWith('RightForeArm')) this.bones.rForeArm = child;
+                    if (name.endsWith('LeftForeArm')) this.bones.lForeArm = child;
+                    if (name.endsWith('RightUpLeg')) this.bones.rThigh = child;
+                    if (name.endsWith('LeftUpLeg')) this.bones.lThigh = child;
+                    if (name.endsWith('RightLeg')) this.bones.rShin = child;
+                    if (name.endsWith('LeftLeg')) this.bones.lShin = child;
+                    if (name.endsWith('Spine')) this.bones.spine = child;
+                    if (name.endsWith('Neck')) this.bones.neck = child;
+                    if (name.endsWith('Hips')) this.bones.hips = child;
+                }
+            });
+        }
+        const bones = this.bones;
 
         if (this.vehicle && this.vehicle.type === 'motorcycle') {
             // Rotalo: Math.PI aligns his back to camera and face to handlebars
@@ -1513,18 +1555,18 @@ PTR LOCK: ${plStatus}
         // 4. Head Position
         applyRel(bones.neck, -0.4, 0, 0);
 
-        // FORCE MATRIX UPDATES AFTER OVERRIDE
-        this.mesh.traverse(child => {
-            if (child.isBone) {
-                child.updateMatrixWorld(true);
-            }
-        });
+        // FORCE MATRIX UPDATES AFTER OVERRIDE - Optimized
+        if (this.bones) {
+            Object.values(this.bones).forEach(bone => {
+                bone.updateMatrixWorld(true);
+            });
+        }
     }
 
     updateCamera(dt) {
-        // FIX: Do not update perspective camera if we are in Full Map mode
-        // (World.js handles the Drone Camera in that mode)
-        if (this.world && this.world.minimap && this.world.minimap.isFullMap) return;
+        // FIX: Do not update perspective camera if we are in Full Map mode or AR mode
+        // (World.js handles the Drone Camera in Map mode, and WebXR handles the camera in AR)
+        if (this.world && (this.world.minimap?.isFullMap || this.world.arMode)) return;
 
         let currentYaw = this.yaw;
 
@@ -1601,17 +1643,17 @@ PTR LOCK: ${plStatus}
         this.mesh.visible = false; // Hide player momentarily so raycaster ignores body natively
 
         // Also check collisions against vehicles! (Ignore the one we are driving)
-        let allCams = [...this.colliders];
+        let allCams = this.colliders; 
         if (this.isDriving && this.vehicle) {
-            this.raycaster.layers.set(0); // Asegúrate de que el heli no esté en una capa que el raycast escuche
-            // O más simple: desactivamos la colisión si es vista de morro
+            this.raycaster.layers.set(0); 
             if (this.vehicle.type === 'helicopter') {
                 this.raycaster.far = 0;
             }
         } else {
             this.raycaster.far = 5; // Valor normal para caminar
         }
-        const camHits = this.raycaster.intersectObjects(allCams, true);
+        // CRITICAL PERFORMANCE: recursive = FALSE
+        const camHits = this.raycaster.intersectObjects(allCams, false);
 
         // Restore visibility unless in First Person OR driving a tank/helicopter
         const shouldBeVisible = !inFirstPerson && !(this.isDriving && this.vehicle && (this.vehicle.type === 'tank' || this.vehicle.type === 'helicopter'));
@@ -1672,6 +1714,11 @@ PTR LOCK: ${plStatus}
 
     // RADAR LOGIC
     updateRadar() {
+        // PERFORMANCE: Throttle radar updates
+        if (!this._radarThrottle) this._radarThrottle = 0;
+        this._radarThrottle++;
+        if (this._radarThrottle % 10 !== 0) return; 
+
         const radarBlips = document.getElementById('radar-blips');
         if (!radarBlips) return;
 

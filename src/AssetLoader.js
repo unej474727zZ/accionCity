@@ -36,7 +36,19 @@ export class AssetLoader {
       { name: 'transporter1', url: '/models/transporter1.glb' },
       { name: 'transporter2', url: '/models/transporter2.glb' },
       { name: 'transporter3', url: '/models/transporter3.glb' },
-      { name: 'spiderMech', url: '/models/spiderMech.glb' }
+      // War Zone Scenery
+      { name: 'trash_can', url: '/models/trash_cans_low_poly.glb' },
+      { name: 'tank_wreck', url: '/models/t-80_damaged.glb' },
+      { name: 'dumpster1', url: '/models/dumpster.glb' },
+      { name: 'dumpster2', url: '/models/dumpster_-_4096px2.glb' },
+      { name: 'car_wreck_fsc', url: '/models/wrecked_fsc_zuk.glb' },
+      { name: 'plane_wreck', url: '/models/fortnite_crashed_plane.glb' },
+      { name: 'moto_wreck', url: '/models/moto_wreck.glb' },
+      { name: 'heli_wreck', url: '/models/helicopter_wreck.glb' },
+      { name: 'bus_wreck', url: '/models/destroyed_bus_01.glb' },
+      { name: 'plane_interior', url: '/models/dc3_wreck._interior..glb' },
+      { name: 'car_wreck_group', url: '/models/wrecked_cars_2.glb' },
+      { name: 'canister', url: '/models/bombona.glb' }
     ];
   }
 

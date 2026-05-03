@@ -599,9 +599,39 @@ export class VehicleManager {
     }
 
     update(dt, input) {
+        // 0. CHECK CANISTER COLLISIONS (NEW MECHANIC: Crash = Explosion)
+        const canisters = this.characterController?.world?.explosiveCanisters || [];
+        
+        // Helper to check collision
+        const checkVehicleAgainstCanisters = (vMesh, onHit) => {
+            for (let j = canisters.length - 1; j >= 0; j--) {
+                const can = canisters[j];
+                if (!can.visible) continue;
+                
+                const dist = vMesh.position.distanceTo(can.position);
+                if (dist < 2.5) { // Collision Radius
+                    // 1. Explode Canister
+                    if (this.characterController?.weaponManager) {
+                        this.characterController.weaponManager.createExplosion(can.position, 1.5);
+                    }
+                    can.visible = false;
+                    this.scene.remove(can);
+                    canisters.splice(j, 1);
+                    
+                    // 2. Trigger Vehicle Explosion
+                    onHit();
+                }
+            }
+        };
+
         // 1. UPDATE ALL MANAGED VEHICLES (Physics/Anims)
         for (let i = this.vehicles.length - 1; i >= 0; i--) {
             const v = this.vehicles[i];
+            
+            // Check collisions if moving
+            if (Math.abs(v.velocity) > 1.0 && !v.isCrushed) {
+                checkVehicleAgainstCanisters(v.mesh, () => this.crushVehicle(v));
+            }
 
             // A) CRUSH ANIMATION
             if (v.isCrushed) {
@@ -641,6 +671,9 @@ export class VehicleManager {
                     car.position.add(car.pushVelocity.clone().multiplyScalar(dt));
                     car.pushVelocity.multiplyScalar(Math.max(0, 1.0 - dt * 4.0));
                     isMoving = true;
+
+                    // NPC Collision with canisters
+                    checkVehicleAgainstCanisters(car, () => this.crushNPC(car));
                 }
 
                 // PERFORMANCE FIX: Only raycast the scenery IF the car is actively being pushed or is currently in the air!
@@ -785,8 +818,9 @@ export class VehicleManager {
                 // Camera Follow: For land vehicles only (Heli camera is independent and leads the way)
                 if (!isHeli && this.characterController) {
                     const actualTurn = input.x * cfg.turnSpeed * dt;
-                    this.characterController.yaw -= actualTurn;
-                    this.characterController.aimYaw -= actualTurn;
+                    // FIX: Invert sync to match unified camera arrows
+                    this.characterController.yaw += actualTurn;
+                    this.characterController.aimYaw += actualTurn;
                 }
 
                 // Calculate leaning if it's a motorcycle
@@ -802,6 +836,26 @@ export class VehicleManager {
             // If tipped over, lock to 90 degrees (Math.PI / 2)
             const finalLean = v.isTippedOver ? (Math.PI / 2.2) : targetLean; 
             v.mesh.rotation.z = THREE.MathUtils.lerp(v.mesh.rotation.z, finalLean, dt * 5.0);
+
+            // --- CANISTER COLLISION (EXPLOSIVE BOMBONAS) ---
+            if (this.characterController.weaponManager && this.characterController.weaponManager.canisters) {
+                const wm = this.characterController.weaponManager;
+                const vPos = v.mesh.position;
+                const checkRadius = (v.type === 'tank' ? 5.0 : 2.5); // Larger for tank
+                const speedMag = Math.abs(v.velocity);
+
+                if (speedMag > 2.0) { // Only explode if moving at reasonable speed
+                    for (let i = wm.canisters.length - 1; i >= 0; i--) {
+                        const can = wm.canisters[i];
+                        if (can.exploded) continue;
+                        const dist = vPos.distanceTo(can.mesh.position);
+                        if (dist < checkRadius) {
+                            console.log("💣 VEHICLE IMPACT EXPLOSION!");
+                            wm.explodeCanister(can);
+                        }
+                    }
+                }
+            }
 
             // Tank Mechanics: Enhanced Crushing and Pushing
             if (isTank) {

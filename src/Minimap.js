@@ -57,7 +57,7 @@ export class Minimap {
     }
 
     projectToCanvas(worldPos, viewCamera) {
-        viewCamera.updateMatrixWorld();
+        // Removed redundant updateMatrixWorld() - now called once per frame in update()
         this._tempVec.copy(worldPos);
         this._tempVec.project(viewCamera);
 
@@ -71,6 +71,9 @@ export class Minimap {
     update(character, remotePlayers, npcManager, vehicleManager, activeCamera) {
         if (!character || !character.mesh || !this.ctx || !activeCamera) return;
 
+        // CRITICAL PERFORMANCE: Update camera matrices ONCE per frame
+        activeCamera.updateMatrixWorld();
+        
         const ctx = this.ctx;
         const width = this.canvas.width;
         const height = this.canvas.height;
@@ -138,7 +141,7 @@ export class Minimap {
             });
         }
 
-        // 4. JUGADOR LOCAL (Flecha Blanca)
+        // 5. JUGADOR LOCAL (Flecha Blanca)
         const playerMesh = character.mesh;
         const worldPos = new THREE.Vector3();
         playerMesh.getWorldPosition(worldPos); // Extraer posición real global
