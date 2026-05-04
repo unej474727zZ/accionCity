@@ -31,24 +31,15 @@ body {
 
 #debug-console {
   position: absolute;
-  top: 20px;
-  left: 20px;
-  padding: 12px;
-  background: rgba(0, 20, 10, 0.7);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-left: 4px solid #00ffaa;
-  color: #00ffaa;
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
-  font-size: 11px;
-  line-height: 1.5;
+  top: 0;
+  left: 0;
+  color: lime;
+  background: rgba(0, 0, 0, 0.5);
   pointer-events: none;
-  z-index: 10000;
-  border-radius: 0 12px 12px 0;
-  box-shadow: 10px 10px 30px rgba(0, 0, 0, 0.6);
-  text-shadow: 0 0 8px rgba(0, 255, 170, 0.6);
-  border: 1px solid rgba(0, 255, 170, 0.1);
-  border-left-width: 4px;
+  z-index: 9999;
+  font-family: monospace;
+  font-size: 10px;
+  white-space: pre;
 }
 
 /* --- PSP CONTROLS LAYOUT (Reference Style) --- */
@@ -63,31 +54,28 @@ body {
   z-index: 20;
 }
 
-/* Base Button - Premium Glassmorphism */
+/* Base Button - Transparent & Clean */
 .psp-btn {
   position: absolute;
-  background: rgba(255, 255, 255, 0.05);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  color: rgba(255, 255, 255, 0.9);
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  /* Thin outline */
+  color: rgba(255, 255, 255, 0.8);
   display: flex;
   justify-content: center;
   align-items: center;
   user-select: none;
   touch-action: none;
   pointer-events: auto;
-  border-radius: 12px;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
-  transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  border-radius: 5px;
+  transition: transform 0.1s, background 0.1s;
 }
 
 .psp-btn:active {
   background: rgba(255, 255, 255, 0.2);
-  transform: scale(0.9) translateY(2px);
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.5);
-  border-color: rgba(255, 255, 255, 0.5);
+  transform: scale(0.95);
   color: white;
+  border-color: white;
 }
 
 /* SHOULDER BUTTONS (L / R) - Top Corners, Wide & Thin */
@@ -318,16 +306,6 @@ body {
   /* Clear of Map (200px + 10px + padding) */
 }
 
-#btn-vr {
-  top: 10px;
-  right: 180px;
-}
-
-#btn-ar {
-  top: 10px;
-  right: 130px;
-}
-
 .toggle-btn {
   width: 40px;
   height: 40px;
@@ -363,12 +341,12 @@ body {
 /* Chat UI */
 #chat-container {
   position: absolute;
-  top: 80px;
+  top: 60px;
   left: 50%;
   transform: translateX(-50%);
-  width: 350px;
-  max-width: 85%;
-  height: 180px;
+  width: 300px;
+  max-width: 80%;
+  height: 150px;
   display: flex;
   flex-direction: column;
   pointer-events: none;
@@ -378,16 +356,15 @@ body {
 #chat-messages {
   flex-grow: 1;
   overflow-y: auto;
-  background: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  padding: 12px;
-  border-radius: 12px;
-  margin-bottom: 8px;
+  background: rgba(0, 0, 0, 0.4);
+  /* Slightly darker for contrast */
+  padding: 5px;
+  border-radius: 5px;
+  margin-bottom: 5px;
   color: white;
-  font-size: 13px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  font-size: 14px;
+  text-shadow: 1px 1px 1px black;
+  scrollbar-width: thin;
 }
 
 /* Individual message style */
@@ -398,21 +375,13 @@ body {
 
 #chat-input {
   width: 100%;
-  padding: 10px 15px;
-  background: rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(5px);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  padding: 5px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.3);
   color: white;
-  border-radius: 20px;
+  border-radius: 3px;
   pointer-events: auto;
-  outline: none;
-  transition: all 0.3s ease;
-}
-
-#chat-input:focus {
-  background: rgba(255, 255, 255, 0.15);
-  border-color: rgba(255, 255, 255, 0.4);
-  box-shadow: 0 0 15px rgba(255, 255, 255, 0.1);
+  /* Enable typing */
 }
 
 #chat-input::placeholder {

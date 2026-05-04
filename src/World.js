@@ -32,7 +32,7 @@ export class World {
     constructor(container) {
         this.container = container;
         this.scene = new THREE.Scene();
-        this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 250); // FAR PLANE REDUCED FOR MOBILE VRAM
+        this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 200); // FAR PLANE REDUCED EVEN MORE FOR PERFORMANCE
         this.scene.userData.world = this; // Global access for components
 
         // NETWORKING
@@ -55,7 +55,7 @@ export class World {
         }
 
         this.renderer.setSize(window.innerWidth, window.innerHeight);
-        this.renderer.setPixelRatio(1);
+        this.renderer.setPixelRatio(0.85); // Lowered from 1.0 for better performance
         this.renderer.shadowMap.enabled = false;
         this.renderer.xr.enabled = true; // Enable WebXR
         container.appendChild(this.renderer.domElement);
@@ -88,7 +88,7 @@ export class World {
         // FOG: Hides the edge of the world (Depth)
         // Denser fog for "heavy atmosphere" as requested
         // near: 20 (starts close), far: 150 (obscures distant buildings)
-        this.scene.fog = new THREE.Fog(skyColor, 20, 150);
+        this.scene.fog = new THREE.Fog(skyColor, 15, 120); // Fog starts closer and ends sooner
 
         // Lighting
         // Hemisphere: Sky Color + Ground Bounce
@@ -118,11 +118,11 @@ export class World {
         this.lastMouseY = 0;
 
         // DEBUG: Floor/Grid removed to see City clearly
-        
+
         // PERFORMANCE: Reuse common geometries/materials
-        this._sharedSmokeGeom = new THREE.BoxGeometry(0.5, 0.5, 0.5);
+        this._sharedSmokeGeom = new THREE.SphereGeometry(0.3, 4, 4);
         this._sharedSmokeMat = new THREE.MeshBasicMaterial({ color: 0x333333, transparent: true, opacity: 0.6 });
-        this.particles = []; 
+        this.particles = [];
 
         // AR RETICLE (Ring to show where the city will be placed)
         this.arReticle = new THREE.Mesh(
@@ -131,6 +131,8 @@ export class World {
         );
         this.arReticle.visible = false;
         this.scene.add(this.arReticle);
+
+        this.clutterObjects = []; // Track pushable scenery
     }
 
     async start() {
@@ -253,7 +255,7 @@ export class World {
                             this.character.colliders.push(child);
                             this._cityMeshCount++;
                         }
-                        
+
                         // Extract bounds for minimap
                         if (!child.geometry.boundingBox) child.geometry.computeBoundingBox();
                         child.updateMatrixWorld(true);
@@ -269,7 +271,7 @@ export class World {
 
             // LOAD CHARACTER POSITION
             // RESCUE PROTOCOL: Force a fresh safe spawn once to get out of buildings
-            localStorage.removeItem('characterPosition'); 
+            localStorage.removeItem('characterPosition');
             console.log("World: System Ready. Forced Reset for Rescue.");
 
             this.camera.lookAt(this.character.mesh.position);
@@ -343,7 +345,7 @@ export class World {
 
             // Sync collisions
             this.updateRemoteColliders();
-            
+
 
 
             this.trashCans = [];
@@ -359,7 +361,7 @@ export class World {
                 mesh.position.copy(pos);
                 mesh.rotation.copy(rot);
                 mesh.scale.set(scale, scale, scale);
-                
+
                 // --- CRITICAL FIX: MAKE OBJECTS SOLID ---
                 this.scene.add(mesh);
                 this.character.colliders.push(mesh); // No more passing through!
@@ -388,44 +390,91 @@ export class World {
                 return mesh;
             };
 
-            // 1. Trash Cans (Solid and Pushable, NOT Explosive)
-            for (let i = 0; i < 60; i++) {
-                const x = (Math.random() - 0.5) * 450;
-                const z = (Math.random() - 0.5) * 450;
-                const mesh = addScenery('trash_can', new THREE.Vector3(x, 0, z), new THREE.Euler(0, Math.random() * Math.PI, 0), 0.6, false);
-                if (mesh) {
-                    mesh.userData.isTrashCan = true;
-                    mesh.userData.hp = 5; // 5 shots with pistol
+            // SAFE SPAWN HELPER (Avoid Buildings)
+            const getSafeStreetPos = (range = 450) => {
+                for (let i = 0; i < 5; i++) {
+                    const x = (Math.random() - 0.5) * range;
+                    const z = (Math.random() - 0.5) * range;
+                    const origin = new THREE.Vector3(x, 10, z);
+                    const ray = new THREE.Raycaster(origin, new THREE.Vector3(0, -1, 0));
+                    // Check against existing colliders (buildings)
+                    const hits = ray.intersectObjects(this.character.colliders, true);
+                    if (hits.length > 0) {
+                        const hit = hits[0];
+                        if (hit.point.y < 1.0) return hit.point; // Near ground = Street
+                    } else {
+                        return new THREE.Vector3(x, 0, z); // Empty floor
+                    }
                 }
-            }
+                return null;
+            };
 
-            // 2. Dumpsters Snapped to Walls (19.95 offset for Parkour)
-            for (let x = -5; x <= 5; x++) {
-                for (let z = -5; z <= 5; z++) {
-                    if (Math.random() > 0.3) {
-                        const side = Math.random() > 0.5 ? 1 : -1;
-                        const axis = Math.random() > 0.5 ? 'x' : 'z';
-                        const pos = new THREE.Vector3(x * 40, 0, z * 40);
-                        let rot = 0;
-                        if (axis === 'x') { pos.x += 19.98 * side; rot = (side > 0) ? 1.57 : -1.57; }
-                        else { pos.z += 19.98 * side; rot = (side > 0) ? 0 : 3.14; }
-                        addScenery(Math.random() > 0.5 ? 'dumpster1' : 'dumpster2', pos, new THREE.Euler(0, rot, 0), 0.8);
+            // 1. Trash Cans (Solid and Pushable, NOT Explosive)
+            for (let i = 0; i < 150; i++) {
+                const pos = getSafeStreetPos();
+                if (pos) {
+                    const mesh = addScenery('trash_can', pos, new THREE.Euler(0, Math.random() * Math.PI, 0), 0.6, false);
+                    if (mesh) {
+                        mesh.userData.isTrashCan = true;
+                        mesh.userData.hp = 5;
+                        mesh.userData.pushVelocity = new THREE.Vector3(0, 0, 0);
+                        this.clutterObjects.push(mesh);
                     }
                 }
             }
 
-            // 3. Wrecks (Solid)
-            for (let i = 0; i < 25; i++) {
-                const pos = new THREE.Vector3((Math.random() - 0.5) * 450, 0, (Math.random() - 0.5) * 450);
-                addScenery('tank_wreck', pos, new THREE.Euler(0, Math.random() * Math.PI, 0), 0.05);
-                addScenery('car_wreck_fsc', pos.clone().add(new THREE.Vector3(5, 0, 5)), new THREE.Euler(0, Math.random() * Math.PI, 0), 0.1);
+            // 2. Dumpsters Snapped to Walls (Now pushable!)
+            for (let x = -7; x <= 7; x++) {
+                for (let z = -7; z <= 7; z++) {
+                    if (Math.random() > 0.4) { // 60% chance
+                        const side = Math.random() > 0.5 ? 1 : -1;
+                        const axis = Math.random() > 0.5 ? 'x' : 'z';
+                        const pos = new THREE.Vector3(x * 40, 0, z * 40);
+                        let rot = 0;
+                        if (axis === 'x') { pos.x += 19.95 * side; rot = (side > 0) ? 1.57 : -1.57; }
+                        else { pos.z += 19.95 * side; rot = (side > 0) ? 0 : 3.14; }
+
+                        const mesh = addScenery(Math.random() > 0.5 ? 'dumpster1' : 'dumpster2', pos, new THREE.Euler(0, rot, 0), 0.8);
+                        if (mesh) {
+                            mesh.userData.isTrashCan = true; // Use the same flag for pushing logic
+                            mesh.userData.hp = 20;
+                            mesh.userData.pushVelocity = new THREE.Vector3(0, 0, 0);
+                            this.clutterObjects.push(mesh);
+                        }
+                    }
+                }
             }
 
-            // 4. Explosive Canisters (Bombonas Rojas)
+            // 3. Wrecks (Solid & Pushable) - Increased count for "War Zone" feel
             for (let i = 0; i < 80; i++) {
-                const x = (Math.random() - 0.5) * 440;
-                const z = (Math.random() - 0.5) * 440;
-                addScenery('canister', new THREE.Vector3(x, 0.4, z), new THREE.Euler(0, 0, 0), 0.6, true);
+                const pos = getSafeStreetPos();
+                if (pos) {
+                    const type = Math.random();
+                    let mesh = null;
+                    if (type < 0.25) mesh = addScenery('tank_wreck', pos, new THREE.Euler(0, Math.random() * Math.PI, 0), 0.05);
+                    else if (type < 0.5) mesh = addScenery('car_wreck_fsc', pos, new THREE.Euler(0, Math.random() * Math.PI, 0), 0.1);
+                    else if (type < 0.75) mesh = addScenery('dumpster1', pos, new THREE.Euler(0, Math.random() * Math.PI, 0), 0.6);
+                    else mesh = addScenery('trash_can', pos, new THREE.Euler(0, Math.random() * Math.PI, 0), 0.8);
+
+                    if (mesh) {
+                        mesh.userData.isTrashCan = true;
+                        mesh.userData.pushVelocity = new THREE.Vector3(0, 0, 0);
+                        this.clutterObjects.push(mesh);
+                    }
+                }
+            }
+
+            // 4. Explosive Canisters (Bombonas Rojas) - High saturation
+            for (let i = 0; i < 200; i++) {
+                const pos = getSafeStreetPos();
+                if (pos) {
+                    pos.y = 0.4;
+                    const mesh = addScenery('canister', pos, new THREE.Euler(0, 0, 0), 0.6, true);
+                    if (mesh) {
+                        mesh.userData.pushVelocity = new THREE.Vector3(0, 0, 0);
+                        this.clutterObjects.push(mesh);
+                    }
+                }
             }
 
             // PASS COLLIDERS
@@ -609,22 +658,20 @@ export class World {
             }, { passive: true });
 
             // --- FINAL SPAWN (Safe Street Center) ---
-            const finalSpawn = new THREE.Vector3(0, 0.5, 0); 
-            this.character.mesh.position.copy(finalSpawn);
-            
-            this.vehicleManager.spawnVehicle('motorcycle', new THREE.Vector3(10, 0.5, 10));
-            this.vehicleManager.spawnVehicle('tank', new THREE.Vector3(450, 0.5, 450)); // Further out
-            this.vehicleManager.spawnVehicle('helicopter', new THREE.Vector3(450, 0.5, -450)); // Further out
+            this.character.mesh.position.set(20, 0.5, 0); // Safe street spawn near center
+
+            this.vehicleManager.spawnVehicle('motorcycle', new THREE.Vector3(-300, 0.5, -40));
+            this.vehicleManager.spawnVehicle('tank', new THREE.Vector3(-300, 0.5, 0));
+            this.vehicleManager.spawnVehicle('helicopter', new THREE.Vector3(-300, 0.5, -20));
 
             // Set camera to player
-            this.camera.position.copy(finalSpawn).add(new THREE.Vector3(0, 5, 10)); 
-            this.camera.lookAt(finalSpawn);
+            const charSpawn = new THREE.Vector3(20, 0.5, 0);
+            this.camera.position.copy(charSpawn).add(new THREE.Vector3(0, 5.5, 10)); 
+            this.camera.lookAt(charSpawn); 
 
             // CRITICAL: HIDE LOADING SCREEN
             const loadingScreen = document.getElementById('loading');
             if (loadingScreen) loadingScreen.style.display = 'none';
-
-            this.animate();
 
             this.animate();
         } catch (err) {
@@ -645,7 +692,7 @@ export class World {
 
     updateRemoteColliders() {
         if (!this.character || !this.weaponManager) return;
-        
+
         let dynamicColliders = Object.values(this.remotePlayers).map(p => p.mesh).filter(m => m);
         if (this.vehicleManager) {
             dynamicColliders = dynamicColliders.concat(this.vehicleManager.vehicles.map(v => v.mesh).filter(m => m));
@@ -653,13 +700,13 @@ export class World {
         if (this.npcManager && this.npcManager.cars) {
             dynamicColliders = dynamicColliders.concat(this.npcManager.cars.filter(m => m));
         }
-        
+
         this.character.remoteColliders = dynamicColliders;
-        
+
         // CONSOLIDATED COLLIDER LIST for Character Physics (Performance!)
         // Instead of concatenating every frame, we do it here once a second
         this.character.allPhysicTargets = [...this.character.colliders, ...dynamicColliders];
-        
+
         this.weaponManager.remotePlayers = Object.values(this.remotePlayers);
     }
 
@@ -714,8 +761,8 @@ export class World {
         this.renderer.xr.setSession(session);
 
         // Hide UI for AR
-        this.toggleUI(); 
-        
+        this.toggleUI();
+
         // Show Reticle
         this.arReticle.visible = true;
 
@@ -724,11 +771,11 @@ export class World {
             this.arHitTestSourceRequested = false;
             this.arHitTestSource = null;
             this.arReticle.visible = false;
-            
+
             // Restore Scene
             this.scene.scale.set(1, 1, 1);
             this.scene.position.set(0, 0, 0);
-            
+
             this.uiVisible = false;
             this.toggleUI(); // Restore UI
             console.log("AR Session Ended");
@@ -756,7 +803,7 @@ export class World {
 
             let skyHex = 0x87CEEB;
             let groundHex = 0x555555;
-            let fogDist = 250; // Optimized from 1500
+            let fogDist = 800; // Increased from 250 for better visibility
             let fogColor = null;
 
             if (this.isNightVision) {
@@ -779,8 +826,8 @@ export class World {
                 this.camera.lookAt(targetPos);
             } else {
                 if (this.uiVisible && this.weaponManager) this.weaponManager.toggleUI(true);
-                if (this.camera.far !== 250) {
-                    this.camera.far = 250;
+                if (this.camera.far !== 800) {
+                    this.camera.far = 800;
                     this.camera.updateProjectionMatrix();
                 }
             }
@@ -824,7 +871,7 @@ export class World {
                         const frame = this.renderer.xr.getFrame();
                         if (frame) {
                             const referenceSpace = this.renderer.xr.getReferenceSpace();
-                            
+
                             // Initialize Hit Test Source once
                             if (this.arHitTestSourceRequested === false) {
                                 session.requestReferenceSpace('viewer').then((viewerSpace) => {
@@ -841,22 +888,22 @@ export class World {
                                 if (hitTestResults.length > 0) {
                                     const hit = hitTestResults[0];
                                     const pose = hit.getPose(referenceSpace);
-                                    
+
                                     // Update Reticle position
                                     this.arReticle.visible = true;
                                     this.arReticle.position.set(pose.transform.position.x, pose.transform.position.y, pose.transform.position.z);
-                                    
+
                                     // Update World Scale and Position (Follow Reticle)
                                     // We scale the whole scene (except camera and reticle) down
                                     // Actually, let's scale the city, character, and other groups
                                     this.scene.scale.set(this.arWorldScale, this.arWorldScale, this.arWorldScale);
                                     this.scene.position.set(pose.transform.position.x, pose.transform.position.y, pose.transform.position.z);
-                                    
+
                                     // Ensure reticle is NOT scaled by the scene (parenting issue)
                                     // Since reticle is child of scene, and scene is scaled, reticle is scaled.
                                     // We need the reticle to stay at real world scale 1.0
-                                    this.arReticle.scale.set(1/this.arWorldScale, 1/this.arWorldScale, 1/this.arWorldScale);
-                                    
+                                    this.arReticle.scale.set(1 / this.arWorldScale, 1 / this.arWorldScale, 1 / this.arWorldScale);
+
                                     // Add pulse effect to reticle
                                     const pulse = 1.0 + Math.sin(Date.now() * 0.01) * 0.1;
                                     this.arReticle.scale.multiplyScalar(pulse);
@@ -929,6 +976,28 @@ export class World {
                         t.triggered = false;
                     }
                 });
+            }
+
+            // CLUTTER PHYSICS (Pushable objects update)
+            for (let i = this.clutterObjects.length - 1; i >= 0; i--) {
+                const obj = this.clutterObjects[i];
+                if (!obj.parent) { this.clutterObjects.splice(i, 1); continue; }
+
+                const pushVel = obj.userData.pushVelocity;
+                if (pushVel && pushVel.length() > 0.01) {
+                    const moveDir = pushVel.clone().normalize();
+                    const ray = new THREE.Raycaster(obj.position.clone().add(new THREE.Vector3(0, 0.5, 0)), moveDir);
+                    ray.far = 1.0;
+                    // Check against buildings
+                    const hits = ray.intersectObjects(this.character.colliders, true);
+
+                    if (hits.length === 0) {
+                        obj.position.add(pushVel.clone().multiplyScalar(dt));
+                    } else {
+                        pushVel.set(0, 0, 0);
+                    }
+                    pushVel.multiplyScalar(Math.max(0, 1.0 - dt * 5.0)); // Friction
+                }
             }
 
             // RENDER PASS

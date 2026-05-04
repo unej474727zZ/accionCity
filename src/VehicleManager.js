@@ -648,9 +648,18 @@ export class VehicleManager {
                 }
             }
 
-            // B) PUSH VELOCITY (Friction/Application)
+            // B) PUSH VELOCITY (Friction/Application with Collision Check)
             if (v.pushVelocity.length() > 0.01) {
-                v.mesh.position.add(v.pushVelocity.clone().multiplyScalar(dt));
+                const moveDir = v.pushVelocity.clone().normalize();
+                const ray = new THREE.Raycaster(v.mesh.position.clone().add(new THREE.Vector3(0, 1.0, 0)), moveDir);
+                ray.far = 1.5;
+                const hits = ray.intersectObjects(this.characterController.colliders, true);
+                
+                if (hits.length === 0) {
+                    v.mesh.position.add(v.pushVelocity.clone().multiplyScalar(dt));
+                } else {
+                    v.pushVelocity.set(0, 0, 0); // Stop if hit wall
+                }
                 v.pushVelocity.multiplyScalar(Math.max(0, 1.0 - dt * 4.0)); // Friction
             }
 
@@ -668,7 +677,16 @@ export class VehicleManager {
                 // Apply Pushing and Gravity ONLY when moving
                 let isMoving = false;
                 if (car.pushVelocity && car.pushVelocity.length() > 0.01) {
-                    car.position.add(car.pushVelocity.clone().multiplyScalar(dt));
+                    const moveDir = car.pushVelocity.clone().normalize();
+                    const ray = new THREE.Raycaster(car.position.clone().add(new THREE.Vector3(0, 1.0, 0)), moveDir);
+                    ray.far = 1.5;
+                    const hits = ray.intersectObjects(this.characterController.colliders, true);
+                    
+                    if (hits.length === 0) {
+                        car.position.add(car.pushVelocity.clone().multiplyScalar(dt));
+                    } else {
+                        car.pushVelocity.set(0, 0, 0);
+                    }
                     car.pushVelocity.multiplyScalar(Math.max(0, 1.0 - dt * 4.0));
                     isMoving = true;
 
@@ -815,12 +833,11 @@ export class VehicleManager {
                     v.mesh.rotation.y -= turn;
                 }
 
-                // Camera Follow: For land vehicles only (Heli camera is independent and leads the way)
+                // Camera Follow: Reference implementation (Yaw subtracts turn)
                 if (!isHeli && this.characterController) {
                     const actualTurn = input.x * cfg.turnSpeed * dt;
-                    // FIX: Invert sync to match unified camera arrows
-                    this.characterController.yaw += actualTurn;
-                    this.characterController.aimYaw += actualTurn;
+                    this.characterController.yaw -= actualTurn;
+                    this.characterController.aimYaw -= actualTurn;
                 }
 
                 // Calculate leaning if it's a motorcycle

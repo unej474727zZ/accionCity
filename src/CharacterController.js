@@ -552,17 +552,10 @@ export class CharacterController {
 
     setFiring(isActive) {
         if (!this.mixer) return;
-        
-        // Anti-Loop: Only trigger changes if the firing state OR weapon type flips
-        const weaponType = this.weaponManager ? this.weaponManager.currentWeaponType : 'none';
-        const stateKey = `${isActive}_${weaponType}`;
-        
-        if (this._lastFiringKey === stateKey) return;
-        this._lastFiringKey = stateKey;
 
         // Determine which mask to use based on weapon
-        const isRifle = (weaponType === 'rifle');
-        const targetClipName = isRifle ? 'firing' : 'shooting';
+        const isRifle = (this.weaponManager && this.weaponManager.currentWeaponType === 'rifle');
+        const targetClipName = isRifle ? 'firing' : 'shooting'; // 'firing' is rifle, 'shooting' is pistol
         const otherClipName = isRifle ? 'shooting' : 'firing';
 
         // Get Actions
@@ -574,20 +567,25 @@ export class CharacterController {
         const otherClip = this.animations[otherClipName];
         if (otherClip) {
             const otherAction = this.mixer.clipAction(otherClip);
-            if (otherAction.isRunning()) otherAction.fadeOut(0.1);
+            if (otherAction.isRunning()) otherAction.fadeOut(0.2);
         }
 
         if (isActive) {
-            targetAction.reset();
-            targetAction.enabled = true;
-            targetAction.setLoop(THREE.LoopRepeat);
-            targetAction.setEffectiveWeight(1.0); 
-            targetAction.fadeIn(0.05); // Faster entry
-            targetAction.play();
-            console.log(`Animation: Firing Start (${targetClipName})`);
+            // Only play if not already playing or fading in
+            if (!targetAction.isRunning() || targetAction.getEffectiveWeight() < 0.1) {
+                targetAction.reset();
+                targetAction.enabled = true;
+                targetAction.setLoop(THREE.LoopRepeat);
+                targetAction.clampWhenFinished = false;
+                // High weight to override arms COMPLETELY (Reference: 50.0)
+                targetAction.setEffectiveWeight(50.0);
+                targetAction.play();
+                targetAction.fadeIn(0.2);
+            }
         } else {
-            console.log("Animation: Firing Stop (Fast Recovery)");
-            targetAction.fadeOut(0.15); // Faster recovery (0.3 -> 0.15)
+            if (targetAction.isRunning()) {
+                targetAction.fadeOut(0.2);
+            }
         }
     }
 
@@ -595,9 +593,23 @@ export class CharacterController {
     playAnimation(name, loop = true) {
         if (this.currentAction && this.state === name) return;
 
-        const clip = this.animations[name];
+        // --- STANCE FALLBACKS ---
+        // 'rifle' and 'pistol' are stances that use 'idle' as base but trigger the mask
+        const isStance = (name === 'rifle' || name === 'pistol' || name === 'idle');
+        const wasStance = (this.state === 'rifle' || this.state === 'pistol' || this.state === 'idle');
+
+        let actualAnimName = name;
+        if (name === 'rifle' || name === 'pistol') actualAnimName = 'idle';
+
+        // --- PREVENT RESTARTING SAME CLIP ---
+        if (isStance && wasStance && this.currentAction && this.currentAction.getClip().name.includes('idle')) {
+            this.state = name;
+            return;
+        }
+
+        const clip = this.animations[actualAnimName];
         if (!clip) {
-            console.warn(`Animation '${name}' not found! Available:`, Object.keys(this.animations));
+            console.warn(`Animation '${actualAnimName}' not found! Available:`, Object.keys(this.animations));
             return;
         }
 
@@ -615,12 +627,9 @@ export class CharacterController {
         const fadeDuration = 0.5;
 
         // --- SINCRONIZACIÓN (Eliminar Cojera) ---
-        // Si estamos pasando entre walk/run/backward, sincronizamos el tiempo
         if (this.currentAction &&
-            (name === 'walk' || name === 'run' || name === 'backward') &&
+            (actualAnimName === 'walk' || actualAnimName === 'run' || actualAnimName === 'backward') &&
             (this.state === 'walk' || this.state === 'run' || this.state === 'backward')) {
-
-            // Sincronizar el nuevo clip con el actual para que los pies coincidan
             action.time = this.currentAction.time;
         }
 
@@ -632,7 +641,7 @@ export class CharacterController {
         }
 
         this.currentAction = action;
-        this.state = name;
+        this.state = name; // We keep 'rifle' or 'pistol' as the state for logic checks
     }
 
     triggerJump(source = 'unknown') {
@@ -722,8 +731,7 @@ export class CharacterController {
                 this.keys.run = true;
                 this.keys.isShiftPressed = true;
                 break;
-            case 'KeyH':
-            case 'KeyL': this.keys.elevate = true; break;
+            case 'KeyH': this.keys.elevate = true; break;
             case 'KeyJ': this.keys.descend = true; break;
 
             case 'KeyF': this.keys.fire = true; break;
@@ -741,13 +749,32 @@ export class CharacterController {
                     this.world.toggleNightVision();
                 }
                 break;
-            case 'KeyP':
-                if (!e.repeat && this.world) this.world.toggleUI();
-                break;
             case 'KeyR':
                 if (!e.repeat && this.weaponManager) this.weaponManager.cycleWeapon();
                 break;
+            case 'KeyT':
+                if (!e.repeat && this.weaponManager) this.weaponManager.toggleHolster();
                 break;
+            case 'KeyF':
+                if (this.weaponManager && this.weaponManager.currentWeaponType) {
+                    this.keys.fire = true;
+                } else {
+                    // Reset pose if unarmed (FORCE RESET)
+                    console.log("Resetting pose (unarmed force reset)");
+                    if (this.mixer) this.mixer.stopAllAction();
+                    this.state = 'idle';
+                    this.currentAction = null;
+                    this.playAnimation('idle');
+                    this._lastFiringKey = 'reset'; // Force setFiring to update next time
+                }
+                break;
+        }
+    }
+
+    reload() {
+        console.log("RELOAD triggered (Animation pending)");
+        if (this.weaponManager && this.weaponManager.soundManager) {
+            // Placeholder for future reload sound
         }
     }
 
@@ -773,8 +800,7 @@ export class CharacterController {
                 this.keys.run = false;
                 this.keys.isShiftPressed = false;
                 break;
-            case 'KeyH':
-            case 'KeyL': this.keys.elevate = false; break;
+            case 'KeyH': this.keys.elevate = false; break;
             case 'KeyJ': this.keys.descend = false; break;
             case 'Space':
                 this.keys.spaceHeld = false;
@@ -787,6 +813,7 @@ export class CharacterController {
             case 'KeyT':
             case 'KeyN':
             case 'KeyP':
+            case 'KeyQ':
             case 'KeyR':
                 // Handled in keydown instantly
                 break;
@@ -1101,12 +1128,11 @@ export class CharacterController {
             // --- SHOOTING PRIORITY ---
             if (this.weaponManager && this.weaponManager.currentWeaponType) {
                 if (this.keys.fire) {
-                    nextState = 'shooting';
+                    // When firing, we keep the base movement (walk/run/idle)
+                    // but setFiring(true) will be called at the end of update()
                 } else if (!isMoving && !this.isJumping) {
                     // Stance based on weapon type when idle
                     nextState = (this.weaponManager.currentWeaponType === 'rifle') ? 'rifle' : 'pistol';
-                } else if (!isMoving) {
-                    nextState = 'idle'; // Absolute fallback
                 }
             }
 
@@ -1129,10 +1155,10 @@ export class CharacterController {
             const rayOrigin = this.mesh.position.clone();
             rayOrigin.y += 1.0;
             this.groundRaycaster.set(rayOrigin, new THREE.Vector3(0, -1, 0));
-            
+
             // OPTIMIZED: Use consolidated list from World.js updateRemoteColliders
-            const groundTargets = this.allPhysicTargets.length > 0 ? this.allPhysicTargets : this.colliders; 
-            
+            const groundTargets = this.allPhysicTargets.length > 0 ? this.allPhysicTargets : this.colliders;
+
             // CRITICAL PERFORMANCE: recursive = TRUE for scenery/complex models
             const intersects = this.groundRaycaster.intersectObjects(groundTargets, true);
 
@@ -1218,6 +1244,7 @@ export class CharacterController {
                 const leftAx = rightAx.clone().negate();
                 const shoulderWidth = 0.4; // 40cm offset
 
+                // Multiple Rays: Chest, Knee, Feet, Shoulders
                 const rayOrigins = [
                     // Chest Height
                     this.mesh.position.clone().add(new THREE.Vector3(0, 1.0, 0)),
@@ -1232,50 +1259,72 @@ export class CharacterController {
                 ];
 
                 const allColliders = this.allPhysicTargets.length > 0 ? this.allPhysicTargets : this.colliders;
-                const dynFar = Math.max(0.6, moveVector.length() + 0.3); // Dynamic length to prevent tunneling
+                const moveDist = moveVector.length();
+                const dynFar = moveDist + 1.2;
                 let closestDist = 999;
 
                 for (const origin of rayOrigins) {
-                    this.raycaster.set(origin, moveDir);
+                    // Offset origin BACKWARDS to catch objects we might be slightly overlapping
+                    const safeOrigin = origin.clone().sub(moveDir.clone().multiplyScalar(0.5));
+                    this.raycaster.set(safeOrigin, moveDir);
                     this.raycaster.far = dynFar;
 
-                    // SET RECURSIVE TO TRUE to detect sub-meshes of complex vehicles/buildings
                     const wallHits = this.raycaster.intersectObjects(allColliders, true);
 
                     if (wallHits.length > 0) {
                         const hit = wallHits[0];
-                        
-                        // --- PUSHING LOGIC (Trash Cans & Canisters) ---
+                        const realDist = hit.distance - 0.5; // Correct for offset
+
+                        // --- PUSHING LOGIC ---
                         let pushObj = null;
                         let t = hit.object;
-                        // Traverse up to find if it's a pushable object
-                        while(t) {
-                            if (t.userData && (t.userData.isTrashCan || t.userData.isExplosive)) { 
-                                pushObj = t; 
-                                break; 
+                        while (t) {
+                            if (t.userData && (t.userData.isTrashCan || t.userData.isExplosive)) {
+                                pushObj = t;
+                                break;
                             }
                             t = t.parent;
                         }
 
                         if (pushObj) {
-                            // If it's a pushable object, we move it and DON'T block the player fully
-                            const pushForce = dt * 15.0; // Force of the push
-                            pushObj.position.add(moveDir.clone().multiplyScalar(pushForce));
-                            pushObj.position.y = 0; // Keep it on the ground
+                            const pushForce = dt * 40.0;
+                            const pushVec = moveDir.clone().multiplyScalar(pushForce);
                             
-                            // Slight slowdown but not a total block
-                            moveVector.multiplyScalar(0.8);
+                            // Check if the object itself is hitting a wall
+                            const pRay = new THREE.Raycaster(pushObj.position.clone().add(new THREE.Vector3(0, 0.5, 0)), moveDir);
+                            pRay.far = 1.0; 
+                            const pHits = pRay.intersectObjects(this.colliders, true);
+                            
+                            // Filter out the object itself from its own raycast
+                            const obstacleHits = pHits.filter(h => {
+                                let p = h.object;
+                                while(p) {
+                                    if (p === pushObj) return false;
+                                    p = p.parent;
+                                }
+                                return true;
+                            });
+
+                            if (obstacleHits.length === 0) {
+                                // Space is clear, push the object
+                                pushObj.position.add(pushVec);
+                                pushObj.position.y = 0;
+                                // Allow player to move with it
+                                moveVector.multiplyScalar(0.9);
+                            } else {
+                                // Object hit a wall! Block the player.
+                                blocked = true;
+                                if (realDist < closestDist) closestDist = realDist;
+                            }
                         } else {
                             blocked = true;
+                            if (realDist < closestDist) closestDist = realDist;
                         }
-                        
-                        if (hit.distance < closestDist) closestDist = hit.distance;
                     }
                 }
 
                 if (blocked) {
                     moveVector.set(0, 0, 0);
-                    // Push-out logic: if we manage to overlap a collider, push the character back
                     const playerBumper = 0.5;
                     if (closestDist < playerBumper) {
                         const overlap = playerBumper - closestDist;
@@ -1284,26 +1333,18 @@ export class CharacterController {
                 }
 
                 // PLAYER-PLAYER COLLISION
-                // Check against remote players (Simple Radius Check)
                 if (this.remoteColliders.length > 0) {
-                    const myPos = this.mesh.position.clone().add(moveVector); // Predicted position
-                    const radius = 0.5; // Player radius
-
+                    const myPos = this.mesh.position.clone().add(moveVector);
+                    const radius = 0.5;
                     for (const otherMesh of this.remoteColliders) {
                         if (!otherMesh) continue;
-                        // Horizontal distance only
                         const dx = myPos.x - otherMesh.position.x;
                         const dz = myPos.z - otherMesh.position.z;
                         const distSq = dx * dx + dz * dz;
-
                         if (distSq < (radius * 2) * (radius * 2)) {
-                            // Collision!
-                            // Push back vector
                             const dist = Math.sqrt(distSq);
                             const pushDir = new THREE.Vector3(dx, 0, dz).normalize();
                             const overlap = (radius * 2) - dist;
-
-                            // Apply push to moveVector (soft collision)
                             moveVector.add(pushDir.multiplyScalar(overlap));
                         }
                     }
@@ -1353,7 +1394,10 @@ export class CharacterController {
         // Camera update is handled by World.js after the vehicle moves to prevent shuddering
 
         // Handle Upper Body Firing Mask Visibility
-        const useMask = (this.weaponManager && this.weaponManager.isFiring);
+        // A stance (rifle/pistol) also triggers the mask even if not firing
+        const isStance = (this.state === 'rifle' || this.state === 'pistol');
+        const isArmed = (this.weaponManager && this.weaponManager.currentWeaponType);
+        const useMask = (isArmed && (this.weaponManager.isFiring || isStance));
         this.setFiring(useMask);
 
         // Update Radar if in helicopter
@@ -1643,9 +1687,9 @@ PTR LOCK: ${plStatus}
         this.mesh.visible = false; // Hide player momentarily so raycaster ignores body natively
 
         // Also check collisions against vehicles! (Ignore the one we are driving)
-        let allCams = this.colliders; 
+        let allCams = this.colliders;
         if (this.isDriving && this.vehicle) {
-            this.raycaster.layers.set(0); 
+            this.raycaster.layers.set(0);
             if (this.vehicle.type === 'helicopter') {
                 this.raycaster.far = 0;
             }
@@ -1717,7 +1761,7 @@ PTR LOCK: ${plStatus}
         // PERFORMANCE: Throttle radar updates
         if (!this._radarThrottle) this._radarThrottle = 0;
         this._radarThrottle++;
-        if (this._radarThrottle % 10 !== 0) return; 
+        if (this._radarThrottle % 10 !== 0) return;
 
         const radarBlips = document.getElementById('radar-blips');
         if (!radarBlips) return;

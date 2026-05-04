@@ -11,7 +11,9 @@
 <body>
   <div id="app"></div>
   <div id="loading">Loading City...</div>
-  <div id="debug-console">Debug Info...</div>
+  <div id="debug-console"
+    style="position: absolute; top: 0; left: 0; color: lime; background: rgba(0,0,0,0.5); pointer-events: none; z-index: 9999; font-family: monospace; font-size: 10px; white-space: pre;">
+    Debug Info...</div>
   <div id="crosshair" style="display: none;">+</div>
   
   <!-- HELICOPTER HUD (Full Screen Radar, Altimeter, Attitude) -->
@@ -67,9 +69,7 @@
   </div>
 
   <div id="mobile-controls"> <!-- Interface -->
-    <div id="zone_joystick"></div> <!-- Left Joystick (Still NippleJS for Analog?) User asked for Cross/D-Pad -->
-    <!-- Actually, user said "necesito 2 cruces", implies D-Pad buttons. Let's make D-Pad buttons AND keep joystick invisible/underneath? -->
-    <!-- Let's build the visual D-Pad -->
+    <div id="zone_joystick"></div> <!-- Left Joystick -->
 
     <div id="psp-controls">
       <!-- SHOULDER BUTTONS -->
@@ -93,7 +93,7 @@
         <div id="btn-sq" class="psp-btn shape-btn">□</div> <!-- Run? -->
       </div>
 
-      <!-- RIGHT CAMERA CROSS (New Request) -->
+      <!-- RIGHT CAMERA CROSS -->
       <div id="camera-cross-container">
         <div id="btn-cam-up" class="psp-btn dpad-btn">▲</div>
         <div id="btn-cam-down" class="psp-btn dpad-btn">▼</div>
@@ -112,14 +112,12 @@
       <div id="toggles-container">
         <div id="btn-chat-toggle" class="psp-btn toggle-btn">💬</div>
         <div id="btn-map-toggle" class="psp-btn toggle-btn">🗺️</div>
-        <div id="btn-vr" class="psp-btn toggle-btn">👓</div>
-        <div id="btn-ar" class="psp-btn toggle-btn">🪄</div>
       </div>
     </div>
 
     <div id="zone_right" class="zone"></div> <!-- Right Look Zone (Background) -->
 
-    <!-- Chat UI (Hidden by default?) -->
+    <!-- Chat UI -->
     <div id="chat-container" style="display: none;">
       <div id="chat-messages"></div>
       <input type="text" id="chat-input" placeholder="Type..." autocomplete="off">

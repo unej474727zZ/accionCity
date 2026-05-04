@@ -228,9 +228,9 @@ export class WeaponManager {
         this.rangeFinderThrottle = 0;
         
         // PERFORMANCE: Shared Geometries
-        this._sparkGeom = new THREE.BoxGeometry(0.05, 0.05, 0.05);
-        this._smokeGeom = new THREE.BoxGeometry(0.2, 0.2, 0.2);
-        this._flashGeom = new THREE.BoxGeometry(1, 1, 1); // For explosion core
+        this._sparkGeom = new THREE.SphereGeometry(0.04, 3, 3); // Ultra-low poly
+        this._smokeGeom = new THREE.SphereGeometry(0.15, 4, 4);
+        this._flashGeom = new THREE.SphereGeometry(0.8, 6, 6); // For explosion core
 
         // PERFORMANCE: Shared Materials
         this._sparkMat = new THREE.MeshBasicMaterial({ color: 0xffff88, transparent: true });
@@ -515,9 +515,7 @@ export class WeaponManager {
         if (this.laserMesh) this.laserMesh.visible = false;
 
         if (this.characterController) {
-            this.characterController.state = 'idle';
-            this.characterController.playAnimation('idle', true);
-            console.log("WeaponManager: Character returning to idle stance.");
+            console.log("WeaponManager: Holstered. CharacterController will return to idle in next update.");
         }
     }
 
@@ -1183,6 +1181,19 @@ export class WeaponManager {
                         const dir = car.position.clone().sub(point).normalize();
                         const intensity = (1.0 - dist / radius) * force;
                         world.vehicleManager.pushVehicleNPC(car, dir, intensity);
+                    }
+                });
+            }
+
+            // Push Clutter (Trash Cans, Canisters)
+            if (world.clutterObjects) {
+                world.clutterObjects.forEach(obj => {
+                    const dist = obj.position.distanceTo(point);
+                    if (dist < radius && dist > 0.1) {
+                        const dir = obj.position.clone().sub(point).normalize();
+                        const intensity = (1.0 - dist / radius) * force * 0.5; // Slightly less for clutter
+                        if (!obj.userData.pushVelocity) obj.userData.pushVelocity = new THREE.Vector3();
+                        obj.userData.pushVelocity.add(dir.multiplyScalar(intensity));
                     }
                 });
             }
