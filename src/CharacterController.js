@@ -878,9 +878,16 @@ export class CharacterController {
         // Rotación más rápida al correr para compensar la inercia visual
         const keyLookSpeed = (this.isRunning ? 3.5 : 2.0) * dt;
 
-        // Corregido: Left gira a la izquierda (+), Right a la derecha (-) para el avatar y moto
-        if (this.keys.lookLeft) this.yaw += keyLookSpeed;
-        if (this.keys.lookRight) this.yaw -= keyLookSpeed;
+        // Corregido: Flechas invierten giro solo en moto por petición del usuario
+        const isMoto = (this.isDriving && this.vehicle && this.vehicle.type === 'motorcycle');
+        if (this.keys.lookLeft) {
+            if (isMoto) this.yaw -= keyLookSpeed;
+            else this.yaw += keyLookSpeed;
+        }
+        if (this.keys.lookRight) {
+            if (isMoto) this.yaw += keyLookSpeed;
+            else this.yaw -= keyLookSpeed;
+        }
         if (this.keys.lookUp) this.pitch += keyLookSpeed;
         if (this.keys.lookDown) this.pitch -= keyLookSpeed;
 
