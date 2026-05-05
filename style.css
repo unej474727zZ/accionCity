@@ -1,0 +1,650 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  overflow: hidden;
+  background-color: #000;
+  font-family: sans-serif;
+  touch-action: none;
+  /* Prevent scroll on mobile */
+  user-select: none;
+}
+
+#app {
+  width: 100vw;
+  height: 100vh;
+}
+
+#loading {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: white;
+  font-size: 24px;
+  pointer-events: none;
+  transition: opacity 0.5s;
+}
+
+#debug-console {
+  position: absolute;
+  top: 0;
+  left: 0;
+  color: lime;
+  background: rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+  z-index: 9999;
+  font-family: monospace;
+  font-size: 10px;
+  white-space: pre;
+}
+
+/* --- PSP CONTROLS LAYOUT (Reference Style) --- */
+
+#psp-controls {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 20;
+}
+
+/* Base Button - Transparent & Clean */
+.psp-btn {
+  position: absolute;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  /* Thin outline */
+  color: rgba(255, 255, 255, 0.8);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  user-select: none;
+  touch-action: none;
+  pointer-events: auto;
+  border-radius: 5px;
+  transition: transform 0.1s, background 0.1s;
+}
+
+.psp-btn:active {
+  background: rgba(255, 255, 255, 0.2);
+  transform: scale(0.95);
+  color: white;
+  border-color: white;
+}
+
+/* SHOULDER BUTTONS (L / R) - Top Corners, Wide & Thin */
+.shoulder-btn {
+  top: 20px;
+  width: 100px;
+  height: 40px;
+  border-radius: 5px;
+  border-top-left-radius: 15px;
+  border-top-right-radius: 15px;
+  font-size: 18px;
+}
+
+#btn-l {
+  left: 20px;
+  border-top-right-radius: 5px;
+}
+
+#btn-r {
+  right: 20px;
+  border-top-left-radius: 5px;
+}
+
+
+/* LEFT D-PAD (Movement) - Hidden in favor of Joystick */
+#dpad-container {
+  display: none;
+}
+
+/* D-Pad individual buttons */
+.dpad-btn {
+  width: 40px;
+  height: 40px;
+  font-size: 24px;
+  border: none;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 5px;
+}
+
+#btn-up {
+  top: 10px;
+  left: 50px;
+}
+
+#btn-down {
+  bottom: 10px;
+  left: 50px;
+}
+
+#btn-left {
+  top: 50px;
+  left: 10px;
+}
+
+#btn-right {
+  top: 50px;
+  right: 10px;
+}
+
+/* D-Pad Backing visual - mimicking stick center style if desired, or keeping cross center */
+#dpad-center {
+  position: absolute;
+  top: 50px;
+  left: 50px;
+  width: 40px;
+  height: 40px;
+  background: rgba(255, 255, 255, 0.05);
+  /* Lighter/Transparent like Right Side */
+  border-radius: 50%;
+  /* Match Round Stick Style? User said "same design" */
+  border: 2px solid rgba(255, 255, 255, 0.1);
+}
+
+
+/* ACTION SHAPES (Triangle, Circle, X, Square) - Top Right */
+#shapes-container {
+  position: absolute;
+  bottom: 120px;
+  right: 30px;
+  width: 140px;
+  height: 140px;
+}
+
+.shape-btn {
+  width: 40px;
+  height: 40px;
+  font-size: 32px;
+  /* Large Icons */
+  border: none !important;
+  /* NO BORDER/CIRCLE */
+  background: transparent !important;
+  text-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
+}
+
+/* Tighter Diamond Layout */
+#btn-tri {
+  top: 10px;
+  left: 50px;
+  color: rgba(0, 255, 170, 0.8);
+}
+
+#btn-cir {
+  top: 50px;
+  right: 10px;
+  color: rgba(255, 85, 85, 0.8);
+}
+
+#btn-x {
+  bottom: 10px;
+  left: 50px;
+  color: rgba(85, 85, 255, 0.8);
+}
+
+#btn-sq {
+  top: 50px;
+  left: 10px;
+  color: rgba(255, 85, 255, 0.8);
+}
+
+
+/* RIGHT CAMERA CROSS (Stick Simulation) - Lower Right */
+#camera-cross-container {
+  position: absolute;
+  bottom: -20px;
+  /* Pushed down */
+  right: 30px;
+  width: 140px;
+  height: 140px;
+  transform: scale(0.8);
+  pointer-events: none;
+}
+
+/* Stick styling */
+#camera-center {
+  position: absolute;
+  top: 50px;
+  left: 50px;
+  width: 40px;
+  height: 40px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 50%;
+  /* Stick is round */
+  border: 2px solid rgba(255, 255, 255, 0.1);
+}
+
+#btn-cam-up {
+  top: 10px;
+  left: 50px;
+  border: none;
+}
+
+#btn-cam-down {
+  bottom: 10px;
+  left: 50px;
+  border: none;
+}
+
+#btn-cam-left {
+  top: 50px;
+  left: 10px;
+  border: none;
+}
+
+#btn-cam-right {
+  top: 50px;
+  right: 10px;
+  border: none;
+}
+
+/* Center piece for Camera Cross */
+#camera-center {
+  position: absolute;
+  top: 52px;
+  left: 52px;
+  width: 46px;
+  height: 46px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  /* Square cross center match */
+  border: none;
+}
+
+
+/* CENTER BAR (Select / Start) - Bottom Center */
+#center-bar {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 15px;
+}
+
+.center-btn {
+  position: relative;
+  width: 60px;
+  height: 25px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: transparent;
+  border-radius: 2px;
+  font-size: 10px;
+  font-family: sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+
+/* TOGGLES (Chat, Map) - Explicit Positioning */
+#toggles-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 0;
+  pointer-events: none;
+  z-index: 25;
+}
+
+#btn-chat-toggle {
+  top: 10px;
+  left: 140px;
+  /* Clear of Left Shoulder (120px) */
+}
+
+#btn-map-toggle {
+  top: 10px;
+  right: 230px;
+  /* Clear of Map (200px + 10px + padding) */
+}
+
+.toggle-btn {
+  width: 40px;
+  height: 40px;
+  border: none;
+  background: transparent;
+  font-size: 24px;
+}
+
+/* Left Joystick Zone */
+#zone_joystick {
+  position: absolute;
+  bottom: 20px;
+  left: 30px;
+  width: 140px;
+  height: 140px;
+  z-index: 50;
+  touch-action: none;
+}
+
+/* Right Look Zone (Background) - Restored */
+#zone_right {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 40%;
+  /* Right 40% (Avoids Center Buttons at 50%) */
+  height: 100%;
+  z-index: 5;
+  /* Below PSP controls */
+  touch-action: none;
+}
+
+/* Chat UI */
+#chat-container {
+  position: absolute;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 300px;
+  max-width: 80%;
+  height: 150px;
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+  z-index: 1000;
+}
+
+#chat-messages {
+  flex-grow: 1;
+  overflow-y: auto;
+  background: rgba(0, 0, 0, 0.4);
+  /* Slightly darker for contrast */
+  padding: 5px;
+  border-radius: 5px;
+  margin-bottom: 5px;
+  color: white;
+  font-size: 14px;
+  text-shadow: 1px 1px 1px black;
+  scrollbar-width: thin;
+}
+
+/* Individual message style */
+.chat-msg {
+  margin-bottom: 2px;
+  word-wrap: break-word;
+}
+
+#chat-input {
+  width: 100%;
+  padding: 5px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: white;
+  border-radius: 3px;
+  pointer-events: auto;
+  /* Enable typing */
+}
+
+#chat-input::placeholder {
+  color: #aaa;
+}
+
+/* Crosshair */
+#crosshair {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 20px;
+  height: 20px;
+  pointer-events: none;
+  /* Let clicks pass through */
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 24px;
+  font-family: monospace;
+  text-align: center;
+  line-height: 20px;
+  z-index: 2000;
+  text-shadow: 0 0 2px black;
+}
+
+/* =========================================
+   HELICOPTER HUD (FULL SCREEN)
+   ========================================= */
+#heli-radar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 15, 5, 0.15); /* Light green tint */
+  pointer-events: none;
+  z-index: 1000;
+  overflow: hidden;
+  box-shadow: inset 0 0 150px rgba(0, 255, 128, 0.3);
+  font-family: monospace;
+}
+
+/* Centered Radar Area */
+.radar-center-box {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 80vh; /* Keeps it square */
+  height: 80vh;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 2px dashed rgba(0, 255, 128, 0.4);
+}
+
+/* Compass Ring */
+#radar-compass-ring {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  border-radius: 50%;
+  transition: transform 0.1s linear;
+}
+
+.compass-deg {
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 40px; height: 20px;
+  margin-top: -10px; margin-left: -20px;
+  text-align: center;
+  font-size: 16px;
+  font-weight: bold;
+  color: #cc99ff; /* Lila */
+  text-shadow: 0 0 5px #cc99ff;
+}
+
+/* Concentric Rings */
+.radar-rings {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.ring {
+  position: absolute;
+  border: 1px solid rgba(0, 255, 128, 0.2);
+  border-radius: 50%;
+}
+
+.r1 { width: 33%; height: 33%; }
+.r2 { width: 66%; height: 66%; }
+.r3 { width: 98%; height: 98%; border: 2px solid rgba(0, 255, 128, 0.5); }
+
+/* Crosshair lines (X and Y axis) */
+.radar-crosshair-lines::before,
+.radar-crosshair-lines::after {
+  content: '';
+  position: absolute;
+  background: rgba(0, 255, 128, 0.3);
+}
+
+.radar-crosshair-lines::before { top: 50%; left: 0; right: 0; height: 1px; }
+.radar-crosshair-lines::after { left: 50%; top: 0; bottom: 0; width: 1px; }
+
+/* Sweep Animation (Gradient Conic) */
+.radar-sweep {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, rgba(0, 255, 128, 0) 0%, rgba(0, 255, 128, 0) 60%, rgba(0, 255, 128, 0.1) 80%, rgba(0, 255, 128, 0.6) 100%);
+  animation: radar-spin 3s linear infinite;
+}
+
+@keyframes radar-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Container for dynamic blips */
+#radar-blips {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  border-radius: 50%;
+}
+
+/* Retro Blip Styles */
+.radar-blip {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-size: 12px;
+  font-weight: bold;
+  text-shadow: 0 0 5px currentColor;
+  animation: blip-fade 3s linear infinite;
+  pointer-events: none;
+}
+
+.blip-dist {
+  font-size: 9px;
+  margin-top: 2px;
+  background: rgba(0, 0, 0, 0.4);
+  padding: 0 2px;
+  border-radius: 2px;
+  white-space: nowrap;
+}
+
+.radar-blip.car {
+  color: rgba(0, 255, 255, 0.35); /* Cyan retro cars (semi-transparent) */
+}
+
+.radar-blip.tank {
+  color: rgba(255, 51, 51, 0.35); /* Red retro tanks (semi-transparent) */
+  font-size: 16px;
+}
+
+@keyframes blip-fade {
+  0% { opacity: 1; transform: translate(-50%, -50%) scale(1.5); }
+  20% { opacity: 0.8; transform: translate(-50%, -50%) scale(1); }
+  100% { opacity: 0.3; transform: translate(-50%, -50%) scale(0.8); }
+}
+
+/* =========================================
+   HUD: ALTIMETER
+   ========================================= */
+#hud-altimeter {
+  position: absolute;
+  right: 5vw;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 60px;
+  height: 300px;
+  border-left: 2px solid #00ff80;
+  color: #00ff80;
+  text-align: right;
+}
+
+.alt-label {
+  position: absolute;
+  top: -25px;
+  right: 0;
+  font-size: 16px;
+  font-weight: bold;
+}
+
+.alt-readout {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  background: rgba(0, 255, 128, 0.2);
+  padding: 5px;
+  border: 1px solid #00ff80;
+  font-size: 18px;
+  font-weight: bold;
+  z-index: 2;
+}
+
+/* =========================================
+   HUD: ATTITUDE INDICATOR (HORIZON)
+   ========================================= */
+#hud-attitude {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 400px;
+  height: 400px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+}
+
+#attitude-pitch {
+  position: absolute;
+  top: 0; left: 0; width: 100%; height: 100%;
+  transform-origin: center center;
+  transition: transform 0.1s linear;
+}
+
+.pitch-line {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  color: #00ff80;
+  font-size: 16px;
+  letter-spacing: 2px;
+  white-space: pre;
+  text-shadow: 0 0 5px #00ff80;
+  text-align: center;
+}
+
+.pl-1 { top: 35%; }
+.pl-0 { top: 50%; margin-top: -8px; }
+.pl--1 { top: 65%; }
+
+/* Static Center Cross */
+.attitude-cross {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 150px;
+  height: 20px;
+}
+
+.hud-center-dot {
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 6px; height: 6px;
+  background: #ffaa00;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  box-shadow: 0 0 5px #ffaa00;
+}
+
+.hud-wing {
+  position: absolute;
+  top: 50%;
+  width: 50px;
+  height: 4px;
+  background: #ffaa00;
+  transform: translateY(-50%);
+  box-shadow: 0 0 5px #ffaa00;
+}
+.left-wing { left: 0; }
+.right-wing { right: 0; }
