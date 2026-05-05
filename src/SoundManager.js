@@ -11,6 +11,8 @@ export class SoundManager {
 
         this.audioLoader = new THREE.AudioLoader();
 
+        this.sounds = {
+            pistol: null,
             rifle: null,
             tankEngine: null,
             heliEngine: null
