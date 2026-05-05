@@ -58,6 +58,13 @@ export class AssetLoader {
   }
 
   async loadAll() {
+    // FAILSAFE: Force hide loading after 15 seconds no matter what
+    const timeout = setTimeout(() => {
+      console.warn("AssetLoader: Loading timeout reached. Forcing game start.");
+      const loadingEl = document.getElementById('loading');
+      if (loadingEl) loadingEl.style.display = 'none';
+    }, 15000);
+
     // SEQUENTIAL LOADING
     for (const item of this.modelsToLoad) {
       try {
@@ -66,25 +73,27 @@ export class AssetLoader {
             `${item.url}?v=${Date.now()}`,
             (gltf) => {
               this.assets[item.name] = gltf;
-              // Optional: Update loading UI text if available
               const loadingEl = document.getElementById('loading');
               if (loadingEl) loadingEl.innerText = `Loading ${item.name}...`;
               resolve(gltf);
             },
-            undefined, // Progress
+            undefined, 
             (error) => {
               console.error(`Error loading ${item.name}: `, error);
-              reject(error);
+              // Resolve anyway to continue with other assets
+              resolve(null);
             }
           );
         });
       } catch (err) {
-        console.warn(`Failed to load ${item.name}, using fallback.`);
-        // Don't throw, just set as null so the game can continue
+        console.warn(`Failed to load ${item.name}, skipping.`);
         this.assets[item.name] = null;
-        // Resolve anyway
       }
     }
+
+    clearTimeout(timeout);
+    const finalLoadingEl = document.getElementById('loading');
+    if (finalLoadingEl) finalLoadingEl.style.display = 'none';
 
     return this.assets;
   }

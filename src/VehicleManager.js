@@ -178,10 +178,10 @@ export class VehicleManager {
                 dFile = 'helicopterHelice1.mp3';
             } else {
                 sFile = 'motorcycle.mp3';
-                dFile = 'motorcicle1.mp3';
+                dFile = 'motorcycle.mp3'; // Using same for now for simplicity
             }
 
-            this.audioLoader.load(`/sounds/${sFile}?v=${Date.now()}`, (buffer) => {
+            this.audioLoader.load(`sounds/${sFile}?v=${Date.now()}`, (buffer) => {
                 startupSound.setBuffer(buffer);
                 startupSound.setRefDistance(10);
                 startupSound.setMaxDistance(50);
@@ -189,7 +189,7 @@ export class VehicleManager {
                 startupSound.setVolume(0);
             });
 
-            this.audioLoader.load(`/sounds/${dFile}?v=${Date.now()}`, (buffer) => {
+            this.audioLoader.load(`sounds/${dFile}?v=${Date.now()}`, (buffer) => {
                 driveSound.setBuffer(buffer);
                 driveSound.setRefDistance(10);
                 driveSound.setMaxDistance(50);
@@ -305,14 +305,10 @@ export class VehicleManager {
         this.currentVehicle = vehicle;
 
         // Start Engine Sound sequence
-        vehicle.soundTimer = 0; // Reset timer when entering
-        if (vehicle.engineSoundStartup && !vehicle.engineSoundStartup.isPlaying) {
-            vehicle.engineSoundStartup.play();
-            vehicle.engineSoundStartup.setVolume(0.2);
-        }
-        if (vehicle.engineSoundDrive && vehicle.engineSoundDrive.isPlaying) {
-            vehicle.engineSoundDrive.stop(); // Ensure drive isn't playing yet
-            vehicle.engineSoundDrive.setVolume(0.0);
+        vehicle.soundTimer = 0; 
+        if (vehicle.engineSoundDrive && !vehicle.engineSoundDrive.isPlaying) {
+            vehicle.engineSoundDrive.play();
+            vehicle.engineSoundDrive.setVolume(0.4);
         }
 
         // Notify Character Controller

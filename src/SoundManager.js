@@ -11,9 +11,9 @@ export class SoundManager {
 
         this.audioLoader = new THREE.AudioLoader();
 
-        this.sounds = {
-            pistol: null,
-            rifle: null
+            rifle: null,
+            tankEngine: null,
+            heliEngine: null
         };
 
         // Audio Pools to prevent improved garbage collection issues and mobile limits
@@ -50,6 +50,14 @@ export class SoundManager {
         this.audioLoader.load(`sounds/tank-crush.mp3?v=${Date.now()}`, (buffer) => {
             this.sounds['tank-crush'] = buffer;
             this.createPool('tank-crush', buffer, 0.6, 3);
+        });
+
+        // Loopable Engine Sounds
+        this.audioLoader.load(`sounds/tank-moving.mp3?v=${Date.now()}`, (buffer) => {
+            this.sounds.tankEngine = buffer;
+        });
+        this.audioLoader.load(`sounds/helicopterHelice1.mp3?v=${Date.now()}`, (buffer) => {
+            this.sounds.heliEngine = buffer;
         });
     }
 
@@ -91,6 +99,20 @@ export class SoundManager {
         sound.play();
 
         this.poolIndex[type] = (index + 1) % this.pools[type].length;
+    }
+
+    // ENGINE SOUNDS (POSITIONAL & LOOPING)
+    createEngineSound(mesh, type, volume = 0.5) {
+        const buffer = (type === 'tank') ? this.sounds.tankEngine : this.sounds.heliEngine;
+        if (!buffer) return null;
+
+        const sound = new THREE.PositionalAudio(this.listener);
+        sound.setBuffer(buffer);
+        sound.setLoop(true);
+        sound.setVolume(volume);
+        sound.setRefDistance(10);
+        mesh.add(sound);
+        return sound;
     }
 
     // LEGACY / UTILITY
