@@ -2,6 +2,7 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
+  base: '/accionCity/', // <--- AÑADE ESTA LÍNEA AQUÍ
   server: {
     // Listen on all addresses (0.0.0.0)
     host: true,

@@ -29,25 +29,25 @@ export class SoundManager {
 
     loadSounds() {
         // Load Pistol
-        this.audioLoader.load(`/sounds/pistolaSoundUno.mp3?v=${Date.now()}`, (buffer) => {
+        this.audioLoader.load(`sounds/pistolaSoundUno.mp3?v=${Date.now()}`, (buffer) => {
             this.sounds.pistol = buffer;
             this.createPool('pistol', buffer);
             console.log("SoundManager: Pistol sound loaded + Pool created.");
         });
 
         // Load Rifle
-        this.audioLoader.load(`/sounds/rifleSoundUno.mp3?v=${Date.now()}`, (buffer) => {
+        this.audioLoader.load(`sounds/rifleSoundUno.mp3?v=${Date.now()}`, (buffer) => {
             this.sounds.rifle = buffer;
             this.createPool('rifle', buffer, 0.3);
             console.log("SoundManager: Rifle sound loaded.");
         });
 
         // TANK: Shots and Crush
-        this.audioLoader.load(`/sounds/tank-shots.mp3?v=${Date.now()}`, (buffer) => {
+        this.audioLoader.load(`sounds/tank-shots.mp3?v=${Date.now()}`, (buffer) => {
             this.sounds['tank-shot'] = buffer;
             this.createPool('tank-shot', buffer, 2, 3);
         });
-        this.audioLoader.load(`/sounds/tank-crush.mp3?v=${Date.now()}`, (buffer) => {
+        this.audioLoader.load(`sounds/tank-crush.mp3?v=${Date.now()}`, (buffer) => {
             this.sounds['tank-crush'] = buffer;
             this.createPool('tank-crush', buffer, 0.6, 3);
         });

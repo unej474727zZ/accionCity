@@ -4,10 +4,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
-  <title>3D City Explorer</title>
+  <title>Accion City</title>
   
-  <script type="module" crossorigin src="/assets/index-30b5fddc.js"></script>
-  <link rel="stylesheet" href="/assets/index-0e4fab81.css">
+  <script type="module" crossorigin src="/accionCity/assets/index-fe0f8822.js"></script>
+  <link rel="stylesheet" href="/accionCity/assets/index-be26e8f1.css">
 </head>
 
 <body>
@@ -17,10 +17,61 @@
     style="position: absolute; top: 0; left: 0; color: lime; background: rgba(0,0,0,0.5); pointer-events: none; z-index: 9999; font-family: monospace; font-size: 10px; white-space: pre;">
     Debug Info...</div>
   <div id="crosshair" style="display: none;">+</div>
-  <div id="mobile-controls"> Interface -->
-    <div id="zone_joystick"></div> <!-- Left Joystick (Still NippleJS for Analog?) User asked for Cross/D-Pad -->
-    <!-- Actually, user said "necesito 2 cruces", implies D-Pad buttons. Let's make D-Pad buttons AND keep joystick invisible/underneath? -->
-    <!-- Let's build the visual D-Pad -->
+  
+  <!-- HELICOPTER HUD (Full Screen Radar, Altimeter, Attitude) -->
+  <div id="heli-radar" style="display: none;">
+    <!-- Centered Radar Box -->
+    <div class="radar-center-box">
+      <div id="radar-compass-ring">
+        <div class="compass-deg" style="transform: rotate(0deg) translateY(-40vh)">N</div>
+        <div class="compass-deg" style="transform: rotate(30deg) translateY(-40vh)">30</div>
+        <div class="compass-deg" style="transform: rotate(60deg) translateY(-40vh)">60</div>
+        <div class="compass-deg" style="transform: rotate(90deg) translateY(-40vh)">E</div>
+        <div class="compass-deg" style="transform: rotate(120deg) translateY(-40vh)">120</div>
+        <div class="compass-deg" style="transform: rotate(150deg) translateY(-40vh)">150</div>
+        <div class="compass-deg" style="transform: rotate(180deg) translateY(-40vh)">S</div>
+        <div class="compass-deg" style="transform: rotate(210deg) translateY(-40vh)">210</div>
+        <div class="compass-deg" style="transform: rotate(240deg) translateY(-40vh)">240</div>
+        <div class="compass-deg" style="transform: rotate(270deg) translateY(-40vh)">W</div>
+        <div class="compass-deg" style="transform: rotate(300deg) translateY(-40vh)">300</div>
+        <div class="compass-deg" style="transform: rotate(330deg) translateY(-40vh)">330</div>
+      </div>
+      <div class="radar-rings">
+        <div class="ring r1"></div>
+        <div class="ring r2"></div>
+        <div class="ring r3"></div>
+        <div class="radar-crosshair-lines"></div>
+      </div>
+      <div class="radar-sweep"></div>
+      <div id="radar-blips"></div>
+    </div>
+
+    <!-- HUD Altimeter -->
+    <div id="hud-altimeter">
+      <div class="alt-label">ALT</div>
+      <div class="alt-readout">0000</div>
+      <div class="alt-scale">
+        <div id="alt-tape"></div>
+      </div>
+    </div>
+
+    <!-- HUD Attitude Indicator (Artificial Horizon) -->
+    <div id="hud-attitude">
+      <div id="attitude-pitch">
+        <div class="pitch-line pl-1">---  10  ---</div>
+        <div class="pitch-line pl-0">==========</div>
+        <div class="pitch-line pl--1">--- -10  ---</div>
+      </div>
+      <div class="attitude-cross">
+        <div class="hud-center-dot"></div>
+        <div class="hud-wing left-wing"></div>
+        <div class="hud-wing right-wing"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="mobile-controls"> <!-- Interface -->
+    <div id="zone_joystick"></div> <!-- Left Joystick -->
 
     <div id="psp-controls">
       <!-- SHOULDER BUTTONS -->
@@ -44,7 +95,7 @@
         <div id="btn-sq" class="psp-btn shape-btn">□</div> <!-- Run? -->
       </div>
 
-      <!-- RIGHT CAMERA CROSS (New Request) -->
+      <!-- RIGHT CAMERA CROSS -->
       <div id="camera-cross-container">
         <div id="btn-cam-up" class="psp-btn dpad-btn">▲</div>
         <div id="btn-cam-down" class="psp-btn dpad-btn">▼</div>
@@ -68,7 +119,7 @@
 
     <div id="zone_right" class="zone"></div> <!-- Right Look Zone (Background) -->
 
-    <!-- Chat UI (Hidden by default?) -->
+    <!-- Chat UI -->
     <div id="chat-container" style="display: none;">
       <div id="chat-messages"></div>
       <input type="text" id="chat-input" placeholder="Type..." autocomplete="off">
