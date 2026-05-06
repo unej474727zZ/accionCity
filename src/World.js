@@ -445,18 +445,28 @@ export class World {
                 }
             }
 
-            // 3. Wrecks (Solid & Pushable) - Increased count for "War Zone" feel
+            // 3. Wrecks (Small ones pushable, large ones static) - Increased count for "War Zone" feel
             for (let i = 0; i < 80; i++) {
                 const pos = getSafeStreetPos();
                 if (pos) {
                     const type = Math.random();
                     let mesh = null;
-                    if (type < 0.25) mesh = addScenery('tank_wreck', pos, new THREE.Euler(0, Math.random() * Math.PI, 0), 0.05);
-                    else if (type < 0.5) mesh = addScenery('car_wreck_fsc', pos, new THREE.Euler(0, Math.random() * Math.PI, 0), 0.1);
-                    else if (type < 0.75) mesh = addScenery('dumpster1', pos, new THREE.Euler(0, Math.random() * Math.PI, 0), 0.6);
-                    else mesh = addScenery('trash_can', pos, new THREE.Euler(0, Math.random() * Math.PI, 0), 0.8);
+                    let isHeavy = false;
 
-                    if (mesh) {
+                    if (type < 0.25) {
+                        mesh = addScenery('tank_wreck', pos, new THREE.Euler(0, Math.random() * Math.PI, 0), 0.05);
+                        isHeavy = true;
+                    } else if (type < 0.5) {
+                        mesh = addScenery('car_wreck_fsc', pos, new THREE.Euler(0, Math.random() * Math.PI, 0), 0.1);
+                        isHeavy = true;
+                    } else if (type < 0.75) {
+                        mesh = addScenery('dumpster1', pos, new THREE.Euler(0, Math.random() * Math.PI, 0), 0.6);
+                    } else {
+                        mesh = addScenery('trash_can', pos, new THREE.Euler(0, Math.random() * Math.PI, 0), 0.8);
+                    }
+
+                    // Only add small items to clutterObjects to allow pushing
+                    if (mesh && !isHeavy) {
                         mesh.userData.isTrashCan = true;
                         mesh.userData.pushVelocity = new THREE.Vector3(0, 0, 0);
                         this.clutterObjects.push(mesh);
