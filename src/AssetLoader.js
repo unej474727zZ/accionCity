@@ -58,20 +58,27 @@ export class AssetLoader {
   }
 
   async loadAll() {
-    // FAILSAFE: Force hide loading after 15 seconds no matter what
-    const timeout = setTimeout(() => {
-      console.warn("AssetLoader: Loading timeout reached. Forcing game start.");
-      const loadingEl = document.getElementById('loading');
-      if (loadingEl) loadingEl.style.display = 'none';
-    }, 15000);
-
     // SEQUENTIAL LOADING
     for (const item of this.modelsToLoad) {
       try {
         await new Promise((resolve, reject) => {
+          let isResolved = false;
+          
+          // Fallback timeout per asset (15 seconds)
+          const assetTimeout = setTimeout(() => {
+            if (!isResolved) {
+              console.warn(`Timeout loading ${item.name}`);
+              isResolved = true;
+              resolve(null);
+            }
+          }, 15000);
+
           this.loader.load(
             `${item.url}?v=${Date.now()}`,
             (gltf) => {
+              if (isResolved) return;
+              isResolved = true;
+              clearTimeout(assetTimeout);
               this.assets[item.name] = gltf;
               const loadingEl = document.getElementById('loading');
               if (loadingEl) loadingEl.innerText = `Loading ${item.name}...`;
@@ -79,8 +86,10 @@ export class AssetLoader {
             },
             undefined, 
             (error) => {
+              if (isResolved) return;
+              isResolved = true;
+              clearTimeout(assetTimeout);
               console.error(`Error loading ${item.name}: `, error);
-              // Resolve anyway to continue with other assets
               resolve(null);
             }
           );
@@ -90,10 +99,6 @@ export class AssetLoader {
         this.assets[item.name] = null;
       }
     }
-
-    clearTimeout(timeout);
-    const finalLoadingEl = document.getElementById('loading');
-    if (finalLoadingEl) finalLoadingEl.style.display = 'none';
 
     return this.assets;
   }
