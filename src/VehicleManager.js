@@ -304,6 +304,11 @@ export class VehicleManager {
 
         this.currentVehicle = vehicle;
 
+        // Resume context if suspended (Browser autoplay policy)
+        if (vehicle.engineSoundDrive && vehicle.engineSoundDrive.context && vehicle.engineSoundDrive.context.state === 'suspended') {
+            vehicle.engineSoundDrive.context.resume();
+        }
+
         // Start Engine Sound sequence
         vehicle.soundTimer = 0; 
         if (vehicle.engineSoundDrive && !vehicle.engineSoundDrive.isPlaying) {
