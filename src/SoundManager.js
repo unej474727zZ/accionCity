@@ -61,6 +61,13 @@ export class SoundManager {
         this.audioLoader.load(`sounds/helicopterHelice1.mp3?v=${Date.now()}`, (buffer) => {
             this.sounds.heliEngine = buffer;
         });
+
+        // Footstep
+        this.audioLoader.load(`sounds/step.mp3?v=${Date.now()}`, (buffer) => {
+            this.sounds.step = buffer;
+            this.createPool('step', buffer, 0.4, 8); // Pool of 8 for rapid steps
+            console.log("SoundManager: Step sound loaded.");
+        });
     }
 
     createPool(type, buffer, volume = 0.4, size = 5) {
@@ -84,6 +91,11 @@ export class SoundManager {
 
     playTankCrush() {
         this.playPool('tank-crush', 1.0 + (Math.random() * 0.2 - 0.1));
+    }
+
+    playStep() {
+        // Vary the pitch slightly so it doesn't sound like a machine gun
+        this.playPool('step', 1.0 + (Math.random() * 0.15 - 0.05));
     }
 
     playPool(type, pitch = 1.0) {

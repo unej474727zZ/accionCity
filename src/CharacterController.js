@@ -1378,7 +1378,20 @@ export class CharacterController {
                     // El valor 0.8 es un multiplicador de ajuste fino para estos assets específicos
                     const animScale = (Math.abs(speed) / baseSpeed) * 0.9;
                     this.currentAction.setEffectiveTimeScale(Math.max(0.4, animScale));
+
+                    // --- FOOTSTEP SOUND ---
+                    if (!this.stepTimer) this.stepTimer = 0;
+                    this.stepTimer += dt;
+                    const stepInterval = (nextState === 'run') ? 0.3 : 0.5; // Segundos entre cada paso
+                    if (this.stepTimer >= stepInterval) {
+                        this.stepTimer = 0;
+                        if (this.world && this.world.soundManager) {
+                            this.world.soundManager.playStep();
+                        }
+                    }
+
                 } else if (this.currentAction) {
+                    this.stepTimer = 0; // Reset timer when stopped
                     this.currentAction.setEffectiveTimeScale(1.0);
                 }
             }
