@@ -68,6 +68,21 @@ export class SoundManager {
             this.createPool('step', buffer, 0.4, 8); // Pool of 8 for rapid steps
             console.log("SoundManager: Step sound loaded.");
         });
+
+        // Ambient Background Sound
+        this.audioLoader.load(`sounds/backSound.mp3?v=${Date.now()}`, (buffer) => {
+            this.sounds.ambient = buffer;
+            this.ambientAudio = new THREE.Audio(this.listener);
+            this.ambientAudio.setBuffer(buffer);
+            this.ambientAudio.setLoop(true);
+            this.ambientAudio.setVolume(0.2); // Low volume so it doesn't overpower footsteps/gunshots
+            
+            // Try to play immediately (might be paused by browser autoplay policy until user clicks)
+            if (this.listener.context.state === 'running') {
+                this.ambientAudio.play();
+            }
+            console.log("SoundManager: Ambient sound loaded.");
+        });
     }
 
     createPool(type, buffer, volume = 0.4, size = 5) {
@@ -101,6 +116,10 @@ export class SoundManager {
     playPool(type, pitch = 1.0) {
         if (this.listener.context.state === 'suspended') {
             this.listener.context.resume();
+            // Try to start ambient audio if it was blocked by autoplay policy
+            if (this.ambientAudio && !this.ambientAudio.isPlaying) {
+                this.ambientAudio.play();
+            }
         }
 
         if (!this.pools[type] || this.pools[type].length === 0) return;
