@@ -83,6 +83,13 @@ export class SoundManager {
             }
             console.log("SoundManager: Ambient sound loaded.");
         });
+
+        // Reload Sound
+        this.audioLoader.load(`sounds/reload.mp3?v=${Date.now()}`, (buffer) => {
+            this.sounds.reload = buffer;
+            this.createPool('reload', buffer, 1.0, 2); // Small pool is enough
+            console.log("SoundManager: Reload sound loaded.");
+        });
     }
 
     createPool(type, buffer, volume = 0.4, size = 5) {
@@ -111,6 +118,10 @@ export class SoundManager {
     playStep() {
         // Vary the pitch slightly so it doesn't sound like a machine gun
         this.playPool('step', 1.0 + (Math.random() * 0.15 - 0.05));
+    }
+
+    playReload() {
+        this.playPool('reload', 1.0);
     }
 
     playPool(type, pitch = 1.0) {

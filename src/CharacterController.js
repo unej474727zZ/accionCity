@@ -750,7 +750,7 @@ export class CharacterController {
                 }
                 break;
             case 'KeyR':
-                if (!e.repeat && this.weaponManager) this.weaponManager.cycleWeapon();
+                if (!e.repeat && this.weaponManager) this.weaponManager.reload();
                 break;
             case 'KeyT':
                 if (!e.repeat && this.weaponManager) this.weaponManager.toggleHolster();
@@ -772,9 +772,8 @@ export class CharacterController {
     }
 
     reload() {
-        console.log("RELOAD triggered (Animation pending)");
-        if (this.weaponManager && this.weaponManager.soundManager) {
-            // Placeholder for future reload sound
+        if (this.weaponManager) {
+            this.weaponManager.reload();
         }
     }
 

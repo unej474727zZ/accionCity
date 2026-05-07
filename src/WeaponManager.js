@@ -181,10 +181,16 @@ export class WeaponManager {
 
         // Input State
         this.isFiring = false;
+        this.isReloading = false;
         this.timeSinceLastShot = 0;
+
+        // Ammo State
+        this.maxAmmo = { pistol: 12, rifle: 30 };
+        this.ammo = { pistol: 12, rifle: 30 };
 
         // Input Setup
         this.setupInput();
+        this.createAmmoUI(); // NEW
         this.createRangeFinderUI();
 
         // Effects
@@ -330,9 +336,8 @@ export class WeaponManager {
         }
 
         window.addEventListener('keydown', (e) => {
-            // Weapon Switching
-            if (e.key === '1') this.equip('pistol');
-            if (e.key === '2') this.equip('rifle');
+            // Weapon Switching (Only with 1)
+            if (e.key === '1') this.cycleWeapon();
             if (e.code === 'KeyT') this.holster();
 
             // ROTATION CONTROLS (Only if weapon equipped)
@@ -385,6 +390,36 @@ export class WeaponManager {
         this.rangeEl.style.pointerEvents = 'none';
         this.rangeEl.innerText = "--- m";
         document.body.appendChild(this.rangeEl);
+    }
+
+    createAmmoUI() {
+        this.ammoEl = document.createElement('div');
+        this.ammoEl.style.position = 'absolute';
+        this.ammoEl.style.bottom = '20px';
+        this.ammoEl.style.right = '20px';
+        this.ammoEl.style.color = '#ffffff';
+        this.ammoEl.style.fontFamily = 'monospace';
+        this.ammoEl.style.fontSize = '32px';
+        this.ammoEl.style.fontWeight = 'bold';
+        this.ammoEl.style.textShadow = '0 0 10px #ff0000, 2px 2px 2px #000';
+        this.ammoEl.style.pointerEvents = 'none';
+        this.ammoEl.style.display = 'none'; // Hidden until weapon equipped
+        this.ammoEl.innerText = "";
+        document.body.appendChild(this.ammoEl);
+    }
+
+    updateAmmoUI() {
+        if (!this.ammoEl) return;
+        if (!this.currentWeaponType || this.isReloading) {
+            this.ammoEl.innerText = this.isReloading ? "RELOADING..." : "";
+            this.ammoEl.style.color = "#ffaa00";
+            return;
+        }
+        
+        const current = this.ammo[this.currentWeaponType];
+        const max = this.maxAmmo[this.currentWeaponType];
+        this.ammoEl.innerText = `${current} / ${max}`;
+        this.ammoEl.style.color = (current <= (max * 0.25)) ? '#ff0000' : '#ffffff';
     }
 
     updateRangeFinder() {
@@ -481,9 +516,13 @@ export class WeaponManager {
             console.log(`WeaponManager: Switched to ${type}`);
         }
 
-        // Show Crosshair
+        // Show Crosshair and Ammo UI
         if (this.crosshairEl) {
             this.crosshairEl.style.display = 'block';
+        }
+        if (this.ammoEl) {
+            this.ammoEl.style.display = 'block';
+            this.updateAmmoUI();
         }
 
         // Show Laser if active
@@ -510,6 +549,7 @@ export class WeaponManager {
         // Hide UI
         if (this.crosshairEl) this.crosshairEl.style.display = 'none';
         if (this.rangeEl) this.rangeEl.innerText = "---";
+        if (this.ammoEl) this.ammoEl.style.display = 'none';
 
         // Hide Laser
         if (this.laserMesh) this.laserMesh.visible = false;
@@ -679,9 +719,24 @@ export class WeaponManager {
     }
 
     shoot() {
-        if (!this.currentWeaponMesh || !this.currentWeaponType) return;
+        if (!this.currentWeaponMesh || !this.currentWeaponType || this.isReloading) return;
+
+        // Ammo Check
+        if (this.ammo[this.currentWeaponType] <= 0) {
+            this.reload();
+            return;
+        }
 
         this.timeSinceLastShot = 0;
+        
+        // Subtract ammo
+        this.ammo[this.currentWeaponType]--;
+        this.updateAmmoUI();
+
+        // Auto reload if empty
+        if (this.ammo[this.currentWeaponType] <= 0) {
+            this.reload();
+        }
 
         // 1. MUZZLE POSITION
         // Calculate muzzle position using localToWorld to handle Scale/Rotation correctly
@@ -1307,6 +1362,9 @@ export class WeaponManager {
                 this.activeBullet = null;
                 if (this.characterController) this.characterController.overrideCamera = false;
             }
+            if (this.characterController) {
+                this.characterController.shakeCamera(0.2, 0.1);
+            }
         } else if (this.characterController) {
             this.characterController.overrideCamera = false;
         }
@@ -1420,6 +1478,32 @@ export class WeaponManager {
     }
 
 
+
+    reload() {
+        if (!this.currentWeaponType || this.isReloading) return;
+        
+        // Don't reload if already full
+        if (this.ammo[this.currentWeaponType] === this.maxAmmo[this.currentWeaponType]) return;
+
+        this.isReloading = true;
+        this.isFiring = false;
+        
+        console.log("WeaponManager: Reloading...");
+        this.updateAmmoUI(); // Shows "RELOADING..."
+
+        if (this.soundManager) this.soundManager.playReload();
+
+        // Lock shooting for 2 seconds (reload duration)
+        setTimeout(() => {
+            if (this.currentWeaponType) {
+                // Refill ammo
+                this.ammo[this.currentWeaponType] = this.maxAmmo[this.currentWeaponType];
+            }
+            this.isReloading = false;
+            this.updateAmmoUI();
+            console.log("WeaponManager: Reload complete.");
+        }, 2000);
+    }
 
     explodeCanister(canister) {
         if (canister.exploded) return;
