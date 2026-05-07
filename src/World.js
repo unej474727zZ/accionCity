@@ -133,6 +133,7 @@ export class World {
         this.scene.add(this.arReticle);
 
         this.clutterObjects = []; // Track pushable scenery
+        this.pickups = []; // Track ammo pickups
     }
 
     async start() {
@@ -484,6 +485,35 @@ export class World {
                         mesh.userData.pushVelocity = new THREE.Vector3(0, 0, 0);
                         this.clutterObjects.push(mesh);
                     }
+                }
+            }
+
+            // 5. Procedural Bazooka Ammo Pickups (Floating glowing cylinders)
+            const ammoGeom = new THREE.CylinderGeometry(0.1, 0.1, 0.8, 8);
+            ammoGeom.rotateX(Math.PI / 2); // Lay flat
+            const ammoMat = new THREE.MeshStandardMaterial({ 
+                color: 0x00ff00, 
+                emissive: 0x00aa00,
+                metalness: 0.8,
+                roughness: 0.2
+            });
+
+            for (let i = 0; i < 80; i++) { // Scatter 80 ammo pickups around
+                const pos = getSafeStreetPos();
+                if (pos) {
+                    pos.y = 1.0; // Float above ground
+                    const mesh = new THREE.Mesh(ammoGeom, ammoMat);
+                    mesh.position.copy(pos);
+                    
+                    // Add a simple halo/glow with another mesh
+                    const glowGeom = new THREE.CylinderGeometry(0.15, 0.15, 0.9, 8);
+                    glowGeom.rotateX(Math.PI / 2);
+                    const glowMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending });
+                    const glowMesh = new THREE.Mesh(glowGeom, glowMat);
+                    mesh.add(glowMesh);
+
+                    this.scene.add(mesh);
+                    this.pickups.push({ mesh, type: 'bazooka', startY: pos.y, timeOffset: Math.random() * Math.PI * 2 });
                 }
             }
 
@@ -1007,6 +1037,39 @@ export class World {
                         pushVel.set(0, 0, 0);
                     }
                     pushVel.multiplyScalar(Math.max(0, 1.0 - dt * 5.0)); // Friction
+                }
+            }
+
+            // PICKUPS LOGIC
+            const pickupTime = performance.now() * 0.002;
+            const playerPos = this.character && this.character.mesh ? this.character.mesh.position : null;
+            
+            for (let i = this.pickups.length - 1; i >= 0; i--) {
+                const p = this.pickups[i];
+                
+                // Animation: bob up and down, and spin
+                p.mesh.position.y = p.startY + Math.sin(pickupTime + p.timeOffset) * 0.2;
+                p.mesh.rotation.y += dt;
+                
+                // Collision with player
+                if (playerPos && playerPos.distanceTo(p.mesh.position) < 2.0) {
+                    // Pick up!
+                    if (p.type === 'bazooka' && this.weaponManager) {
+                        // Only pick up if we actually need ammo
+                        if (this.weaponManager.ammo['bazooka'] < this.weaponManager.maxAmmo['bazooka']) {
+                            this.weaponManager.ammo['bazooka'] = this.weaponManager.maxAmmo['bazooka'];
+                            this.weaponManager.updateAmmoUI();
+                            if (this.soundManager) this.soundManager.playReload();
+                            
+                            // Remove from scene
+                            this.scene.remove(p.mesh);
+                            p.mesh.geometry.dispose();
+                            p.mesh.material.dispose();
+                            this.pickups.splice(i, 1);
+                            
+                            console.log("🚀 Bazooka Ammo Picked Up!");
+                        }
+                    }
                 }
             }
 

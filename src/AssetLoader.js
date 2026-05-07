@@ -53,7 +53,8 @@ export class AssetLoader {
       { name: 'bus_wreck', url: 'models/destroyed_bus.glb' },
       { name: 'plane_interior', url: 'models/dc3_interior.glb' },
       { name: 'car_wreck_group', url: 'models/wrecked_cars_2.glb' },
-      { name: 'canister', url: 'models/bombona.glb' }
+      { name: 'canister', url: 'models/bombona.glb' },
+      { name: 'bazooka', url: 'models/bazooka.glb' }
     ];
   }
 

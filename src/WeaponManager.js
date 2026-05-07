@@ -174,6 +174,12 @@ export class WeaponManager {
                 // User: "Perfect" -> X=2.77, Y=5.74, Z=-64.00
                 rotation: new THREE.Euler(2.77, 5.74, -64.00),
                 fireRate: 0.8 // Rapid fire
+            },
+            bazooka: { // bazooka.glb
+                scale: 15.0, // Adjust later if needed
+                position: new THREE.Vector3(0.5, 0.4, 0.3), // Shoulder position
+                rotation: new THREE.Euler(0, Math.PI, 0), // Forward
+                fireRate: 2.0 // Slow fire rate
             }
         };
 
@@ -185,8 +191,8 @@ export class WeaponManager {
         this.timeSinceLastShot = 0;
 
         // Ammo State
-        this.maxAmmo = { pistol: 12, rifle: 30 };
-        this.ammo = { pistol: 12, rifle: 30 };
+        this.maxAmmo = { pistol: 12, rifle: 30, bazooka: 2 };
+        this.ammo = { pistol: 12, rifle: 30, bazooka: 2 };
 
         // Input Setup
         this.setupInput();
@@ -324,6 +330,7 @@ export class WeaponManager {
 
     cycleWeapon() {
         if (this.currentWeaponType === 'pistol') this.equip('rifle');
+        else if (this.currentWeaponType === 'rifle') this.equip('bazooka');
         else this.equip('pistol');
     }
 
@@ -652,25 +659,9 @@ export class WeaponManager {
         const shell = new TankShell(this.scene, muzzlePos, bulletDir, 150.0, (pos, norm, obj) => {
             console.log("💥 TANK SHELL IMPACT:", pos);
             this.createExplosion(pos, 5.0);
-            this.createImpact(pos, norm || new THREE.Vector3(0, 1, 0), 'spark', 5.0, obj); // 5x Scale (up from 4)
+            this.createImpact(pos, norm || new THREE.Vector3(0, 1, 0), 'spark', 5.0, obj); // 5x Scale
 
-            // AREA DAMAGE (SPLASH DAMAGE)
-            const splashRadius = 15.0;
-            const affectedVehicles = new Set();
-            const worldPos = new THREE.Vector3();
-            
-            this.scene.traverse(c => {
-                if (c.isMesh) {
-                    c.getWorldPosition(worldPos);
-                    if (worldPos.distanceTo(pos) < splashRadius) {
-                        const targetVeh = this.characterController.world.vehicleManager.findVehicleByMesh(c);
-                        if (targetVeh && !affectedVehicles.has(targetVeh)) {
-                            this.characterController.world.vehicleManager.damageVehicle(targetVeh, 1.0, c);
-                            affectedVehicles.add(targetVeh);
-                        }
-                    }
-                }
-            });
+            this.applyAreaDamage(pos, 15.0, 1.0);
         });
 
         if (hit) {
@@ -684,6 +675,39 @@ export class WeaponManager {
         }
 
         this.tankShells.push(shell);
+    }
+
+    applyAreaDamage(pos, radius, damageAmount) {
+        if (!this.characterController || !this.characterController.world) return;
+        const vm = this.characterController.world.vehicleManager;
+        const npcManager = this.characterController.world.npcManager;
+        const affectedVehicles = new Set();
+
+        // 1. Managed Vehicles (O(N) where N is small)
+        for (const v of vm.vehicles) {
+            if (!v.mesh) continue;
+            // Using a simple distance check (not using getWorldPosition to save perf)
+            if (v.mesh.position.distanceTo(pos) < radius) {
+                vm.damageVehicle(v, damageAmount, v.mesh, true);
+                affectedVehicles.add(v);
+            }
+        }
+
+        // 2. NPC Vehicles
+        if (npcManager && npcManager.cars) {
+            for (const car of npcManager.cars) {
+                if (!car) continue;
+                if (car.position.distanceTo(pos) < radius && !affectedVehicles.has(car)) {
+                    vm.damageVehicle(car, damageAmount, car, true);
+                    affectedVehicles.add(car);
+                }
+            }
+        }
+
+        // 3. Player
+        if (this.character && this.character.position.distanceTo(pos) < radius) {
+            if (this.characterController.damage) this.characterController.damage(20);
+        }
     }
 
     createExplosion(position, radius) {
@@ -776,8 +800,39 @@ export class WeaponManager {
         const hits = raycaster.intersectObjects(targets, false);
         const targetPoint = hits.length > 0 ? hits[0].point : this.camera.position.clone().add(camDir.multiplyScalar(1000));
 
-        // 3. VISUAL BULLET
+        // 3. VISUAL BULLET (OR PROJECTILE)
         const bulletDir = targetPoint.clone().sub(muzzlePos).normalize();
+        
+        if (this.currentWeaponType === 'bazooka') {
+            // Spawn a Missile (Reusing TankShell logic since it does exactly what we want)
+            // Play a rocket sound? We don't have one, but we can play tank shot sound.
+            if (this.soundManager) this.soundManager.playTankShot();
+            
+            // Adjust muzzle pos for bazooka to be further forward
+            muzzlePos.add(bulletDir.clone().multiplyScalar(2.0));
+            
+            const shell = new TankShell(this.scene, muzzlePos, bulletDir, 100.0, (pos, norm, obj) => {
+                this.createExplosion(pos, 8.0); // Bigger explosion
+                this.createImpact(pos, norm || new THREE.Vector3(0, 1, 0), 'spark', 15.0, obj); // ENORMOUS DECAL/HOLE (15.0 scale)
+
+                this.applyAreaDamage(pos, 15.0, 1.0);
+            });
+
+            if (hits.length > 0) {
+                const hit = hits[0];
+                shell.hitPoint = hit.point;
+                const worldNormal = hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld) : new THREE.Vector3(0, 1, 0);
+                shell.hitNormal = worldNormal;
+                shell.hitObject = hit.object;
+            } else {
+                shell.hitPoint = targetPoint;
+            }
+
+            this.tankShells.push(shell); // We can reuse the tankShells array for update loop
+            
+            return; // Skip hitscan effects
+        }
+
         const bullet = new Bullet(this.scene, muzzlePos, bulletDir, 350.0);
         this.bullets.push(bullet);
 
@@ -1482,6 +1537,11 @@ export class WeaponManager {
     reload() {
         if (!this.currentWeaponType || this.isReloading) return;
         
+        if (this.currentWeaponType === 'bazooka') {
+            console.log("Bazooka must be reloaded by picking up ammo on the map!");
+            return; // Bazooka uses pickups, no manual reload
+        }
+        
         // Don't reload if already full
         if (this.ammo[this.currentWeaponType] === this.maxAmmo[this.currentWeaponType]) return;
 
@@ -1520,19 +1580,11 @@ export class WeaponManager {
         }
 
         // Visual & Audio
-        this.createExplosion(pos, 6.0); // Smaller explosion
+        this.createExplosion(pos, 6.0); // Normal explosion
         if (this.soundManager) this.soundManager.playTankShot();
 
-        // Area Damage (reduced radius)
-        const radius = 8.0; 
-        
-        // ... (rest of the logic for players remains the same)
-
-
-        // Damage Player
-        if (this.character.position.distanceTo(pos) < radius) {
-            if (this.characterController.damage) this.characterController.damage(20);
-        }
+        // Area Damage (Normal radius)
+        this.applyAreaDamage(pos, 8.0, 1.0);
 
         // Remove mesh
         this.scene.remove(canister.mesh);
