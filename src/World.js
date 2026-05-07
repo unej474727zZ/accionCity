@@ -391,7 +391,7 @@ export class World {
             };
 
             // SAFE SPAWN HELPER (Avoid Buildings)
-            const getSafeStreetPos = (range = 450) => {
+            const getSafeStreetPos = (range = 800) => {
                 for (let i = 0; i < 5; i++) {
                     const x = (Math.random() - 0.5) * range;
                     const z = (Math.random() - 0.5) * range;
@@ -410,7 +410,7 @@ export class World {
             };
 
             // 1. Trash Cans (Solid and Pushable, NOT Explosive)
-            for (let i = 0; i < 150; i++) {
+            for (let i = 0; i < 400; i++) {
                 const pos = getSafeStreetPos();
                 if (pos) {
                     const mesh = addScenery('trash_can', pos, new THREE.Euler(0, Math.random() * Math.PI, 0), 0.6, false);
@@ -475,7 +475,7 @@ export class World {
             }
 
             // 4. Explosive Canisters (Bombonas Rojas) - High saturation
-            for (let i = 0; i < 200; i++) {
+            for (let i = 0; i < 500; i++) {
                 const pos = getSafeStreetPos();
                 if (pos) {
                     pos.y = 0.4;
