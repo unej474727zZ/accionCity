@@ -30,16 +30,7 @@ body {
 }
 
 #debug-console {
-  position: absolute;
-  top: 0;
-  left: 0;
-  color: lime;
-  background: rgba(0, 0, 0, 0.5);
-  pointer-events: none;
-  z-index: 9999;
-  font-family: monospace;
-  font-size: 10px;
-  white-space: pre;
+  display: none !important;
 }
 
 /* --- PSP CONTROLS LAYOUT (Reference Style) --- */
@@ -80,13 +71,7 @@ body {
 
 /* SHOULDER BUTTONS (L / R) - Top Corners, Wide & Thin */
 .shoulder-btn {
-  top: 20px;
-  width: 100px;
-  height: 40px;
-  border-radius: 5px;
-  border-top-left-radius: 15px;
-  border-top-right-radius: 15px;
-  font-size: 18px;
+  display: none !important;
 }
 
 #btn-l {
@@ -152,11 +137,7 @@ body {
 
 /* ACTION SHAPES (Triangle, Circle, X, Square) - Top Right */
 #shapes-container {
-  position: absolute;
-  bottom: 120px;
-  right: 30px;
-  width: 140px;
-  height: 140px;
+  display: none !important;
 }
 
 .shape-btn {
@@ -198,14 +179,7 @@ body {
 
 /* RIGHT CAMERA CROSS (Stick Simulation) - Lower Right */
 #camera-cross-container {
-  position: absolute;
-  bottom: -20px;
-  /* Pushed down */
-  right: 30px;
-  width: 140px;
-  height: 140px;
-  transform: scale(0.8);
-  pointer-events: none;
+  display: none !important;
 }
 
 /* Stick styling */
@@ -316,13 +290,7 @@ body {
 
 /* Left Joystick Zone */
 #zone_joystick {
-  position: absolute;
-  bottom: 20px;
-  left: 30px;
-  width: 140px;
-  height: 140px;
-  z-index: 50;
-  touch-action: none;
+  display: none !important;
 }
 
 /* Right Look Zone (Background) - Restored */
