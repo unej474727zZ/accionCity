@@ -393,10 +393,11 @@ export class World {
 
             // SAFE SPAWN HELPER (Avoid Buildings)
             const getSafeStreetPos = (range = 800) => {
-                for (let i = 0; i < 5; i++) {
+                for (let i = 0; i < 20; i++) {
                     const x = (Math.random() - 0.5) * range;
                     const z = (Math.random() - 0.5) * range;
-                    const origin = new THREE.Vector3(x, 10, z);
+                    // CRITICAL: Start ray high above the city to hit roofs first!
+                    const origin = new THREE.Vector3(x, 200, z);
                     const ray = new THREE.Raycaster(origin, new THREE.Vector3(0, -1, 0));
                     // Check against existing colliders (buildings)
                     const hits = ray.intersectObjects(this.character.colliders, true);
@@ -476,7 +477,10 @@ export class World {
             }
 
             // 4. Explosive Canisters (Bombonas Rojas) - High saturation
-            for (let i = 0; i < 500; i++) {
+            let canistersSpawned = 0;
+            let canisterAttempts = 0;
+            while (canistersSpawned < 1000 && canisterAttempts < 10000) {
+                canisterAttempts++;
                 const pos = getSafeStreetPos();
                 if (pos) {
                     pos.y = 0.4;
@@ -484,9 +488,11 @@ export class World {
                     if (mesh) {
                         mesh.userData.pushVelocity = new THREE.Vector3(0, 0, 0);
                         this.clutterObjects.push(mesh);
+                        canistersSpawned++;
                     }
                 }
             }
+            console.log(`🧨 Spawned ${canistersSpawned} explosive canisters.`);
 
             // 5. Procedural Bazooka Ammo Pickups (Floating glowing cylinders)
             const ammoGeom = new THREE.CylinderGeometry(0.1, 0.1, 0.8, 8);
