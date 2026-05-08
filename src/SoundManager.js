@@ -159,8 +159,39 @@ export class SoundManager {
         return sound;
     }
 
-    // LEGACY / UTILITY
+    // LEGACY / UTILITY / SPATIAL EXPLOSIONS
     playExplosion(pos) {
-        this.playTankShot();
+        if (!pos || !this.camera) {
+            this.playTankShot();
+            return;
+        }
+
+        const dist = this.camera.position.distanceTo(pos);
+        const maxDist = 800; // Far hear far, close hear close
+        if (dist > maxDist) return;
+
+        let vol = 1.0 - (dist / maxDist);
+        vol = Math.max(0.01, vol * vol); // Quadratic falloff
+
+        // Resume context if needed
+        if (this.listener.context.state === 'suspended') {
+            this.listener.context.resume();
+            if (this.ambientAudio && !this.ambientAudio.isPlaying) {
+                this.ambientAudio.play();
+            }
+        }
+
+        const type = 'tank-shot';
+        if (!this.pools[type] || this.pools[type].length === 0) return;
+
+        const index = this.poolIndex[type];
+        const sound = this.pools[type][index];
+
+        if (sound.isPlaying) sound.stop();
+        sound.setVolume(vol * 2.0); // Boost base volume for bombs to ensure impact
+        sound.setPlaybackRate(0.8 + Math.random() * 0.2); // Lower pitch for bigger boom
+        sound.play();
+
+        this.poolIndex[type] = (index + 1) % this.pools[type].length;
     }
 }

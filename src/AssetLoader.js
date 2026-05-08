@@ -47,22 +47,16 @@ export class AssetLoader {
       { name: 'dumpster1', url: 'models/dumpster.glb' },
       { name: 'dumpster2', url: 'models/dumpster_4k.glb' },
       { name: 'car_wreck_fsc', url: 'models/wrecked_fsc_zuk.glb' },
-      { name: 'plane_wreck', url: 'models/crashed_plane.glb' },
-      { name: 'moto_wreck', url: 'models/moto_wreck.glb' },
-      { name: 'heli_wreck', url: 'models/helicopter_wreck.glb' },
-      { name: 'bus_wreck', url: 'models/destroyed_bus.glb' },
-      { name: 'plane_interior', url: 'models/dc3_interior.glb' },
-      { name: 'car_wreck_group', url: 'models/wrecked_cars_2.glb' },
       { name: 'canister', url: 'models/bombona.glb' },
       { name: 'bazooka', url: 'models/bazooka.glb' }
     ];
   }
 
   async loadAll() {
-    // SEQUENTIAL LOADING
+    // SEQUENTIAL LOADING (Prevents browser freeze on low-end devices / mobile)
     for (const item of this.modelsToLoad) {
       try {
-        await new Promise((resolve, reject) => {
+        await new Promise((resolve) => {
           let isResolved = false;
           
           // Fallback timeout per asset (15 seconds)
@@ -75,14 +69,16 @@ export class AssetLoader {
           }, 15000);
 
           this.loader.load(
-            `${item.url}?v=${Date.now()}`,
+            `${item.url}`, // CACHE ENABLED! (No ?v=Date.now())
             (gltf) => {
               if (isResolved) return;
               isResolved = true;
               clearTimeout(assetTimeout);
               this.assets[item.name] = gltf;
+              
               const loadingEl = document.getElementById('loading');
-              if (loadingEl) loadingEl.innerText = `Loading ${item.name}...`;
+              if (loadingEl) loadingEl.innerText = `Cargando ${item.name}...`;
+              
               resolve(gltf);
             },
             undefined, 

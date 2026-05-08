@@ -812,8 +812,8 @@ export class WeaponManager {
             muzzlePos.add(bulletDir.clone().multiplyScalar(2.0));
             
             const shell = new TankShell(this.scene, muzzlePos, bulletDir, 100.0, (pos, norm, obj) => {
-                this.createExplosion(pos, 8.0); // Bigger explosion
-                this.createImpact(pos, norm || new THREE.Vector3(0, 1, 0), 'spark', 15.0, obj); // ENORMOUS DECAL/HOLE (15.0 scale)
+                this.createExplosion(pos, 5.0); // Optimized scale from 8.0
+                this.createImpact(pos, norm || new THREE.Vector3(0, 1, 0), 'spark', 6.0, obj); // Optimized scale from 15.0
 
                 this.applyAreaDamage(pos, 15.0, 1.0);
             });
@@ -1098,8 +1098,8 @@ export class WeaponManager {
         const baseMat = type === 'blood' ? this._bloodMat : this._sparkMat;
 
         // 1. SPARKS / PARTICLES
-        // Optimized: Reduced count and use shared material clones for independent fade
-        const sparkCount = (type === 'blood' ? 5 : 8) * scale; 
+        // Optimized: Absolute minimum count for mobile
+        const sparkCount = (type === 'blood' ? 2 : 2) * scale; 
         for (let i = 0; i < sparkCount; i++) {
             const pMat = baseMat.clone();
             const p = new THREE.Mesh(this._sparkGeom, pMat);
@@ -1198,8 +1198,8 @@ export class WeaponManager {
         }
 
         // 3. SMOKE PUFFS (NEW)
-        // Optimized: Fewer smoke puffs and use shared material clones
-        const smokeCount = 1 * scale;
+        // Optimized: Only huge explosions get 1 smoke puff
+        const smokeCount = scale > 5 ? 1 : 0;
         for (let i = 0; i < smokeCount; i++) {
             const sMat = this._smokeMat.clone();
             const s = new THREE.Mesh(this._smokeGeom, sMat);
@@ -1226,15 +1226,15 @@ export class WeaponManager {
     }
 
     createExplosion(point, scale = 1.0) {
-        // 1. Core Flash (Smaller & Faster)
-        const flashGeom = new THREE.SphereGeometry(1.5 * scale, 8, 8);
+        // 1. Core Flash (Optimized segments: 4x2)
+        const flashGeom = new THREE.SphereGeometry(1.5 * scale, 4, 2);
         const flashMat = new THREE.MeshBasicMaterial({ color: 0xffcc00, transparent: true, opacity: 1.0 });
         const flash = new THREE.Mesh(flashGeom, flashMat);
         flash.position.copy(point);
         this.scene.add(flash);
 
         // 2. Light Pulse (Reduced intensity/range)
-        const light = new THREE.PointLight(0xffaa00, 20 * scale, 15 * scale);
+        const light = new THREE.PointLight(0xffaa00, 15 * scale, 12 * scale);
         light.position.copy(point);
         this.scene.add(light);
 
@@ -1256,17 +1256,18 @@ export class WeaponManager {
         };
         anim();
 
-        // 3. Debris/Sparks
-        this.createImpact(point, new THREE.Vector3(0, 1, 0), 'spark', scale * 2);
+        // 3. Debris/Sparks (Optimized scale)
+        this.createImpact(point, new THREE.Vector3(0, 1, 0), 'spark', scale * 1.2);
 
-        // 4. PERMANENT SCORCH MARK (Burn)
-        // Raycast down to find ground
+        // 4. PERMANENT SCORCH MARK (Removed for performance)
+        /*
         const ray = new THREE.Raycaster(point.clone().add(new THREE.Vector3(0, 1, 0)), new THREE.Vector3(0, -1, 0));
         const hits = ray.intersectObjects(this.scene.children, true);
         const groundHit = hits.find(h => h.object.name === "AsphaltFloor" || h.object.name.toLowerCase().includes('city'));
         if (groundHit) {
-            this.createImpact(groundHit.point, groundHit.face ? groundHit.face.normal.clone().transformDirection(groundHit.object.matrixWorld) : new THREE.Vector3(0, 1, 0), 'scorch', scale * 3.0, groundHit.object);
+            this.createImpact(groundHit.point, groundHit.face ? groundHit.face.normal.clone().transformDirection(groundHit.object.matrixWorld) : new THREE.Vector3(0, 1, 0), 'scorch', scale * 2.0, groundHit.object);
         }
+        */
 
         // 5. SHOCKWAVE (Push nearby objects)
         const radius = 15.0 * scale;
@@ -1580,7 +1581,7 @@ export class WeaponManager {
         }
 
         // Visual & Audio
-        this.createExplosion(pos, 6.0); // Normal explosion
+        this.createExplosion(pos, 4.0); // Optimized scale from 6.0
         if (this.soundManager) this.soundManager.playTankShot();
 
         // Area Damage (Normal radius)

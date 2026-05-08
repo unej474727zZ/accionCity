@@ -12,6 +12,7 @@ import { RemotePlayer } from './RemotePlayer.js';
 import { WeaponManager } from './WeaponManager.js';
 import { Minimap } from './Minimap.js';
 import { SoundManager } from './SoundManager.js';
+import { Bomber } from './Bomber.js';
 
 // --- CRITICAL AUDIO PATCH (Anti-Crash) ---
 // Prevents browser thread lock when Three.js sends non-finite numbers to Web Audio
@@ -321,6 +322,9 @@ export class World {
             // MINIMAP
             this.minimap = new Minimap(this.cityBlocks, this.camera);
 
+            // BOMBER (Procedural Air Support)
+            this.bomber = new Bomber(this);
+
             // MINIMAP 3D CAMERA
             this.minimapSpan = 80; // Default span
             this.minimapCamera = new THREE.OrthographicCamera(-this.minimapSpan, this.minimapSpan, this.minimapSpan, -this.minimapSpan, 1, 1000);
@@ -391,28 +395,34 @@ export class World {
                 return mesh;
             };
 
-            // SAFE SPAWN HELPER (Avoid Buildings)
+            // FAST SPAWN HELPER (AABB Math instead of Raycasting)
             const getSafeStreetPos = (range = 800) => {
                 for (let i = 0; i < 20; i++) {
                     const x = (Math.random() - 0.5) * range;
                     const z = (Math.random() - 0.5) * range;
-                    // CRITICAL: Start ray high above the city to hit roofs first!
-                    const origin = new THREE.Vector3(x, 200, z);
-                    const ray = new THREE.Raycaster(origin, new THREE.Vector3(0, -1, 0));
-                    // Check against existing colliders (buildings)
-                    const hits = ray.intersectObjects(this.character.colliders, true);
-                    if (hits.length > 0) {
-                        const hit = hits[0];
-                        if (hit.point.y < 1.0) return hit.point; // Near ground = Street
-                    } else {
-                        return new THREE.Vector3(x, 0, z); // Empty floor
+                    
+                    let isInsideBuilding = false;
+                    for (const block of this.cityBlocks) {
+                        // Ignore massive blocks (like the floor itself)
+                        if ((block.maxX - block.minX) > 200 || (block.maxZ - block.minZ) > 200) continue;
+                        
+                        // Add 1.5 units of padding so things don't spawn half-inside a wall
+                        if (x > block.minX - 1.5 && x < block.maxX + 1.5 && 
+                            z > block.minZ - 1.5 && z < block.maxZ + 1.5) {
+                            isInsideBuilding = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!isInsideBuilding) {
+                        return new THREE.Vector3(x, 0, z);
                     }
                 }
                 return null;
             };
 
             // 1. Trash Cans (Solid and Pushable, NOT Explosive)
-            for (let i = 0; i < 400; i++) {
+            for (let i = 0; i < 100; i++) {
                 const pos = getSafeStreetPos();
                 if (pos) {
                     const mesh = addScenery('trash_can', pos, new THREE.Euler(0, Math.random() * Math.PI, 0), 0.6, false);
@@ -479,9 +489,14 @@ export class World {
             // 4. Explosive Canisters (Bombonas Rojas) - High saturation
             let canistersSpawned = 0;
             let canisterAttempts = 0;
-            while (canistersSpawned < 1000 && canisterAttempts < 10000) {
+            // UPDATE UI
+            const loadUI = document.getElementById('loading');
+            if (loadUI) loadUI.innerText = 'Generando Ciudad...';
+            await new Promise(r => setTimeout(r, 10)); // Yield to let UI update
+
+            while (canistersSpawned < 200 && canisterAttempts < 2000) {
                 canisterAttempts++;
-                const pos = getSafeStreetPos();
+                const pos = getSafeStreetPos(400); // Reduce range for denser packing without needing 1000 items
                 if (pos) {
                     pos.y = 0.4;
                     const mesh = addScenery('canister', pos, new THREE.Euler(0, 0, 0), 0.6, true);
@@ -490,6 +505,11 @@ export class World {
                         this.clutterObjects.push(mesh);
                         canistersSpawned++;
                     }
+                }
+                
+                // Yield periodically to prevent browser freeze
+                if (canisterAttempts % 100 === 0) {
+                    await new Promise(r => setTimeout(r, 0));
                 }
             }
             console.log(`🧨 Spawned ${canistersSpawned} explosive canisters.`);
@@ -975,6 +995,10 @@ export class World {
                 if (moto && moto.mesh) {
                     localStorage.setItem('motorcyclePosition', JSON.stringify({ x: moto.mesh.position.x, y: moto.mesh.position.y, z: moto.mesh.position.z }));
                 }
+            }
+
+            if (this.bomber) {
+                this.bomber.update(dt);
             }
 
             if (this.character && !this.isInspectionMode) this.character.updateCamera(dt);
