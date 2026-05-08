@@ -68,18 +68,22 @@ export class Bomber {
         let start = new THREE.Vector3();
         let end = new THREE.Vector3();
         
+        // 50% Chance to target the player
+        const targetPlayer = Math.random() < 0.5 && this.world.character && this.world.character.mesh;
+        const pPos = targetPlayer ? this.world.character.mesh.position.clone() : new THREE.Vector3(0,0,0);
+        
         if (side === 0) { // North to South
             start.set((Math.random() - 0.5) * half, this.altitude, -half);
-            end.set((Math.random() - 0.5) * half, this.altitude, half);
+            end.set(targetPlayer ? pPos.x : (Math.random() - 0.5) * half, this.altitude, half);
         } else if (side === 1) { // South to North
             start.set((Math.random() - 0.5) * half, this.altitude, half);
-            end.set((Math.random() - 0.5) * half, this.altitude, -half);
+            end.set(targetPlayer ? pPos.x : (Math.random() - 0.5) * half, this.altitude, -half);
         } else if (side === 2) { // East to West
             start.set(half, this.altitude, (Math.random() - 0.5) * half);
-            end.set(-half, this.altitude, (Math.random() - 0.5) * half);
+            end.set(-half, this.altitude, targetPlayer ? pPos.z : (Math.random() - 0.5) * half);
         } else { // West to East
             start.set(-half, this.altitude, (Math.random() - 0.5) * half);
-            end.set(half, this.altitude, (Math.random() - 0.5) * half);
+            end.set(half, this.altitude, targetPlayer ? pPos.z : (Math.random() - 0.5) * half);
         }
         
         this.mesh.position.copy(start);

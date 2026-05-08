@@ -13,6 +13,8 @@ import { WeaponManager } from './WeaponManager.js';
 import { Minimap } from './Minimap.js';
 import { SoundManager } from './SoundManager.js';
 import { Bomber } from './Bomber.js';
+import { SniperManager } from './SniperManager.js';
+
 
 // --- CRITICAL AUDIO PATCH (Anti-Crash) ---
 // Prevents browser thread lock when Three.js sends non-finite numbers to Web Audio
@@ -324,6 +326,10 @@ export class World {
 
             // BOMBER (Procedural Air Support)
             this.bomber = new Bomber(this);
+
+            // SNIPERS (Hidden NPCs)
+            this.sniperManager = new SniperManager(this);
+
 
             // MINIMAP 3D CAMERA
             this.minimapSpan = 80; // Default span
@@ -999,6 +1005,10 @@ export class World {
 
             if (this.bomber) {
                 this.bomber.update(dt);
+            }
+
+            if (this.sniperManager) {
+                this.sniperManager.update(dt);
             }
 
             if (this.character && !this.isInspectionMode) this.character.updateCamera(dt);
