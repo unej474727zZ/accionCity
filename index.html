@@ -4,23 +4,21 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
-  <title>Accion City</title>
+  <title>Accion City v1.2</title>
   
-  <script type="module" crossorigin src="/accionCity/assets/index-9def0078.js"></script>
+  <script type="module" crossorigin src="/accionCity/assets/index-06f94f62.js"></script>
   <link rel="stylesheet" href="/accionCity/assets/index-88508b6f.css">
 </head>
 
 <body>
   <div id="app"></div>
-  <div id="loading">Loading City...</div>
+  <div id="loading">Cargando Zona de Guerra...</div>
   <div id="debug-console"
     style="position: absolute; top: 0; left: 0; color: lime; background: rgba(0,0,0,0.5); pointer-events: none; z-index: 9999; font-family: monospace; font-size: 10px; white-space: pre;">
     Debug Info...</div>
   <div id="crosshair" style="display: none;">+</div>
   
-  <!-- HELICOPTER HUD (Full Screen Radar, Altimeter, Attitude) -->
   <div id="heli-radar" style="display: none;">
-    <!-- Centered Radar Box -->
     <div class="radar-center-box">
       <div id="radar-compass-ring">
         <div class="compass-deg" style="transform: rotate(0deg) translateY(-40vh)">N</div>
@@ -45,8 +43,6 @@
       <div class="radar-sweep"></div>
       <div id="radar-blips"></div>
     </div>
-
-    <!-- HUD Altimeter -->
     <div id="hud-altimeter">
       <div class="alt-label">ALT</div>
       <div class="alt-readout">0000</div>
@@ -54,8 +50,6 @@
         <div id="alt-tape"></div>
       </div>
     </div>
-
-    <!-- HUD Attitude Indicator (Artificial Horizon) -->
     <div id="hud-attitude">
       <div id="attitude-pitch">
         <div class="pitch-line pl-1">---  10  ---</div>
@@ -70,15 +64,11 @@
     </div>
   </div>
 
-  <div id="mobile-controls"> <!-- Interface -->
-    <div id="zone_joystick"></div> <!-- Left Joystick -->
-
+  <div id="mobile-controls">
+    <div id="zone_joystick"></div>
     <div id="psp-controls">
-      <!-- SHOULDER BUTTONS -->
       <div id="btn-l" class="psp-btn shoulder-btn">L</div>
       <div id="btn-r" class="psp-btn shoulder-btn">R</div>
-
-      <!-- LEFT D-PAD -->
       <div id="dpad-container">
         <div id="btn-up" class="psp-btn dpad-btn">▲</div>
         <div id="btn-down" class="psp-btn dpad-btn">▼</div>
@@ -86,16 +76,12 @@
         <div id="btn-right" class="psp-btn dpad-btn">►</div>
         <div id="dpad-center"></div>
       </div>
-
-      <!-- RIGHT SHAPES -->
       <div id="shapes-container">
-        <div id="btn-tri" class="psp-btn shape-btn">△</div> <!-- Switch -->
-        <div id="btn-cir" class="psp-btn shape-btn">○</div> <!-- Ghost/Laser? -->
-        <div id="btn-x" class="psp-btn shape-btn">✕</div> <!-- Jump -->
-        <div id="btn-sq" class="psp-btn shape-btn">□</div> <!-- Run? -->
+        <div id="btn-tri" class="psp-btn shape-btn">△</div>
+        <div id="btn-cir" class="psp-btn shape-btn">○</div>
+        <div id="btn-x" class="psp-btn shape-btn">✕</div>
+        <div id="btn-sq" class="psp-btn shape-btn">□</div>
       </div>
-
-      <!-- RIGHT CAMERA CROSS -->
       <div id="camera-cross-container">
         <div id="btn-cam-up" class="psp-btn dpad-btn">▲</div>
         <div id="btn-cam-down" class="psp-btn dpad-btn">▼</div>
@@ -103,23 +89,16 @@
         <div id="btn-cam-right" class="psp-btn dpad-btn">▶</div>
         <div id="camera-center"></div>
       </div>
-
-      <!-- CENTER BAR -->
       <div id="center-bar">
         <div id="btn-select" class="psp-btn center-btn">SELECT</div>
         <div id="btn-start" class="psp-btn center-btn">START</div>
       </div>
-
-      <!-- EXTRA TOGGLES (On screen edges) -->
       <div id="toggles-container">
         <div id="btn-chat-toggle" class="psp-btn toggle-btn">💬</div>
         <div id="btn-map-toggle" class="psp-btn toggle-btn">🗺️</div>
       </div>
     </div>
-
-    <div id="zone_right" class="zone"></div> <!-- Right Look Zone (Background) -->
-
-    <!-- Chat UI -->
+    <div id="zone_right" class="zone"></div>
     <div id="chat-container" style="display: none;">
       <div id="chat-messages"></div>
       <input type="text" id="chat-input" placeholder="Type..." autocomplete="off">
@@ -128,5 +107,4 @@
 
   
 </body>
-
 </html>
