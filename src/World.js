@@ -35,7 +35,7 @@ export class World {
     constructor(container) {
         this.container = container;
         this.scene = new THREE.Scene();
-        this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100); // MODO PATATA: Visión reducida a 100m
+        this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 300); // MODO PREMIUM: Visión extendida a 300m
         this.scene.userData.world = this; // Global access for components
 
         // NETWORKING
@@ -58,7 +58,7 @@ export class World {
         }
 
         this.renderer.setSize(window.innerWidth, window.innerHeight);
-        this.renderer.setPixelRatio(0.5); // MODO PATATA: Resolución al 50% para ganar fluidez
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // MODO PREMIUM: Resolución nativa (Max 2x)
         this.renderer.shadowMap.enabled = false;
         this.renderer.xr.enabled = true; // Enable WebXR
         container.appendChild(this.renderer.domElement);
@@ -88,8 +88,8 @@ export class World {
         const groundColor = 0x555555; // Grayish
         this.scene.background = new THREE.Color(skyColor);
 
-        // FOG: MODO PATATA: Niebla más cerca (80m) para ocultar el recorte de visión
-        this.scene.fog = new THREE.Fog(skyColor, 5, 80); 
+        // FOG: MODO PREMIUM: Niebla suave y lejana para una atmósfera épica
+        this.scene.fog = new THREE.Fog(skyColor, 50, 250); 
 
         // Lighting
         // Hemisphere: Sky Color + Ground Bounce
@@ -253,7 +253,7 @@ export class World {
                 this._cityMeshCount = 0;
                 city.traverse((child) => {
                     if (child.isMesh) {
-                        if (this._cityMeshCount < 300) { // MODO PATATA: Menos colisiones simultáneas para CPU vieja
+                        if (this._cityMeshCount < 1000) { // MODO PREMIUM: Más colisiones para una ciudad más sólida
                             this.character.colliders.push(child);
                             this._cityMeshCount++;
                         }
