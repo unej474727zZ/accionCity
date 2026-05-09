@@ -35,7 +35,7 @@ export class World {
     constructor(container) {
         this.container = container;
         this.scene = new THREE.Scene();
-        this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 200); // FAR PLANE REDUCED EVEN MORE FOR PERFORMANCE
+        this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100); // MODO PATATA: Visión reducida a 100m
         this.scene.userData.world = this; // Global access for components
 
         // NETWORKING
@@ -58,7 +58,7 @@ export class World {
         }
 
         this.renderer.setSize(window.innerWidth, window.innerHeight);
-        this.renderer.setPixelRatio(0.85); // Lowered from 1.0 for better performance
+        this.renderer.setPixelRatio(0.5); // MODO PATATA: Resolución al 50% para ganar fluidez
         this.renderer.shadowMap.enabled = false;
         this.renderer.xr.enabled = true; // Enable WebXR
         container.appendChild(this.renderer.domElement);
@@ -88,10 +88,8 @@ export class World {
         const groundColor = 0x555555; // Grayish
         this.scene.background = new THREE.Color(skyColor);
 
-        // FOG: Hides the edge of the world (Depth)
-        // Denser fog for "heavy atmosphere" as requested
-        // near: 20 (starts close), far: 150 (obscures distant buildings)
-        this.scene.fog = new THREE.Fog(skyColor, 15, 120); // Fog starts closer and ends sooner
+        // FOG: MODO PATATA: Niebla más cerca (80m) para ocultar el recorte de visión
+        this.scene.fog = new THREE.Fog(skyColor, 5, 80); 
 
         // Lighting
         // Hemisphere: Sky Color + Ground Bounce
@@ -255,7 +253,7 @@ export class World {
                 this._cityMeshCount = 0;
                 city.traverse((child) => {
                     if (child.isMesh) {
-                        if (this._cityMeshCount < 800) {
+                        if (this._cityMeshCount < 300) { // MODO PATATA: Menos colisiones simultáneas para CPU vieja
                             this.character.colliders.push(child);
                             this._cityMeshCount++;
                         }
