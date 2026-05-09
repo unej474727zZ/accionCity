@@ -39,35 +39,51 @@ export class SniperManager {
         }
         console.log(`🔍 Sniper: Searching building near ${playerPos.x.toFixed(1)}, ${playerPos.z.toFixed(1)}. Total blocks: ${this.world.cityBlocks.length}`);
         
-        // 1. Find a nearby building to spawn the bullet from
+        // 1. Find ANY building nearby to spawn the bullet from
         const buildings = this.world.cityBlocks.filter(b => {
             const centerX = (b.minX + b.maxX) / 2;
             const centerZ = (b.minZ + b.maxZ) / 2;
             const dist = new THREE.Vector2(centerX, centerZ).distanceTo(new THREE.Vector2(playerPos.x, playerPos.z));
-            return dist < 150 && dist > 5; 
+            return dist < 300; // Increased radius, removed minimum distance
         });
 
-        if (buildings.length === 0) {
-            console.warn("🚫 Sniper: No buildings found in radius!");
-            return;
-        }
-        const block = buildings[Math.floor(Math.random() * buildings.length)];
+        let spawnPos = new THREE.Vector3();
 
-        // 2. Pick a "window" position on building surface
-        const spawnPos = new THREE.Vector3();
-        const side = Math.floor(Math.random() * 4);
-        const height = 8 + Math.random() * 25; 
-        
-        if (side === 0) spawnPos.set(block.minX, height, THREE.MathUtils.lerp(block.minZ, block.maxZ, Math.random()));
-        else if (side === 1) spawnPos.set(block.maxX, height, THREE.MathUtils.lerp(block.minZ, block.maxZ, Math.random()));
-        else if (side === 2) spawnPos.set(THREE.MathUtils.lerp(block.minX, block.maxX, Math.random()), height, block.minZ);
-        else spawnPos.set(THREE.MathUtils.lerp(block.minX, block.maxX, Math.random()), height, block.maxZ);
+        if (buildings.length === 0) {
+            console.warn(`⚠️ Sniper: No buildings found near ${playerPos.x.toFixed(1)}, ${playerPos.z.toFixed(1)}! Forcing Phantom Sniper.`);
+            // DEBUG: Show first 5 blocks to see where they are
+            if (this.world.cityBlocks.length > 0) {
+                console.log("Current City Blocks (First 5):");
+                this.world.cityBlocks.slice(0, 5).forEach((b, i) => {
+                    console.log(`Block ${i}: X(${b.minX.toFixed(1)} to ${b.maxX.toFixed(1)}), Z(${b.minZ.toFixed(1)} to ${b.maxZ.toFixed(1)})`);
+                });
+            }
+
+            // Force a spawn point in the air nearby (simulating a window in an unregistered building)
+            const angle = Math.random() * Math.PI * 2;
+            const dist = 50 + Math.random() * 50;
+            spawnPos.set(
+                playerPos.x + Math.cos(angle) * dist,
+                25 + Math.random() * 20, // High up
+                playerPos.z + Math.sin(angle) * dist
+            );
+        } else {
+            const block = buildings[Math.floor(Math.random() * buildings.length)];
+            const side = Math.floor(Math.random() * 4);
+            const height = 8 + Math.random() * 25; 
+            
+            if (side === 0) spawnPos.set(block.minX, height, THREE.MathUtils.lerp(block.minZ, block.maxZ, Math.random()));
+            else if (side === 1) spawnPos.set(block.maxX, height, THREE.MathUtils.lerp(block.minZ, block.maxZ, Math.random()));
+            else if (side === 2) spawnPos.set(THREE.MathUtils.lerp(block.minX, block.maxX, Math.random()), height, block.minZ);
+            else spawnPos.set(THREE.MathUtils.lerp(block.minX, block.maxX, Math.random()), height, block.maxZ);
+        }
 
         // 3. Target logic: prioritize canisters near player
         let targetPos = playerPos.clone().add(new THREE.Vector3(0, 1.2, 0));
         
-        const nearbyCanister = this.weaponManager.canisters.find(c => c.mesh.position.distanceTo(playerPos) < 12);
-        if (nearbyCanister && Math.random() < 0.6) {
+        const nearbyCanister = this.weaponManager.canisters.find(c => c.mesh.position.distanceTo(playerPos) < 15);
+        if (nearbyCanister) {
+            // FORCE fire at canister if player is nearby
             targetPos.copy(nearbyCanister.mesh.position);
         } else if (Math.random() > this.accuracy) {
             // Near miss

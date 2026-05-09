@@ -73,16 +73,16 @@ export class Bomber {
         const pPos = targetPlayer ? this.world.character.mesh.position.clone() : new THREE.Vector3(0,0,0);
         
         if (side === 0) { // North to South
-            start.set((Math.random() - 0.5) * half, this.altitude, -half);
+            start.set(targetPlayer ? pPos.x : (Math.random() - 0.5) * half, this.altitude, -half);
             end.set(targetPlayer ? pPos.x : (Math.random() - 0.5) * half, this.altitude, half);
         } else if (side === 1) { // South to North
-            start.set((Math.random() - 0.5) * half, this.altitude, half);
+            start.set(targetPlayer ? pPos.x : (Math.random() - 0.5) * half, this.altitude, half);
             end.set(targetPlayer ? pPos.x : (Math.random() - 0.5) * half, this.altitude, -half);
         } else if (side === 2) { // East to West
-            start.set(half, this.altitude, (Math.random() - 0.5) * half);
+            start.set(half, this.altitude, targetPlayer ? pPos.z : (Math.random() - 0.5) * half);
             end.set(-half, this.altitude, targetPlayer ? pPos.z : (Math.random() - 0.5) * half);
         } else { // West to East
-            start.set(-half, this.altitude, (Math.random() - 0.5) * half);
+            start.set(-half, this.altitude, targetPlayer ? pPos.z : (Math.random() - 0.5) * half);
             end.set(half, this.altitude, targetPlayer ? pPos.z : (Math.random() - 0.5) * half);
         }
         
