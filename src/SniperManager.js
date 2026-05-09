@@ -25,6 +25,7 @@ export class SniperManager {
 
         this.timer += dt;
         if (this.timer >= this.fireInterval) {
+            console.log(`🎯 Sniper Timer: ${this.timer.toFixed(2)} / ${this.fireInterval.toFixed(2)}`);
             this.timer = 0;
             this.tryFire(playerPos, targetObject);
             // Randomize next shot interval (3 to 15 seconds)
@@ -33,13 +34,23 @@ export class SniperManager {
     }
 
     tryFire(playerPos, targetObject) {
+        if (this.world.cityBlocks.length > 0 && Math.random() < 0.1) {
+             console.log("🏙️ Sample Block 0:", this.world.cityBlocks[0]);
+        }
+        console.log(`🔍 Sniper: Searching building near ${playerPos.x.toFixed(1)}, ${playerPos.z.toFixed(1)}. Total blocks: ${this.world.cityBlocks.length}`);
+        
         // 1. Find a nearby building to spawn the bullet from
         const buildings = this.world.cityBlocks.filter(b => {
-            const dist = new THREE.Vector2(b.minX, b.minZ).distanceTo(new THREE.Vector2(playerPos.x, playerPos.z));
-            return dist < 120 && dist > 20; 
+            const centerX = (b.minX + b.maxX) / 2;
+            const centerZ = (b.minZ + b.maxZ) / 2;
+            const dist = new THREE.Vector2(centerX, centerZ).distanceTo(new THREE.Vector2(playerPos.x, playerPos.z));
+            return dist < 150 && dist > 5; 
         });
 
-        if (buildings.length === 0) return;
+        if (buildings.length === 0) {
+            console.warn("🚫 Sniper: No buildings found in radius!");
+            return;
+        }
         const block = buildings[Math.floor(Math.random() * buildings.length)];
 
         // 2. Pick a "window" position on building surface

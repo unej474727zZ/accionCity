@@ -119,6 +119,7 @@ export class Bomber {
         if (!this.active) {
             this.timer += dt;
             if (this.timer >= this.spawnInterval) {
+                console.log("✈️ Bomber: Spawning flight!");
                 this.timer = 0;
                 this.spawn();
             }
