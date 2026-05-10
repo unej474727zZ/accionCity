@@ -75,12 +75,9 @@ export class SoundManager {
             this.ambientAudio = new THREE.Audio(this.listener);
             this.ambientAudio.setBuffer(buffer);
             this.ambientAudio.setLoop(true);
-            this.ambientAudio.setVolume(0.2); // Low volume so it doesn't overpower footsteps/gunshots
+            this.ambientAudio.setVolume(0.4); // Aumentado a 0.4 para que se escuche mejor
             
-            // Try to play immediately (might be paused by browser autoplay policy until user clicks)
-            if (this.listener.context.state === 'running') {
-                this.ambientAudio.play();
-            }
+            this.resumeContext(); // Intentar reproducir si ya hubo interacción
             console.log("SoundManager: Ambient sound loaded.");
         });
 
@@ -125,13 +122,7 @@ export class SoundManager {
     }
 
     playPool(type, pitch = 1.0) {
-        if (this.listener.context.state === 'suspended') {
-            this.listener.context.resume();
-            // Try to start ambient audio if it was blocked by autoplay policy
-            if (this.ambientAudio && !this.ambientAudio.isPlaying) {
-                this.ambientAudio.play();
-            }
-        }
+        this.resumeContext();
 
         if (!this.pools[type] || this.pools[type].length === 0) return;
 
@@ -143,6 +134,21 @@ export class SoundManager {
         sound.play();
 
         this.poolIndex[type] = (index + 1) % this.pools[type].length;
+    }
+
+    // Explicitly resume audio context and start ambient music
+    resumeContext() {
+        if (this.listener.context.state === 'suspended') {
+            this.listener.context.resume().then(() => {
+                if (this.ambientAudio && !this.ambientAudio.isPlaying) {
+                    this.ambientAudio.play();
+                }
+            });
+        } else {
+            if (this.ambientAudio && !this.ambientAudio.isPlaying) {
+                this.ambientAudio.play();
+            }
+        }
     }
 
     // ENGINE SOUNDS (POSITIONAL & LOOPING)

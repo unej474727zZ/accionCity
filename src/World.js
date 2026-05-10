@@ -286,8 +286,8 @@ export class World {
 
             // Unlock AudioContext on mobile (browsers block audio until interaction)
             const unlockAudio = () => {
-                if (this.audioListener.context.state === 'suspended') {
-                    this.audioListener.context.resume();
+                if (this.soundManager) {
+                    this.soundManager.resumeContext();
                 }
                 document.removeEventListener('touchstart', unlockAudio);
                 document.removeEventListener('click', unlockAudio);
