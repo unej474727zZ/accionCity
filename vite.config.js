@@ -11,6 +11,14 @@ export default defineConfig({
         target: 'http://localhost:3000',
         ws: true,
         changeOrigin: true
+      },
+      '/webhook': {
+        target: 'http://localhost:3000',
+        changeOrigin: true
+      },
+      '/accionCity/webhook': {
+        target: 'http://localhost:3000',
+        changeOrigin: true
       }
     },
     // Allow tunnel URLs (bypass strict host check)

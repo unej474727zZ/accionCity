@@ -28,6 +28,7 @@ export class RemotePlayer {
             this.mesh = SkeletonUtils.clone(idleAsset.scene);
             this.mesh.userData.id = this.id;
             this.mesh.name = `RemotePlayer_${this.id}`;
+            this.playerColor = data.color || 0x00ffaa;
             this.scene.add(this.mesh);
 
             // ANIMATION SETUP
@@ -98,12 +99,13 @@ export class RemotePlayer {
                 if (child.material) {
                     child.material = child.material.clone();
                     // Preserve texture, add emissive tint for identification
+                    // 1. Set Base Color (Using .set for string compatibility)
+                    child.material.color.set(colorHex);
+
+                    // 2. Add Emissive (Glow) to prevent being pitch black in shadows
                     if (child.material.emissive) {
-                        child.material.emissive.setHex(colorHex);
+                        child.material.emissive.set(colorHex);
                         child.material.emissiveIntensity = 0.6;
-                    } else {
-                        // Fallback: slight color blend
-                        child.material.color.lerp(new THREE.Color(colorHex), 0.3);
                     }
                 }
             }
@@ -123,6 +125,8 @@ export class RemotePlayer {
         this.nameTag.style.userSelect = 'none';
         this.nameTag.style.border = '1px solid rgba(255,255,255,0.2)';
         this.nameTag.innerText = name;
+        this.nameTag.style.border = `2px solid ${this.playerColor || 'white'}`;
+        this.nameTag.style.boxShadow = `0 0 10px ${this.playerColor || 'white'}`;
         document.body.appendChild(this.nameTag);
     }
 
