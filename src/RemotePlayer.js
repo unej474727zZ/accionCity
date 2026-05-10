@@ -51,8 +51,8 @@ export class RemotePlayer {
             // Start Idle
             this.playAnimation('idle');
 
-            // TINT MESH (Random Color or generic)
-            this.tintMesh(this.mesh, 0xff0000);
+            // TINT MESH (Using Color assigned by Server)
+            this.tintMesh(this.mesh, data.color || 0x00ffaa);
 
             // NAME TAG
             this.createNameTag(data.name || `Player ${this.id.substr(0, 4)}`);
@@ -129,11 +129,16 @@ export class RemotePlayer {
         if (!this.mesh) return;
 
         this.mesh.position.set(data.x, data.y, data.z);
-        this.mesh.rotation.y = data.rot + Math.PI; // Fix: Add PI to match local player model rotation
+        this.mesh.rotation.y = data.rot + Math.PI; 
 
         if (this.state !== data.state) {
             this.state = data.state;
             this.playAnimation(this.state);
+        }
+
+        // SYNC WEAPON IN REAL-TIME
+        if (data.weaponType && data.weaponType !== this.weaponType) {
+            this.setWeapon(data.weaponType);
         }
     }
 
