@@ -565,7 +565,7 @@ export class World {
             this.networkManager.onPlayerJoined = (id, data) => {
                 console.log("Player Joined:", id);
                 if (this.remotePlayers[id]) return; // Already exists
-                const remotePlayer = new RemotePlayer(this.scene, assets, id, data);
+                const remotePlayer = new RemotePlayer(this.scene, assets, id, data, this);
                 this.remotePlayers[id] = remotePlayer;
                 this.updateRemoteColliders(); // Sync with key systems
             };
@@ -595,12 +595,22 @@ export class World {
 
             this.networkManager.onPlayerHit = (data) => {
                 if (this.weaponManager) {
-                    this.weaponManager.createImpact(
-                        new THREE.Vector3(data.position.x, data.position.y, data.position.z),
-                        null, 
-                        data.type, 
-                        data.scale
-                    );
+                    const hitPos = new THREE.Vector3(data.position.x, data.position.y, data.position.z);
+                    
+                    // Blood on hit location (victim or wall)
+                    this.weaponManager.createImpact(hitPos, new THREE.Vector3(0, 1, 0), data.type, data.scale);
+
+                    // --- DETECTION FOR LOCAL PLAYER ---
+                    if (this.character && this.character.mesh) {
+                        const distToMe = hitPos.distanceTo(this.character.mesh.position);
+                        // Increased range to 3.0m to catch headshots (mesh origin is at feet)
+                        if (distToMe < 3.0) {
+                            console.log("💥 I GOT HIT!");
+                            this.triggerDamageFlash();
+                            // Create extra blood effect right in front of camera for feedback
+                            this.weaponManager.createImpact(hitPos, new THREE.Vector3(0, 1, 0), 'blood', 2.0);
+                        }
+                    }
                 }
             };
 
@@ -1241,5 +1251,26 @@ export class World {
             requestAnimationFrame(anim);
         };
         anim();
+    }
+
+    triggerDamageFlash() {
+        const flash = document.createElement('div');
+        flash.style.position = 'fixed';
+        flash.style.top = '0';
+        flash.style.left = '0';
+        flash.style.width = '100vw';
+        flash.style.height = '100vh';
+        flash.style.backgroundColor = 'rgba(255, 0, 0, 0.5)'; // More visible
+        flash.style.pointerEvents = 'none';
+        flash.style.zIndex = '1000000'; // Maximum priority
+        document.body.appendChild(flash);
+        
+        setTimeout(() => {
+            flash.style.transition = 'opacity 0.15s ease-out';
+            flash.style.opacity = '0';
+            setTimeout(() => {
+                if (flash.parentNode) document.body.removeChild(flash);
+            }, 200);
+        }, 100);
     }
 }

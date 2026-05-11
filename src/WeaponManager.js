@@ -1098,8 +1098,7 @@ export class WeaponManager {
         const baseMat = type === 'blood' ? this._bloodMat : this._sparkMat;
 
         // 1. SPARKS / PARTICLES
-        // Optimized: Absolute minimum count for mobile
-        const sparkCount = (type === 'blood' ? 2 : 2) * scale; 
+        const sparkCount = 2 * scale; 
         for (let i = 0; i < sparkCount; i++) {
             const pMat = baseMat.clone();
             const p = new THREE.Mesh(this._sparkGeom, pMat);

@@ -3,10 +3,11 @@ import { SkeletonUtils } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { Bullet } from './Bullet.js';
 
 export class RemotePlayer {
-    constructor(scene, assets, id, initialData) {
+    constructor(scene, assets, id, initialData, world) {
         this.scene = scene;
         this.assets = assets;
         this.id = id;
+        this.world = world;
 
         this.mesh = null;
         this.mixer = null;
@@ -20,6 +21,7 @@ export class RemotePlayer {
         this.pitch = 0;
         this.laserActive = true;
         this.laserMesh = this.createLaser();
+        this.raycaster = new THREE.Raycaster();
 
         this.init(initialData);
     }
@@ -268,11 +270,32 @@ export class RemotePlayer {
         const bullet = new Bullet(this.scene, start, dir, 150);
         this.bullets.push(bullet);
 
+        // --- MUZZLE FLASH VISUAL ---
+        const flashGeom = new THREE.PlaneGeometry(0.5, 0.5);
+        const flashMat = new THREE.MeshBasicMaterial({ 
+            color: 0xffcc00, 
+            transparent: true, 
+            opacity: 1, 
+            side: THREE.DoubleSide,
+            blending: THREE.AdditiveBlending 
+        });
+        const flash = new THREE.Mesh(flashGeom, flashMat);
+        flash.position.copy(start);
+        flash.lookAt(this.world.camera.position); // Always face the observer
+        this.scene.add(flash);
+
         // Flash Light (Muzzle)
-        const light = new THREE.PointLight(0xffaa00, 5, 5);
+        const light = new THREE.PointLight(0xffaa00, 10, 10);
         light.position.copy(start);
         this.scene.add(light);
-        setTimeout(() => { if (this.scene) this.scene.remove(light); }, 50);
+
+        // Cleanup flash
+        setTimeout(() => { 
+            if (this.scene) {
+                this.scene.remove(flash);
+                this.scene.remove(light);
+            }
+        }, 100); // 100ms for better visibility
     }
 
     update(dt, camera) {
@@ -281,9 +304,9 @@ export class RemotePlayer {
         // --- APPLY PITCH TO BONES (Aiming up/down) ---
         if (this.mesh) {
             this.mesh.traverse(child => {
-                if (child.isBone && (child.name.includes('Spine') || child.name.includes('Neck'))) {
-                    // Apply pitch to upper body bones
-                    child.rotation.x = -this.pitch * 0.5; // Distribute pitch across spine
+                // USAMOS SPINE2 O SPINE PARA LA INCLINACION PRINCIPAL
+                if (child.isBone && child.name.includes('Spine')) {
+                    child.rotation.x = -this.pitch; // Aplicamos el pitch total al tronco
                 }
             });
         }
@@ -308,11 +331,35 @@ export class RemotePlayer {
                 const playerRot = new THREE.Euler(-this.pitch, this.mesh.rotation.y + Math.PI, 0, 'YXZ');
                 dir.applyEuler(playerRot);
 
-                const end = start.clone().add(dir.multiplyScalar(100));
+                const end = start.clone().add(dir.clone().multiplyScalar(100));
+
+                // RAYCAST COLLISION (Laser stopping at walls/players)
+                let hitPoint = end;
+                if (this.world) {
+                    this.raycaster.set(start, dir);
+                    this.raycaster.far = 100;
+
+                    // Get all possible targets: Buildings + Local Player
+                    const targets = [];
+                    if (this.world.character && this.world.character.mesh) targets.push(this.world.character.mesh);
+                    if (this.world.character && this.world.character.colliders) targets.push(...this.world.character.colliders);
+                    
+                    // Also other remote players (optional but better)
+                    for (let rid in this.world.remotePlayers) {
+                        if (rid !== this.id && this.world.remotePlayers[rid].mesh) {
+                            targets.push(this.world.remotePlayers[rid].mesh);
+                        }
+                    }
+
+                    const intersects = this.raycaster.intersectObjects(targets, true);
+                    if (intersects.length > 0) {
+                        hitPoint = intersects[0].point;
+                    }
+                }
 
                 const positions = this.laserMesh.geometry.attributes.position.array;
                 positions[0] = start.x; positions[1] = start.y; positions[2] = start.z;
-                positions[3] = end.x; positions[4] = end.y; positions[5] = end.z;
+                positions[3] = hitPoint.x; positions[4] = hitPoint.y; positions[5] = hitPoint.z;
                 this.laserMesh.geometry.attributes.position.needsUpdate = true;
                 this.laserMesh.geometry.computeBoundingSphere();
             }
