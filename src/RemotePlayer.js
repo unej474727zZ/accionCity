@@ -115,18 +115,17 @@ export class RemotePlayer {
     createNameTag(name) {
         this.nameTag = document.createElement('div');
         this.nameTag.style.position = 'absolute';
-        this.nameTag.style.color = 'white';
-        this.nameTag.style.background = 'rgba(0, 0, 0, 0.6)';
-        this.nameTag.style.padding = '2px 8px';
-        this.nameTag.style.borderRadius = '4px';
-        this.nameTag.style.fontSize = '14px';
-        this.nameTag.style.fontWeight = 'bold';
+        
+        // Usamos Three.js para asegurarnos de que el color sea IDENTICO al del avatar
+        const color = new THREE.Color(this.playerColor || 0x00ffaa);
+        this.nameTag.style.color = color.getStyle(); // Retorna "rgb(r,g,b)" exacto
+        
+        this.nameTag.style.background = 'none';
+        this.nameTag.style.padding = '0';
+        this.nameTag.style.fontSize = '16px';
         this.nameTag.style.pointerEvents = 'none';
         this.nameTag.style.userSelect = 'none';
-        this.nameTag.style.border = '1px solid rgba(255,255,255,0.2)';
         this.nameTag.innerText = name;
-        this.nameTag.style.border = `2px solid ${this.playerColor || 'white'}`;
-        this.nameTag.style.boxShadow = `0 0 10px ${this.playerColor || 'white'}`;
         document.body.appendChild(this.nameTag);
     }
 
