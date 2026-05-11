@@ -17,6 +17,9 @@ export class RemotePlayer {
         this.weaponMesh = null;
         this.rightHandBone = null;
         this.bullets = [];
+        this.pitch = 0;
+        this.laserActive = true;
+        this.laserMesh = this.createLaser();
 
         this.init(initialData);
     }
@@ -41,13 +44,29 @@ export class RemotePlayer {
                 }
             };
 
+            const upperBodyBones = ['Spine', 'Neck', 'Head', 'Shoulder', 'Arm', 'Hand', 'ForeArm'];
+            const createMask = (name, assetKey) => {
+                const asset = this.assets[assetKey];
+                const rawClip = asset && asset.animations && asset.animations.length > 0 ? asset.animations[0] : null;
+                if (rawClip) {
+                    const newTracks = [];
+                    rawClip.tracks.forEach(track => {
+                        const boneName = track.name.split('.')[0];
+                        if (upperBodyBones.some(b => boneName.includes(b))) newTracks.push(track);
+                    });
+                    this.animations[name] = new THREE.AnimationClip(name, rawClip.duration, newTracks);
+                } else {
+                    loadAnim(name, assetKey);
+                }
+            };
+
             loadAnim('idle', 'idle');
             loadAnim('walk', 'walk');
             loadAnim('run', 'run');
             loadAnim('backward', 'backward');
             loadAnim('jump', 'jump');
-            loadAnim('firing', 'firing');
-            loadAnim('shooting', 'shooting');
+            createMask('firing', 'firing');
+            createMask('shooting', 'shooting');
 
             this.playAnimation('idle');
 
@@ -59,6 +78,8 @@ export class RemotePlayer {
 
             // NAME TAG
             this.createNameTag(data.name || `Player ${this.id.substr(0, 4)}`);
+
+            this.scene.add(this.laserMesh);
 
             // HITBOX
             const hitGeom = new THREE.CylinderGeometry(0.35, 0.35, 1.8, 8);
@@ -171,7 +192,8 @@ export class RemotePlayer {
     updateState(data) {
         if (!this.mesh) return;
         this.mesh.position.set(data.x, data.y, data.z);
-        this.mesh.rotation.y = data.rot + Math.PI;
+        this.mesh.rotation.y = data.yaw + Math.PI; // Corrected field name to 'yaw'
+        this.pitch = data.pitch || 0;
 
         if (this.state !== data.state) {
             this.state = data.state;
@@ -181,10 +203,53 @@ export class RemotePlayer {
         if (data.weaponType !== this.weaponType) {
             this.setWeapon(data.weaponType);
         }
+
+        // SYNC FIRING STANCE (Rifle UP)
+        const isStance = (this.state === 'rifle' || this.state === 'pistol');
+        const isFiring = data.firing || isStance;
+        this.setFiring(isFiring);
+    }
+
+    setFiring(isActive) {
+        if (!this.mixer || !this.weaponType) return;
+
+        const isRifle = (this.weaponType === 'rifle');
+        const targetClipName = isRifle ? 'firing' : 'shooting';
+        const otherClipName = isRifle ? 'shooting' : 'firing';
+
+        const targetClip = this.animations[targetClipName];
+        if (!targetClip) return;
+        const targetAction = this.mixer.clipAction(targetClip);
+
+        // Clean up other mask
+        const otherClip = this.animations[otherClipName];
+        if (otherClip) {
+            const otherAction = this.mixer.clipAction(otherClip);
+            if (otherAction.isRunning()) otherAction.fadeOut(0.2);
+        }
+
+        if (isActive) {
+            if (!targetAction.isRunning() || targetAction.getEffectiveWeight() < 0.1) {
+                targetAction.reset();
+                targetAction.enabled = true;
+                targetAction.setLoop(THREE.LoopRepeat);
+                targetAction.setEffectiveWeight(50.0); // Override upper body
+                targetAction.play();
+                targetAction.fadeIn(0.2);
+            }
+        } else {
+            if (targetAction.isRunning()) {
+                targetAction.fadeOut(0.2);
+            }
+        }
     }
 
     playAnimation(name) {
-        const clip = this.animations[name] || this.animations['idle'];
+        // Fallbacks for stances to base idle
+        let actualAnimName = name;
+        if (name === 'rifle' || name === 'pistol') actualAnimName = 'idle';
+
+        const clip = this.animations[actualAnimName] || this.animations['idle'];
         if (!clip || !this.mixer) return;
         
         const action = this.mixer.clipAction(clip);
@@ -196,25 +261,62 @@ export class RemotePlayer {
     }
 
     shoot(origin, direction, weaponType) {
-        // Tracer and light effect
+        // Tracer effect
         const start = new THREE.Vector3(origin.x, origin.y, origin.z);
         const dir = new THREE.Vector3(direction.x, direction.y, direction.z);
         
         const bullet = new Bullet(this.scene, start, dir, 150);
         this.bullets.push(bullet);
 
-        // One-shot shoot animation
-        const anim = (this.state === 'idle') ? 'firing' : 'shooting';
-        const clip = this.animations[anim];
-        if (clip) {
-            const action = this.mixer.clipAction(clip);
-            action.setLoop(THREE.LoopOnce);
-            action.reset().play();
-        }
+        // Flash Light (Muzzle)
+        const light = new THREE.PointLight(0xffaa00, 5, 5);
+        light.position.copy(start);
+        this.scene.add(light);
+        setTimeout(() => { if (this.scene) this.scene.remove(light); }, 50);
     }
 
     update(dt, camera) {
         if (this.mixer) this.mixer.update(dt);
+
+        // --- APPLY PITCH TO BONES (Aiming up/down) ---
+        if (this.mesh) {
+            this.mesh.traverse(child => {
+                if (child.isBone && (child.name.includes('Spine') || child.name.includes('Neck'))) {
+                    // Apply pitch to upper body bones
+                    child.rotation.x = -this.pitch * 0.5; // Distribute pitch across spine
+                }
+            });
+        }
+
+        // --- UPDATE REMOTE LASER ---
+        if (this.laserMesh && this.weaponMesh && this.weaponType) {
+            const isFiringOrStance = (this.state === 'rifle' || this.state === 'pistol' || this.firing);
+            this.laserMesh.visible = isFiringOrStance;
+
+            if (this.laserMesh.visible) {
+                // Muzzle position logic (same as WeaponManager)
+                const localMuzzle = this.weaponType === 'pistol' ? 
+                    new THREE.Vector3(0, 0.1, -0.4) : 
+                    new THREE.Vector3(0.85, 0.05, 0);
+                
+                this.weaponMesh.updateMatrixWorld(true);
+                const start = this.weaponMesh.localToWorld(localMuzzle.clone());
+                
+                // Direction from pitch/yaw
+                const dir = new THREE.Vector3(0, 0, -1);
+                // Correct for player rotation
+                const playerRot = new THREE.Euler(-this.pitch, this.mesh.rotation.y + Math.PI, 0, 'YXZ');
+                dir.applyEuler(playerRot);
+
+                const end = start.clone().add(dir.multiplyScalar(100));
+
+                const positions = this.laserMesh.geometry.attributes.position.array;
+                positions[0] = start.x; positions[1] = start.y; positions[2] = start.z;
+                positions[3] = end.x; positions[4] = end.y; positions[5] = end.z;
+                this.laserMesh.geometry.attributes.position.needsUpdate = true;
+                this.laserMesh.geometry.computeBoundingSphere();
+            }
+        }
 
         for (let i = this.bullets.length - 1; i >= 0; i--) {
             this.bullets[i].update(dt);
@@ -239,6 +341,16 @@ export class RemotePlayer {
     dispose() {
         if (this.nameTag) this.nameTag.remove();
         if (this.mesh) this.scene.remove(this.mesh);
+        if (this.laserMesh) this.scene.remove(this.laserMesh);
         this.bullets.forEach(b => b.destroy());
+    }
+
+    createLaser() {
+        const laserGeom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)]);
+        const laserMat = new THREE.LineBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0.5 });
+        const laserMesh = new THREE.Line(laserGeom, laserMat);
+        laserMesh.frustumCulled = false;
+        laserMesh.visible = false;
+        return laserMesh;
     }
 }

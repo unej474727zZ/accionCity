@@ -585,6 +585,25 @@ export class World {
                 }
             };
 
+            // COMBAT SYNC
+            this.networkManager.onPlayerShoot = (data) => {
+                const remote = this.remotePlayers[data.id];
+                if (remote) {
+                    remote.shoot(data.origin, data.direction, data.weaponType);
+                }
+            };
+
+            this.networkManager.onPlayerHit = (data) => {
+                if (this.weaponManager) {
+                    this.weaponManager.createImpact(
+                        new THREE.Vector3(data.position.x, data.position.y, data.position.z),
+                        null, 
+                        data.type, 
+                        data.scale
+                    );
+                }
+            };
+
             // CHAT SYSTEM
             const chatInput = document.getElementById('chat-input');
             const chatMessages = document.getElementById('chat-messages');
@@ -1043,7 +1062,14 @@ export class World {
             Object.values(this.remotePlayers).forEach(p => p.update(dt, this.camera));
 
             if (this.character && this.networkManager) {
-                this.networkManager.sendUpdate(this.character.mesh.position, this.character.yaw, this.character.state, this.weaponManager ? this.weaponManager.currentWeaponType : 'pistol');
+                this.networkManager.sendUpdate(
+                    this.character.mesh.position, 
+                    this.character.yaw, 
+                    this.character.pitch || 0,
+                    this.character.state, 
+                    this.weaponManager ? this.weaponManager.currentWeaponType : 'pistol',
+                    this.weaponManager ? this.weaponManager.isFiring : false
+                );
                 localStorage.setItem('characterPosition', JSON.stringify({ x: this.character.mesh.position.x, y: this.character.mesh.position.y, z: this.character.mesh.position.z }));
             }
 

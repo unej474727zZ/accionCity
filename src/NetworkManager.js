@@ -75,15 +75,17 @@ export class NetworkManager {
         });
     }
 
-    sendUpdate(pos, rot, state, weaponType) {
+    sendUpdate(pos, yaw, pitch, state, weaponType, firing) {
         if (this.socket) {
             this.socket.emit('playerMove', {
                 x: pos.x,
                 y: pos.y,
                 z: pos.z,
-                rot: rot,
+                yaw: yaw,
+                pitch: pitch,
                 state: state,
-                weaponType: weaponType
+                weaponType: weaponType,
+                firing: firing
             });
         }
     }
