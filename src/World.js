@@ -151,7 +151,14 @@ export class World {
 
             if (cityParams) {
                 city = cityParams.scene;
-                // SCALE FIX: Increased to 40.0 per user request (Avatar was looking giant)
+                
+                // --- CRITICAL FIX: CENTER CITY MODEL ---
+                const box = new THREE.Box3().setFromObject(city);
+                const center = box.getCenter(new THREE.Vector3());
+                city.position.sub(center);
+                city.position.y = 0; // Stick to ground
+                
+                // SCALE FIX: Increased to 40.0 per user request
                 city.scale.set(40, 40, 40);
 
                 // TEXTURE FIX: Prevent stretching by repeating textures
@@ -280,9 +287,8 @@ export class World {
 
             this.camera.lookAt(this.character.mesh.position);
 
-            // AUDIO LISTENER (Ear)
-            this.audioListener = new THREE.AudioListener();
-            this.camera.add(this.audioListener);
+            // AUDIO LISTENER (Using the one from SoundManager to avoid conflicts)
+            this.audioListener = this.soundManager.listener;
 
             // Unlock AudioContext on mobile (browsers block audio until interaction)
             const unlockAudio = () => {

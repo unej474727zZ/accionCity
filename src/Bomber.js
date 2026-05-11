@@ -135,7 +135,7 @@ export class Bomber {
             }
             
             // Check if out of bounds
-            if (Math.abs(this.mesh.position.x) > 500 || Math.abs(this.mesh.position.z) > 500) {
+            if (Math.abs(this.mesh.position.x) > 1000 || Math.abs(this.mesh.position.z) > 1000) {
                 this.active = false;
                 this.mesh.visible = false;
             }

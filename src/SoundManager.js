@@ -70,7 +70,7 @@ export class SoundManager {
         });
 
         // Ambient Background Sound
-        this.audioLoader.load(`sounds/backSound.mp3?v=${Date.now()}`, (buffer) => {
+        this.audioLoader.load(`sounds/backSound.mp3`, (buffer) => {
             this.sounds.ambient = buffer;
             this.ambientAudio = new THREE.Audio(this.listener);
             this.ambientAudio.setBuffer(buffer);
