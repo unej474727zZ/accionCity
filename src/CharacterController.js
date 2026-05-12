@@ -186,10 +186,12 @@ export class CharacterController {
             // No animations (mixer stays null)
         }
 
-        // User requested: "Spawn near the motorcycle"
-        this.mesh.position.set(-298, 0.5, -40);
+        // User requested: "Spawn near the motorcycle" with random dispersion
+        const spawnX = -298 + (Math.random() - 0.5) * 4;
+        const spawnZ = -40 + (Math.random() - 0.5) * 4;
+        this.mesh.position.set(spawnX, 0.5, spawnZ);
         this.yaw = 0;
-        console.log("Spawned at Cluster:", this.mesh.position);
+        console.log("Spawned at Cluster with offset:", this.mesh.position);
 
         /* DISABLED PERSISTENCE FOR NOW
         const savedPos = JSON.parse(localStorage.getItem('playerPos'));
@@ -825,7 +827,7 @@ export class CharacterController {
             const dx = e.movementX * sens;
             const dy = e.movementY * sens;
 
-            this.yaw -= dx;
+            this.yaw -= dx; // Decreasing yaw turns right
             this.pitch -= dy;
 
             // Mouse also updates Aim for vehicles
@@ -869,7 +871,6 @@ export class CharacterController {
         this.inputVector = { x: 0, y: 0 };
         this.isRunning = this.keys.run || this.keys.isShiftPressed;
 
-        // 2. UPDATE LOOK ROTATION (Rotation should always work)
         const joyLookSpeed = 0.75;
         this.yaw -= this.joystickValues.lookX * joyLookSpeed * dt;
         this.pitch += this.joystickValues.lookY * joyLookSpeed * dt;
@@ -1085,7 +1086,8 @@ export class CharacterController {
         // Unified update loop skips walking in the physics block below
 
         // 5. UPDATE MOVEMENT VECTORS
-        const forward = new THREE.Vector3(0, 0, -1);
+        // Assets usually face +Z by default. We align heading yaw=0 with +Z.
+        const forward = new THREE.Vector3(0, 0, 1);
         forward.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
 
         const right = new THREE.Vector3(1, 0, 0);
@@ -1093,7 +1095,7 @@ export class CharacterController {
 
         // WALKING MODE CONTINUES
         if (!this.isDriving) {
-            this.mesh.rotation.y = this.yaw + Math.PI;
+            this.mesh.rotation.y = this.yaw; // Removed + Math.PI to match asset default (+Z)
 
             // --- Normal Character Update ---
             let speed = 0;
@@ -1402,6 +1404,20 @@ export class CharacterController {
                 this.mixer.update(dt);
             }
         }
+
+        // Apply pitch to local player bones so they appear correct in mirrors/others
+        if (this.mesh && !this.isDriving) {
+            this.mesh.traverse(child => {
+                if (child.isBone) {
+                    if (child.name.includes('Neck') || child.name.includes('Head')) {
+                        // Facing +Z, negative X rotation tilts backwards (UP)
+                        // Just the head/neck as requested
+                        child.rotation.x = -this.pitch; 
+                    }
+                }
+            });
+        }
+
         if (this.isDriving && this.vehicle) {
             // Character is parented now, just keep it hidden
             this.mesh.visible = (this.vehicle.type === 'motorcycle'); // Show on motorcycle, hide on tank/heli
@@ -1644,10 +1660,11 @@ PTR LOCK: ${plStatus}
         // Dynamic Camera Distance (Wheel Zoom)
         let distance = this.cameraDistance;
 
-        // Base Spherical Offset
-        let offsetX = distance * Math.sin(currentYaw) * Math.cos(this.pitch);
-        let offsetY = distance * Math.sin(-this.pitch); // Invert pitch for typical feel
-        let offsetZ = distance * Math.cos(currentYaw) * Math.cos(this.pitch);
+        // Base Spherical Offset (Behind player)
+        // Since we face +Z, camera at yaw=0 should be at -Z relative to player.
+        let offsetX = -distance * Math.sin(currentYaw) * Math.cos(this.pitch);
+        let offsetY = distance * Math.sin(-this.pitch); 
+        let offsetZ = -distance * Math.cos(currentYaw) * Math.cos(this.pitch);
 
         // HELICOPTER CAMERA OVERRIDE: Nose Camera (Panoramic Exterior)
         if (this.isDriving && this._vehicle && this._vehicle.type === 'helicopter') {
@@ -1674,9 +1691,9 @@ PTR LOCK: ${plStatus}
         } else if (this.isDriving && this.vehicle && this.vehicle.type === 'tank') {
             distance = Math.max(distance, 12.0); // Minimum 12m for tanks
             // Re-calculate offsets with the new distance
-            offsetX = distance * Math.sin(currentYaw) * Math.cos(this.pitch);
+            offsetX = -distance * Math.sin(currentYaw) * Math.cos(this.pitch);
             offsetY = distance * Math.sin(-this.pitch);
-            offsetZ = distance * Math.cos(currentYaw) * Math.cos(this.pitch);
+            offsetZ = -distance * Math.cos(currentYaw) * Math.cos(this.pitch);
         }
 
         // --- OVER THE SHOULDER OFFSET ---
@@ -1684,8 +1701,9 @@ PTR LOCK: ${plStatus}
         // Otherwise, shift the camera to the Right relative to character's facing direction.
         const rightOffsetMag = (distance < 0.8) ? 0.0 : 0.8; // 0.8m to the right over shoulder
         if (rightOffsetMag > 0) {
-            offsetX += rightOffsetMag * Math.sin(currentYaw - Math.PI / 2);
-            offsetZ += rightOffsetMag * Math.cos(currentYaw - Math.PI / 2);
+            // Adjust shoulder offset to match the new -Z camera base
+            offsetX += rightOffsetMag * Math.sin(currentYaw + Math.PI / 2);
+            offsetZ += rightOffsetMag * Math.cos(currentYaw + Math.PI / 2);
         }
 
         const idealPosition = new THREE.Vector3(

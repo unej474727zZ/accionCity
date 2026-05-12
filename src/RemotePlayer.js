@@ -194,7 +194,8 @@ export class RemotePlayer {
     updateState(data) {
         if (!this.mesh) return;
         this.mesh.position.set(data.x, data.y, data.z);
-        this.mesh.rotation.y = data.yaw + Math.PI; // Corrected field name to 'yaw'
+        this.yaw = data.yaw || 0;
+        this.mesh.rotation.y = this.yaw; // Removed + Math.PI to match local player and asset default (+Z)
         this.pitch = data.pitch || 0;
 
         if (this.state !== data.state) {
@@ -304,9 +305,13 @@ export class RemotePlayer {
         // --- APPLY PITCH TO BONES (Aiming up/down) ---
         if (this.mesh) {
             this.mesh.traverse(child => {
-                // USAMOS SPINE2 O SPINE PARA LA INCLINACION PRINCIPAL
-                if (child.isBone && child.name.includes('Spine')) {
-                    child.rotation.x = -this.pitch; // Aplicamos el pitch total al tronco
+                // Repartimos la inclinación para que no parezca un avestruz (Look natural)
+                if (child.isBone) {
+                    if (child.name.includes('Neck') || child.name.includes('Head')) {
+                        // Facing +Z, negative X rotation tilts backwards (UP)
+                        // Just the head/neck as requested
+                        child.rotation.x = -this.pitch;
+                    }
                 }
             });
         }
@@ -326,9 +331,9 @@ export class RemotePlayer {
                 const start = this.weaponMesh.localToWorld(localMuzzle.clone());
                 
                 // Direction from pitch/yaw
-                const dir = new THREE.Vector3(0, 0, -1);
-                // Correct for player rotation
-                const playerRot = new THREE.Euler(-this.pitch, this.mesh.rotation.y + Math.PI, 0, 'YXZ');
+                const dir = new THREE.Vector3(0, 0, 1); // Face +Z by default for yaw=0
+                // Sincronizamos con el eje de mira del jugador (yaw puro)
+                const playerRot = new THREE.Euler(-this.pitch, this.yaw, 0, 'YXZ');
                 dir.applyEuler(playerRot);
 
                 const end = start.clone().add(dir.clone().multiplyScalar(100));
