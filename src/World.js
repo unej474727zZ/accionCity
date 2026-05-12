@@ -151,13 +151,13 @@ export class World {
 
             if (cityParams) {
                 city = cityParams.scene;
-                
+
                 // --- CRITICAL FIX: CENTER CITY MODEL ---
                 const box = new THREE.Box3().setFromObject(city);
                 const center = box.getCenter(new THREE.Vector3());
                 city.position.sub(center);
                 city.position.y = 0; // Stick to ground
-                
+
                 // SCALE FIX: Increased to 40.0 per user request
                 city.scale.set(40, 40, 40);
 
@@ -419,20 +419,20 @@ export class World {
                 for (let i = 0; i < 20; i++) {
                     const x = (seededRandom() - 0.5) * range;
                     const z = (seededRandom() - 0.5) * range;
-                    
+
                     let isInsideBuilding = false;
                     for (const block of this.cityBlocks) {
                         // Ignore massive blocks (like the floor itself)
                         if ((block.maxX - block.minX) > 200 || (block.maxZ - block.minZ) > 200) continue;
-                        
+
                         // Add 1.5 units of padding so things don't spawn half-inside a wall
-                        if (x > block.minX - 1.5 && x < block.maxX + 1.5 && 
+                        if (x > block.minX - 1.5 && x < block.maxX + 1.5 &&
                             z > block.minZ - 1.5 && z < block.maxZ + 1.5) {
                             isInsideBuilding = true;
                             break;
                         }
                     }
-                    
+
                     if (!isInsideBuilding) {
                         return new THREE.Vector3(x, 0, z);
                     }
@@ -525,7 +525,7 @@ export class World {
                         canistersSpawned++;
                     }
                 }
-                
+
                 // Yield periodically to prevent browser freeze
                 if (canisterAttempts % 100 === 0) {
                     await new Promise(r => setTimeout(r, 0));
@@ -536,8 +536,8 @@ export class World {
             // 5. Procedural Bazooka Ammo Pickups (Floating glowing cylinders)
             const ammoGeom = new THREE.CylinderGeometry(0.1, 0.1, 0.8, 8);
             ammoGeom.rotateX(Math.PI / 2); // Lay flat
-            const ammoMat = new THREE.MeshStandardMaterial({ 
-                color: 0x00ff00, 
+            const ammoMat = new THREE.MeshStandardMaterial({
+                color: 0x00ff00,
                 emissive: 0x00aa00,
                 metalness: 0.8,
                 roughness: 0.2
@@ -549,7 +549,7 @@ export class World {
                     pos.y = 1.0; // Float above ground
                     const mesh = new THREE.Mesh(ammoGeom, ammoMat);
                     mesh.position.copy(pos);
-                    
+
                     // Add a simple halo/glow with another mesh
                     const glowGeom = new THREE.CylinderGeometry(0.15, 0.15, 0.9, 8);
                     glowGeom.rotateX(Math.PI / 2);
@@ -569,6 +569,18 @@ export class World {
             // NETWORK: Connect and Setup Events
             this.networkManager.connect();
 
+            // IMMEDIATE INITIAL SYNC: Override server default with local random spawn
+            if (this.character && this.networkManager) {
+                this.networkManager.sendUpdate(
+                    this.character.mesh.position, 
+                    this.character.yaw, 
+                    this.character.pitch || 0,
+                    this.character.state,
+                    this.weaponManager ? this.weaponManager.currentWeaponType : 'pistol',
+                    this.weaponManager ? this.weaponManager.isFiring : false
+                );
+            }
+
             this.networkManager.onPlayerJoined = (id, data) => {
                 console.log("Player Joined:", id);
                 if (this.remotePlayers[id]) return; // Already exists
@@ -579,7 +591,7 @@ export class World {
 
             this.networkManager.onPlayerMoved = (id, data) => {
                 const remotePlayer = this.remotePlayers[id];
-                if (remotePlayer) remotePlayer.updateState(data);
+                if (remotePlayer && data.x !== undefined) remotePlayer.updateState(data);
             };
 
             this.networkManager.onPlayerLeft = (id) => {
@@ -603,7 +615,7 @@ export class World {
             this.networkManager.onPlayerHit = (data) => {
                 if (this.weaponManager) {
                     const hitPos = new THREE.Vector3(data.position.x, data.position.y, data.position.z);
-                    
+
                     // Blood on hit location (victim or wall)
                     this.weaponManager.createImpact(hitPos, new THREE.Vector3(0, 1, 0), data.type, data.scale);
 
@@ -790,8 +802,8 @@ export class World {
 
             // Set camera to player
             const charSpawn = new THREE.Vector3(20, 0.5, 0);
-            this.camera.position.copy(charSpawn).add(new THREE.Vector3(0, 5.5, 10)); 
-            this.camera.lookAt(charSpawn); 
+            this.camera.position.copy(charSpawn).add(new THREE.Vector3(0, 5.5, 10));
+            this.camera.lookAt(charSpawn);
 
             // CRITICAL: HIDE LOADING SCREEN
             const loadingScreen = document.getElementById('loading');
@@ -1080,10 +1092,10 @@ export class World {
 
             if (this.character && this.networkManager) {
                 this.networkManager.sendUpdate(
-                    this.character.mesh.position, 
-                    this.character.yaw, 
+                    this.character.mesh.position,
+                    this.character.yaw,
                     this.character.pitch || 0,
-                    this.character.state, 
+                    this.character.state,
                     this.weaponManager ? this.weaponManager.currentWeaponType : 'pistol',
                     this.weaponManager ? this.weaponManager.isFiring : false
                 );
@@ -1142,14 +1154,14 @@ export class World {
             // PICKUPS LOGIC
             const pickupTime = performance.now() * 0.002;
             const playerPos = this.character && this.character.mesh ? this.character.mesh.position : null;
-            
+
             for (let i = this.pickups.length - 1; i >= 0; i--) {
                 const p = this.pickups[i];
-                
+
                 // Animation: bob up and down, and spin
                 p.mesh.position.y = p.startY + Math.sin(pickupTime + p.timeOffset) * 0.2;
                 p.mesh.rotation.y += dt;
-                
+
                 // Collision with player
                 if (playerPos && playerPos.distanceTo(p.mesh.position) < 2.0) {
                     // Pick up!
@@ -1159,13 +1171,13 @@ export class World {
                             this.weaponManager.ammo['bazooka'] = this.weaponManager.maxAmmo['bazooka'];
                             this.weaponManager.updateAmmoUI();
                             if (this.soundManager) this.soundManager.playReload();
-                            
+
                             // Remove from scene
                             this.scene.remove(p.mesh);
                             p.mesh.geometry.dispose();
                             p.mesh.material.dispose();
                             this.pickups.splice(i, 1);
-                            
+
                             console.log("🚀 Bazooka Ammo Picked Up!");
                         }
                     }
@@ -1271,7 +1283,7 @@ export class World {
         flash.style.pointerEvents = 'none';
         flash.style.zIndex = '1000000'; // Maximum priority
         document.body.appendChild(flash);
-        
+
         setTimeout(() => {
             flash.style.transition = 'opacity 0.15s ease-out';
             flash.style.opacity = '0';

@@ -186,9 +186,11 @@ export class CharacterController {
             // No animations (mixer stays null)
         }
 
-        // User requested: "Spawn near the motorcycle" with random dispersion
-        const spawnX = -298 + (Math.random() - 0.5) * 4;
-        const spawnZ = -40 + (Math.random() - 0.5) * 4;
+        // User requested: "Spawn near the motorcycle" with 5m circular dispersion to avoid superposition
+        const angle = Math.random() * Math.PI * 2;
+        const radius = Math.random() * 5; // 5m Radius dispersion
+        const spawnX = -298 + Math.cos(angle) * radius;
+        const spawnZ = -40 + Math.sin(angle) * radius;
         this.mesh.position.set(spawnX, 0.5, spawnZ);
         this.yaw = 0;
         console.log("Spawned at Cluster with offset:", this.mesh.position);
@@ -977,8 +979,8 @@ export class CharacterController {
         // Keyboard/Joystick logic
         if (this.keys.forward) fInput += 1;
         if (this.keys.backward) fInput -= 1;
-        if (this.keys.left) sInput -= 1;
-        if (this.keys.right) sInput += 1;
+        if (this.keys.left) sInput += 1;
+        if (this.keys.right) sInput -= 1;
 
         fInput += this.joystickValues.linear;
         sInput += this.joystickValues.angular;
@@ -1690,10 +1692,10 @@ PTR LOCK: ${plStatus}
             return;
         } else if (this.isDriving && this.vehicle && this.vehicle.type === 'tank') {
             distance = Math.max(distance, 12.0); // Minimum 12m for tanks
-            // Re-calculate offsets with the new distance
-            offsetX = -distance * Math.sin(currentYaw) * Math.cos(this.pitch);
+            // REVERTED: Using original signs for tank camera
+            offsetX = distance * Math.sin(currentYaw) * Math.cos(this.pitch);
             offsetY = distance * Math.sin(-this.pitch);
-            offsetZ = -distance * Math.cos(currentYaw) * Math.cos(this.pitch);
+            offsetZ = distance * Math.cos(currentYaw) * Math.cos(this.pitch);
         }
 
         // --- OVER THE SHOULDER OFFSET ---

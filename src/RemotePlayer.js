@@ -35,10 +35,10 @@ export class RemotePlayer {
             this.mesh.name = `RemotePlayer_${this.id}`;
             this.playerColor = data.color || 0x00ffaa;
             this.scene.add(this.mesh);
-            
+
             // ANIMATION SETUP
             this.mixer = new THREE.AnimationMixer(this.mesh);
-            
+
             const loadAnim = (name, assetKey) => {
                 const asset = this.assets[assetKey];
                 if (asset && asset.animations && asset.animations.length > 0) {
@@ -138,11 +138,11 @@ export class RemotePlayer {
     createNameTag(name) {
         this.nameTag = document.createElement('div');
         this.nameTag.style.position = 'absolute';
-        
+
         // Usamos Three.js para asegurarnos de que el color sea IDENTICO al del avatar
         const color = new THREE.Color(this.playerColor || 0x00ffaa);
         this.nameTag.style.color = color.getStyle(); // Retorna "rgb(r,g,b)" exacto
-        
+
         this.nameTag.style.background = 'none';
         this.nameTag.style.padding = '0';
         this.nameTag.style.fontSize = '16px';
@@ -167,7 +167,7 @@ export class RemotePlayer {
         const asset = this.assets[type];
         if (asset) {
             this.weaponMesh = asset.scene.clone();
-            
+
             // CONFIGS (Must match WeaponManager.js)
             if (type === 'pistol') {
                 this.weaponMesh.scale.set(15.0, 15.0, 15.0);
@@ -192,7 +192,7 @@ export class RemotePlayer {
     }
 
     updateState(data) {
-        if (!this.mesh) return;
+        if (!this.mesh || data.x === undefined) return;
         this.mesh.position.set(data.x, data.y, data.z);
         this.yaw = data.yaw || 0;
         this.mesh.rotation.y = this.yaw; // Removed + Math.PI to match local player and asset default (+Z)
@@ -254,7 +254,7 @@ export class RemotePlayer {
 
         const clip = this.animations[actualAnimName] || this.animations['idle'];
         if (!clip || !this.mixer) return;
-        
+
         const action = this.mixer.clipAction(clip);
         if (this.currentAction === action) return;
 
@@ -267,18 +267,18 @@ export class RemotePlayer {
         // Tracer effect
         const start = new THREE.Vector3(origin.x, origin.y, origin.z);
         const dir = new THREE.Vector3(direction.x, direction.y, direction.z);
-        
+
         const bullet = new Bullet(this.scene, start, dir, 150);
         this.bullets.push(bullet);
 
         // --- MUZZLE FLASH VISUAL ---
         const flashGeom = new THREE.PlaneGeometry(0.5, 0.5);
-        const flashMat = new THREE.MeshBasicMaterial({ 
-            color: 0xffcc00, 
-            transparent: true, 
-            opacity: 1, 
+        const flashMat = new THREE.MeshBasicMaterial({
+            color: 0xffcc00,
+            transparent: true,
+            opacity: 1,
             side: THREE.DoubleSide,
-            blending: THREE.AdditiveBlending 
+            blending: THREE.AdditiveBlending
         });
         const flash = new THREE.Mesh(flashGeom, flashMat);
         flash.position.copy(start);
@@ -291,7 +291,7 @@ export class RemotePlayer {
         this.scene.add(light);
 
         // Cleanup flash
-        setTimeout(() => { 
+        setTimeout(() => {
             if (this.scene) {
                 this.scene.remove(flash);
                 this.scene.remove(light);
@@ -323,13 +323,13 @@ export class RemotePlayer {
 
             if (this.laserMesh.visible) {
                 // Muzzle position logic (same as WeaponManager)
-                const localMuzzle = this.weaponType === 'pistol' ? 
-                    new THREE.Vector3(0, 0.1, -0.4) : 
+                const localMuzzle = this.weaponType === 'pistol' ?
+                    new THREE.Vector3(0, 0.1, -0.4) :
                     new THREE.Vector3(0.85, 0.05, 0);
-                
+
                 this.weaponMesh.updateMatrixWorld(true);
                 const start = this.weaponMesh.localToWorld(localMuzzle.clone());
-                
+
                 // Direction from pitch/yaw
                 const dir = new THREE.Vector3(0, 0, 1); // Face +Z by default for yaw=0
                 // Sincronizamos con el eje de mira del jugador (yaw puro)
@@ -348,7 +348,7 @@ export class RemotePlayer {
                     const targets = [];
                     if (this.world.character && this.world.character.mesh) targets.push(this.world.character.mesh);
                     if (this.world.character && this.world.character.colliders) targets.push(...this.world.character.colliders);
-                    
+
                     // Also other remote players (optional but better)
                     for (let rid in this.world.remotePlayers) {
                         if (rid !== this.id && this.world.remotePlayers[rid].mesh) {
