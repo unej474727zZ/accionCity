@@ -407,11 +407,18 @@ export class World {
                 return mesh;
             };
 
+            // --- SEEDED RANDOM FOR SYNCHRONIZATION ---
+            let decorationSeed = 42; // Fixed seed for all clients
+            const seededRandom = () => {
+                decorationSeed = (decorationSeed * 9301 + 49297) % 233280;
+                return decorationSeed / 233280;
+            };
+
             // FAST SPAWN HELPER (AABB Math instead of Raycasting)
             const getSafeStreetPos = (range = 800) => {
                 for (let i = 0; i < 20; i++) {
-                    const x = (Math.random() - 0.5) * range;
-                    const z = (Math.random() - 0.5) * range;
+                    const x = (seededRandom() - 0.5) * range;
+                    const z = (seededRandom() - 0.5) * range;
                     
                     let isInsideBuilding = false;
                     for (const block of this.cityBlocks) {
@@ -437,7 +444,7 @@ export class World {
             for (let i = 0; i < 100; i++) {
                 const pos = getSafeStreetPos();
                 if (pos) {
-                    const mesh = addScenery('trash_can', pos, new THREE.Euler(0, Math.random() * Math.PI, 0), 0.6, false);
+                    const mesh = addScenery('trash_can', pos, new THREE.Euler(0, seededRandom() * Math.PI, 0), 0.6, false);
                     if (mesh) {
                         mesh.userData.isTrashCan = true;
                         mesh.userData.hp = 5;
@@ -450,9 +457,9 @@ export class World {
             // 2. Dumpsters Snapped to Walls (Now pushable!)
             for (let x = -7; x <= 7; x++) {
                 for (let z = -7; z <= 7; z++) {
-                    if (Math.random() > 0.4) { // 60% chance
-                        const side = Math.random() > 0.5 ? 1 : -1;
-                        const axis = Math.random() > 0.5 ? 'x' : 'z';
+                    if (seededRandom() > 0.4) { // 60% chance
+                        const side = seededRandom() > 0.5 ? 1 : -1;
+                        const axis = seededRandom() > 0.5 ? 'x' : 'z';
                         const pos = new THREE.Vector3(x * 40, 0, z * 40);
                         let rot = 0;
                         if (axis === 'x') { pos.x += 19.95 * side; rot = (side > 0) ? 1.57 : -1.57; }
@@ -473,20 +480,20 @@ export class World {
             for (let i = 0; i < 80; i++) {
                 const pos = getSafeStreetPos();
                 if (pos) {
-                    const type = Math.random();
+                    const type = seededRandom();
                     let mesh = null;
                     let isHeavy = false;
 
                     if (type < 0.25) {
-                        mesh = addScenery('tank_wreck', pos, new THREE.Euler(0, Math.random() * Math.PI, 0), 0.05);
+                        mesh = addScenery('tank_wreck', pos, new THREE.Euler(0, seededRandom() * Math.PI, 0), 0.05);
                         isHeavy = true;
                     } else if (type < 0.5) {
-                        mesh = addScenery('car_wreck_fsc', pos, new THREE.Euler(0, Math.random() * Math.PI, 0), 0.1);
+                        mesh = addScenery('car_wreck_fsc', pos, new THREE.Euler(0, seededRandom() * Math.PI, 0), 0.1);
                         isHeavy = true;
                     } else if (type < 0.75) {
-                        mesh = addScenery('dumpster1', pos, new THREE.Euler(0, Math.random() * Math.PI, 0), 0.6);
+                        mesh = addScenery('dumpster1', pos, new THREE.Euler(0, seededRandom() * Math.PI, 0), 0.6);
                     } else {
-                        mesh = addScenery('trash_can', pos, new THREE.Euler(0, Math.random() * Math.PI, 0), 0.8);
+                        mesh = addScenery('trash_can', pos, new THREE.Euler(0, seededRandom() * Math.PI, 0), 0.8);
                     }
 
                     // Only add small items to clutterObjects to allow pushing
@@ -551,7 +558,7 @@ export class World {
                     mesh.add(glowMesh);
 
                     this.scene.add(mesh);
-                    this.pickups.push({ mesh, type: 'bazooka', startY: pos.y, timeOffset: Math.random() * Math.PI * 2 });
+                    this.pickups.push({ mesh, type: 'bazooka', startY: pos.y, timeOffset: seededRandom() * Math.PI * 2 });
                 }
             }
 

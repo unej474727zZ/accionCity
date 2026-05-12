@@ -29,13 +29,13 @@ export class RemotePlayer {
     init(data) {
         const idleAsset = this.assets['idle'];
         if (idleAsset) {
-            // CLONE MESH (SkeletonUtils is safer for bones)
+            // USE SKELETONUTILS CLONE (The proper way for SkinnedMeshes)
             this.mesh = SkeletonUtils.clone(idleAsset.scene);
             this.mesh.userData.id = this.id;
             this.mesh.name = `RemotePlayer_${this.id}`;
             this.playerColor = data.color || 0x00ffaa;
             this.scene.add(this.mesh);
-
+            
             // ANIMATION SETUP
             this.mixer = new THREE.AnimationMixer(this.mesh);
             
@@ -117,19 +117,19 @@ export class RemotePlayer {
 
     tintMesh(mesh, colorHex) {
         mesh.traverse((child) => {
+            child.visible = true;
             if (child.isMesh) {
-                child.frustumCulled = false; // Prevent flickering
+                child.frustumCulled = false;
                 if (child.material) {
                     child.material = child.material.clone();
-                    // Preserve texture, add emissive tint for identification
-                    // 1. Set Base Color (Using .set for string compatibility)
+                    child.material.transparent = false;
+                    child.material.opacity = 1.0;
                     child.material.color.set(colorHex);
-
-                    // 2. Add Emissive (Glow) to prevent being pitch black in shadows
                     if (child.material.emissive) {
                         child.material.emissive.set(colorHex);
-                        child.material.emissiveIntensity = 0.6;
+                        child.material.emissiveIntensity = 0.5;
                     }
+                    child.material.needsUpdate = true;
                 }
             }
         });
@@ -235,7 +235,7 @@ export class RemotePlayer {
                 targetAction.reset();
                 targetAction.enabled = true;
                 targetAction.setLoop(THREE.LoopRepeat);
-                targetAction.setEffectiveWeight(50.0); // Override upper body
+                targetAction.setEffectiveWeight(1.0); // Corrected from 50.0 to prevent mesh glitching
                 targetAction.play();
                 targetAction.fadeIn(0.2);
             }

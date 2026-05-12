@@ -578,7 +578,7 @@ export class CharacterController {
                 targetAction.setLoop(THREE.LoopRepeat);
                 targetAction.clampWhenFinished = false;
                 // High weight to override arms COMPLETELY (Reference: 50.0)
-                targetAction.setEffectiveWeight(50.0);
+                targetAction.setEffectiveWeight(1.0);
                 targetAction.play();
                 targetAction.fadeIn(0.2);
             }
