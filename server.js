@@ -1,36 +1,71 @@
+require('dotenv').config({ path: './notifywebhook.env' });
+const fetch = require('node-fetch');
 const express = require('express');
 const app = express();
 const http = require('http').createServer(app);
 const io = require('socket.io')(http, {
   cors: {
-    origin: "*", // Allow any origin for dev
+    origin: "*", 
     methods: ["GET", "POST"]
   }
 });
 
 const PORT = process.env.PORT || 3000;
+const WEBHOOK_URL = process.env.NOTIFY_WEBHOOK_URL;
 
-// State
+// Notification Helper
+const sendNotify = async (title, message, color = 0x00ff00) => {
+  if (!WEBHOOK_URL) {
+    console.log('⚠️ No hay URL de Webhook configurada.');
+    return;
+  }
+  try {
+    console.log(`📡 Intentando enviar notificación: "${title}"...`);
+    
+    // Enviamos como JSON (el estándar más fiable)
+    const response = await fetch(WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({ 
+        title: title, 
+        message: message, 
+        color: color.toString() 
+      })
+    });
+    
+    const resText = await response.text();
+    if (response.ok) {
+        console.log(`✅ ¡Notificación enviada con éxito!`);
+    } else {
+        console.log(`❌ Error del Webhook (${response.status}): ${resText}`);
+        // Si el proxy falló por "No Data", puede ser que no esté leyendo JSON.
+        // Pero con el nuevo proxy que te he creado esto no pasará.
+    }
+  } catch (err) {
+    console.error('❌ Error de conexión:', err.message);
+  }
+};
+
+// Global Server State
 const players = {};
+let isPaused = false;
 
-app.use(express.static('public')); // Serve public assets if needed directly
+// Notify server start
+sendNotify('🚀 Servidor Iniciado', `El servidor de AccionCity está corriendo en el puerto ${PORT}`);
 
 io.on('connection', (socket) => {
-  console.log('User connected:', socket.id);
+  const ip = socket.handshake.address;
+  const userAgent = socket.handshake.headers['user-agent'];
+  console.log('User connected:', socket.id, 'IP:', ip);
 
   // Random Color Generator (Vivid/Neon)
   const getRandomNeonColor = () => {
-    // HSV to Hex conversion for pure vivid colors
-    // Saturation 100%, Lightness 50% = Maximum pure color
     const h = Math.random();
     const s = 0.9;
     const l = 0.5;
-
-    const r = l;
-    // Simplified HSL to RGB conversion for S=1, L=0.5 (approximated for max vividness)
-    // Actually, proper conversion is better to ensure valid Hex.
-
-    // Using a robust HSL to Hex function
     const hue2rgb = (p, q, t) => {
       if (t < 0) t += 1;
       if (t > 1) t -= 1;
@@ -39,77 +74,69 @@ io.on('connection', (socket) => {
       if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
       return p;
     };
-
     const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
     const p = 2 * l - q;
-
-    // Random Hue (0-1)
-    const r_val = Math.round(hue2rgb(p, q, h + 1 / 3) * 255);
-    const g_val = Math.round(hue2rgb(p, q, h) * 255);
-    const b_val = Math.round(hue2rgb(p, q, h - 1 / 3) * 255);
-
     const toHex = (c) => {
-      const hex = c.toString(16);
+      const hex = Math.round(c * 255).toString(16);
       return hex.length == 1 ? "0" + hex : hex;
     };
-
-    return "#" + toHex(r_val) + toHex(g_val) + toHex(b_val);
+    return "#" + toHex(hue2rgb(p, q, h + 1 / 3)) + toHex(hue2rgb(p, q, h)) + toHex(hue2rgb(p, q, h - 1 / 3));
   };
 
   const finalColor = getRandomNeonColor();
   const randomName = 'Player ' + Math.floor(Math.random() * 10000);
 
-  // Create new player entry
+  const angle = Math.random() * Math.PI * 2;
+  const radius = Math.random() * 5;
   players[socket.id] = {
-    x: 0, y: 0, z: 0,
+    id: socket.id,
+    x: -298 + Math.cos(angle) * radius,
+    y: 0.5,
+    z: -40 + Math.sin(angle) * radius,
     rot: 0,
     state: 'idle',
-    color: finalColor, // Vivid Hex
-    name: randomName
+    color: finalColor,
+    name: randomName,
+    ip: ip
   };
 
-  // Send current players to new joiner
-  socket.emit('currentPlayers', players);
+  // Notify Player Entry
+  sendNotify('👤 Jugador Conectado', 
+    `**Nombre:** ${randomName}\n**IP:** ${ip}\n**ID:** ${socket.id}\n**Navegador:** ${userAgent}`,
+    0x00ff00
+  );
 
-  // Broadcast new joiner to others
-  socket.broadcast.emit('newPlayer', {
-    id: socket.id,
-    player: players[socket.id]
+  socket.emit('currentPlayers', players);
+  socket.broadcast.emit('newPlayer', { id: socket.id, player: players[socket.id] });
+
+  // Handle Pause
+  socket.on('togglePause', (data) => {
+    isPaused = data.paused;
+    const player = players[socket.id];
+    const status = isPaused ? '⏸️ JUEGO PAUSADO' : '▶️ JUEGO REANUDADO';
+    
+    // Solo mandamos el aviso al correo, NO bloqueamos a los demás
+    sendNotify(status, `El jugador **${player ? player.name : 'Desconocido'}** ha ${isPaused ? 'puesto' : 'quitado'} la pausa individualmente.`);
   });
 
-  // Handle Movement
   socket.on('playerMove', (data) => {
     if (players[socket.id]) {
-      players[socket.id].x = data.x;
-      players[socket.id].y = data.y;
-      players[socket.id].z = data.z;
-      players[socket.id].rot = data.rot;
-      players[socket.id].state = data.state;
-
-      // Broadcast update to others (excluding sender)
-      socket.broadcast.emit('playerMoved', {
-        id: socket.id,
-        ...data
-      });
+      Object.assign(players[socket.id], data);
+      socket.broadcast.emit('playerMoved', { id: socket.id, ...data });
     }
   });
 
-  // Handle Shooting
   socket.on('playerShoot', (data) => {
     socket.broadcast.emit('playerShoot', { id: socket.id, ...data });
   });
 
-  // Handle Hits (Impacts)
   socket.on('playerHit', (data) => {
-    // Broadcast to everyone so they see the blood/spark
     io.emit('playerHit', { id: socket.id, ...data });
   });
 
-  // Handle Chat
   socket.on('chatMessage', (data) => {
     const player = players[socket.id];
     if (player) {
-      // Broadcast to EVERYONE (including sender)
       io.emit('chatMessage', {
         id: socket.id,
         name: player.name,
@@ -119,14 +146,24 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Handle Disconnect
   socket.on('disconnect', () => {
+    const player = players[socket.id];
     console.log('User disconnected:', socket.id);
+    
+    if (player) {
+      sendNotify('❌ Jugador Desconectado', `**Nombre:** ${player.name}\n**ID:** ${socket.id}`, 0xff0000);
+    }
+    
     delete players[socket.id];
     io.emit('playerDisconnected', socket.id);
   });
 });
 
+// Manual Shutdown Notification
+process.on('SIGINT', async () => {
+  await sendNotify('🛑 Servidor Detenido', 'El servidor se ha cerrado manualmente desde la consola.', 0xffa500);
+  process.exit();
+});
 
 http.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);

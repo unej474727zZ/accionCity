@@ -137,6 +137,26 @@ export class World {
 
         this.clutterObjects = []; // Track pushable scenery
         this.pickups = []; // Track ammo pickups
+
+        this.isPaused = false;
+        this.pausedOverlay = this.createPauseOverlay();
+    }
+
+    createPauseOverlay() {
+        const div = document.createElement('div');
+        div.id = 'pause-overlay';
+        div.style.cssText = `
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(0,0,0,0.6); display: none; flex-direction: column;
+            justify-content: center; align-items: center; z-index: 1000000;
+            color: white; font-family: 'Arial Black', sans-serif; pointer-events: none;
+        `;
+        div.innerHTML = `
+            <h1 style="font-size: 80px; margin: 0; color: #00ffaa; text-shadow: 0 0 20px #000;">PAUSA</h1>
+            <p style="font-size: 18px; color: white;">Presiona START para reanudar</p>
+        `;
+        document.body.appendChild(div);
+        return div;
     }
 
     async start() {
@@ -604,6 +624,8 @@ export class World {
                 }
             };
 
+            // Eliminado el escuchador de pausa global
+
             // COMBAT SYNC
             this.networkManager.onPlayerShoot = (data) => {
                 const remote = this.remotePlayers[data.id];
@@ -866,13 +888,26 @@ export class World {
         if (chatInput) chatInput.style.display = this.uiVisible ? 'block' : 'none';
         if (chatMessages) chatMessages.style.display = this.uiVisible ? 'block' : 'none';
 
-        const idsToToggle = ['dpad-container', 'shapes-container', 'camera-cross-container', 'btn-l', 'btn-r', 'minimap-canvas'];
+        const idsToToggle = ['dpad-container', 'shapes-container', 'camera-cross-container', 'btn-l', 'btn-r', 'minimap-canvas', 'zone_joystick', 'zone_right', 'heli-radar'];
         idsToToggle.forEach(id => {
             const el = document.getElementById(id);
             if (el) el.style.display = this.uiVisible ? '' : 'none';
         });
 
         if (this.weaponManager) this.weaponManager.toggleUI(this.uiVisible);
+    }
+
+    togglePause() {
+        console.log("🛠️ togglePause() ejecutado en el cliente.");
+        this.isPaused = !this.isPaused;
+        this.pausedOverlay.style.display = this.isPaused ? 'flex' : 'none';
+        
+        if (this.networkManager) {
+            console.log("📡 Enviando estado de pausa al servidor:", this.isPaused);
+            this.networkManager.sendPause(this.isPaused);
+        } else {
+            console.warn("⚠️ No hay NetworkManager disponible para enviar la pausa.");
+        }
     }
 
     async toggleAR() {
@@ -992,7 +1027,7 @@ export class World {
                 }
             }
 
-            if (this.character) {
+            if (this.character && !this.isPaused) {
                 this.character.update(dt);
                 if (!this.colliderThrottle) this.colliderThrottle = 0;
                 this.colliderThrottle++;
@@ -1052,13 +1087,13 @@ export class World {
                 }
             }
 
-            if (this.npcManager) this.npcManager.update(dt);
-            if (this.weaponManager) {
+            if (this.npcManager && !this.isPaused) this.npcManager.update(dt);
+            if (this.weaponManager && !this.isPaused) {
                 this.weaponManager.remotePlayers = Object.values(this.remotePlayers);
                 this.weaponManager.update(dt);
             }
 
-            if (this.vehicleManager && this.character) {
+            if (this.vehicleManager && this.character && !this.isPaused) {
                 const input = this.character.inputVector || { x: 0, y: 0 };
                 this.vehicleManager.update(dt, input);
                 const moto = this.vehicleManager.vehicles.find(v => v.type === 'motorcycle');
@@ -1067,11 +1102,11 @@ export class World {
                 }
             }
 
-            if (this.bomber) {
+            if (this.bomber && !this.isPaused) {
                 this.bomber.update(dt);
             }
 
-            if (this.sniperManager) {
+            if (this.sniperManager && !this.isPaused) {
                 this.sniperManager.update(dt);
             }
 
@@ -1090,7 +1125,7 @@ export class World {
 
             Object.values(this.remotePlayers).forEach(p => p.update(dt, this.camera));
 
-            if (this.character && this.networkManager) {
+            if (this.character && this.networkManager && !this.isPaused) {
                 this.networkManager.sendUpdate(
                     this.character.mesh.position,
                     this.character.yaw,
@@ -1103,7 +1138,7 @@ export class World {
             }
 
             // Teleportation
-            if (this.character && !this.character.isDriving && this.transporters.length > 0) {
+            if (this.character && !this.character.isDriving && this.transporters.length > 0 && !this.isPaused) {
                 if (this.teleportCooldown > 0) this.teleportCooldown -= dt;
 
                 this.transporters.forEach((t, i) => {
@@ -1133,6 +1168,7 @@ export class World {
             for (let i = this.clutterObjects.length - 1; i >= 0; i--) {
                 const obj = this.clutterObjects[i];
                 if (!obj.parent) { this.clutterObjects.splice(i, 1); continue; }
+                if (this.isPaused) continue; // Skip physical updates during pause
 
                 const pushVel = obj.userData.pushVelocity;
                 if (pushVel && pushVel.length() > 0.01) {

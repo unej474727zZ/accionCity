@@ -73,6 +73,20 @@ export class NetworkManager {
         this.socket.on('playerHit', (data) => {
             if (this.onPlayerHit) this.onPlayerHit(data);
         });
+
+        // 8. Game Pause
+        this.socket.on('gamePauseUpdate', (data) => {
+            if (this.onGamePause) this.onGamePause(data);
+        });
+    }
+
+    sendPause(paused) {
+        if (this.socket && this.socket.connected) {
+            console.log("🚀 Socket emitiendo 'togglePause':", paused);
+            this.socket.emit('togglePause', { paused });
+        } else {
+            console.error("❌ Error: Socket no conectado. No se puede enviar la pausa.");
+        }
     }
 
     sendUpdate(pos, yaw, pitch, state, weaponType, firing) {

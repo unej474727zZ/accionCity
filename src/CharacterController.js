@@ -472,14 +472,10 @@ export class CharacterController {
             // Unused or map to something else
         }, null);
 
-        // START -> PAUSE / TOGGLE UI
+        // START -> PAUSE SERVER
         bindBtn('btn-start', () => {
-            // User requested Start to be different from Map.
-            // Mapping to UI Toggle (Cinematic/Pause feel)
-            if (this.world && this.world.toggleUI) {
-                this.world.toggleUI();
-            } else {
-                console.log("Start Pressed - UI Toggle not available");
+            if (this.world && this.world.togglePause) {
+                this.world.togglePause();
             }
         }, null);
 
@@ -979,8 +975,8 @@ export class CharacterController {
         // Keyboard/Joystick logic
         if (this.keys.forward) fInput += 1;
         if (this.keys.backward) fInput -= 1;
-        if (this.keys.left) sInput += 1;
-        if (this.keys.right) sInput -= 1;
+        if (this.keys.left) sInput -= 1;
+        if (this.keys.right) sInput += 1;
 
         fInput += this.joystickValues.linear;
         sInput += this.joystickValues.angular;
