@@ -158,7 +158,7 @@ export class Minimap {
             
             if (!hidePlayerIcon) {
                 let displayYaw = character.yaw;
-                ctx.rotate(-displayYaw); 
+                ctx.rotate(-displayYaw + Math.PI); 
                 
                 ctx.fillStyle = character.isDriving ? '#00ffff' : '#ffffff'; // Cian si conduce moto
                 ctx.beginPath();
