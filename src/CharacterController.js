@@ -1088,7 +1088,7 @@ export class CharacterController {
         const forward = new THREE.Vector3(0, 0, 1);
         forward.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
 
-        const right = new THREE.Vector3(1, 0, 0);
+        const right = new THREE.Vector3(-1, 0, 0);
         right.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
 
         // WALKING MODE CONTINUES
