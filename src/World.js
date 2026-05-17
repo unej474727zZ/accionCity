@@ -242,7 +242,7 @@ export class World {
                 new THREE.Vector3(-430, 0, -430)
             ];
 
-            const carKeys = ['car1', 'car2', 'car3', 'car1', 'car2', 'car3', 'tank']; // Tanks are now 1 in 7 probability
+            const carKeys = ['car1', 'casco', 'car3', 'car1', 'casco', 'car3', 'tank']; // Tanks are now 1 in 7 probability
             const tNames = ['transporter', 'transporter1', 'transporter2', 'transporter3'];
             tNames.forEach((name, i) => {
                 const asset = assets[name];
@@ -698,7 +698,11 @@ export class World {
                 if (data.id === this.networkManager.id) return;
                 const remotePlayer = this.remotePlayers[data.id];
                 if (remotePlayer) {
-                    remotePlayer.shoot(data.origin, data.direction, data.weaponType);
+                    if (['tank', 'bazooka', 'helicopter_missile'].includes(data.weaponType) && this.weaponManager) {
+                        this.weaponManager.spawnRemoteProjectile(data.origin, data.direction, data.weaponType, data.id);
+                    } else {
+                        remotePlayer.shoot(data.origin, data.direction, data.weaponType);
+                    }
                 }
             };
 
@@ -816,14 +820,14 @@ export class World {
             }, { passive: true });
 
             // --- FINAL SPAWN (Safe Street Center) ---
-            this.character.mesh.position.set(20, 0.5, 0); // Safe street spawn near center
+            this.character.mesh.position.set(-296, 0.5, -20); // Safe street spawn right next to the vehicles!
 
             this.vehicleManager.spawnVehicle('motorcycle', new THREE.Vector3(-300, 0.5, -40));
             this.vehicleManager.spawnVehicle('tank', new THREE.Vector3(-300, 0.5, 0));
             this.vehicleManager.spawnVehicle('helicopter', new THREE.Vector3(-300, 0.5, -20));
 
             // Set camera to player
-            const charSpawn = new THREE.Vector3(20, 0.5, 0);
+            const charSpawn = new THREE.Vector3(-296, 0.5, -20);
             this.camera.position.copy(charSpawn).add(new THREE.Vector3(0, 5.5, 10));
             this.camera.lookAt(charSpawn);
 
@@ -1132,7 +1136,8 @@ export class World {
                     this.character.pitch || 0,
                     this.character.state,
                     this.weaponManager ? this.weaponManager.currentWeaponType : 'pistol',
-                    this.weaponManager ? this.weaponManager.isFiring : false
+                    this.weaponManager ? this.weaponManager.isFiring : false,
+                    this.character.vehicle ? this.character.vehicle.type : null
                 );
                 localStorage.setItem('characterPosition', JSON.stringify({ x: this.character.mesh.position.x, y: this.character.mesh.position.y, z: this.character.mesh.position.z }));
             }

@@ -19,6 +19,8 @@ export class RemotePlayer {
         this.rightHandBone = null;
         this.bullets = [];
         this.pitch = 0;
+        this.headBone = null;
+        this.helmetMesh = null;
         this.laserActive = true;
         this.laserMesh = this.createLaser();
         this.raycaster = new THREE.Raycaster();
@@ -74,6 +76,7 @@ export class RemotePlayer {
 
             // Find Hand Bone (Identical to WeaponManager)
             this.findHandBone();
+            this.findHeadBone();
 
             // SYNC COLOR (Keep textures, add glow)
             this.tintMesh(this.mesh, data.color || 0x00ffaa);
@@ -112,6 +115,22 @@ export class RemotePlayer {
         if (bestBone) {
             this.rightHandBone = bestBone;
             console.log(`RemotePlayer ${this.id}: Bone found: ${bestBone.name}`);
+        }
+    }
+
+    findHeadBone() {
+        if (!this.mesh) return;
+        let bestBone = null;
+        this.mesh.traverse((child) => {
+            if (child.isBone) {
+                const name = child.name.toLowerCase();
+                if (name.includes('head') && !name.includes('neck') && !name.includes('top')) {
+                    bestBone = child;
+                }
+            }
+        });
+        if (bestBone) {
+            this.headBone = bestBone;
         }
     }
 
@@ -211,6 +230,44 @@ export class RemotePlayer {
         const isStance = (this.state === 'rifle' || this.state === 'pistol');
         const isFiring = data.firing || isStance;
         this.setFiring(isFiring);
+
+        // --- HELMET SYNC ---
+        if (data.vehicleType === 'motorcycle') {
+            if (!this.helmetMesh) {
+                this.helmetMesh = this.createVRHelmet();
+            }
+            if (this.headBone && this.helmetMesh && !this.helmetMesh.parent) {
+                this.headBone.add(this.helmetMesh);
+                
+                // PROGRAMMATIC SCALE COMPENSATION FOR MIXAMO ARMATURE
+                this.headBone.updateMatrixWorld(true);
+                const worldScale = new THREE.Vector3();
+                this.headBone.getWorldScale(worldScale);
+                
+                if (worldScale.x !== 0 && worldScale.y !== 0 && worldScale.z !== 0) {
+                    this.helmetMesh.scale.set(
+                        1.0 / worldScale.x,
+                        1.0 / worldScale.y,
+                        1.0 / worldScale.z
+                    );
+                } else {
+                    this.helmetMesh.scale.set(120, 120, 120); // Fallback standard Mixamo compensation
+                }
+                
+                // Position and rotation offsets must also be adjusted for the parent scale:
+                const scaleCompY = worldScale.y !== 0 ? 1.0 / worldScale.y : 120;
+                const scaleCompZ = worldScale.z !== 0 ? 1.0 / worldScale.z : 120;
+                this.helmetMesh.position.set(0, 0.1 * scaleCompY, 0.03 * scaleCompZ);
+                this.helmetMesh.rotation.set(0, 0, 0);
+
+                this.helmetMesh.visible = true;
+            }
+        } else {
+            if (this.helmetMesh) {
+                this.helmetMesh.visible = false;
+                if (this.helmetMesh.parent) this.helmetMesh.parent.remove(this.helmetMesh);
+            }
+        }
     }
 
     setFiring(isActive) {
@@ -395,6 +452,81 @@ export class RemotePlayer {
         if (this.mesh) this.scene.remove(this.mesh);
         if (this.laserMesh) this.scene.remove(this.laserMesh);
         this.bullets.forEach(b => b.destroy());
+    }
+
+    createVRHelmet() {
+        const helmet = new THREE.Group();
+        helmet.name = "VRHelmet";
+
+        // 1. Helmet Casing (Sphere cut or squashed)
+        const casingGeom = new THREE.SphereGeometry(0.24, 16, 16);
+        casingGeom.scale(1.0, 1.05, 1.15); // Squashed to look aerodynamic
+        const casingMat = new THREE.MeshStandardMaterial({
+            color: 0x1b1f22, // Sleek matte carbon dark grey
+            roughness: 0.5,
+            metalness: 0.8
+        });
+        const casing = new THREE.Mesh(casingGeom, casingMat);
+        helmet.add(casing);
+
+        // 2. Neon Visor (Glowing sleek curved cylinder/sphere piece)
+        const visorGeom = new THREE.SphereGeometry(0.21, 16, 16, 0, Math.PI, 0, Math.PI / 2);
+        const visorMat = new THREE.MeshBasicMaterial({
+            color: 0x00f3ff, // High vibrant cyber cyan
+            transparent: true,
+            opacity: 0.85,
+            blending: THREE.AdditiveBlending
+        });
+        const visor = new THREE.Mesh(visorGeom, visorMat);
+        visor.scale.set(1.05, 0.8, 1.16);
+        visor.position.set(0, 0.02, 0.04);
+        visor.rotation.x = Math.PI / 6; // Angled down slightly
+        helmet.add(visor);
+
+        // 3. Side Holographic Projector Cylinders (Left & Right)
+        const projectorGeom = new THREE.CylinderGeometry(0.05, 0.05, 0.08, 8);
+        projectorGeom.rotateZ(Math.PI / 2);
+        const projectorMat = new THREE.MeshStandardMaterial({ color: 0x3a3d40, metalness: 0.9, roughness: 0.2 });
+        
+        const rightProjector = new THREE.Mesh(projectorGeom, projectorMat);
+        rightProjector.position.set(0.22, 0, 0);
+        helmet.add(rightProjector);
+
+        const leftProjector = new THREE.Mesh(projectorGeom, projectorMat);
+        leftProjector.position.set(-0.22, 0, 0);
+        helmet.add(leftProjector);
+
+        // 4. Side LED Lights (Cyan Glowing rings or points)
+        const ledGeom = new THREE.SphereGeometry(0.015, 8, 8);
+        const ledMat = new THREE.MeshBasicMaterial({ color: 0x00ffcc });
+        
+        const rightLed = new THREE.Mesh(ledGeom, ledMat);
+        rightLed.position.set(0.23, 0, 0.05);
+        helmet.add(rightLed);
+
+        const leftLed = new THREE.Mesh(ledGeom, ledMat);
+        leftLed.position.set(-0.23, 0, 0.05);
+        helmet.add(leftLed);
+
+        // 5. Back Battery / HUD Processor (Box at the back)
+        const packGeom = new THREE.BoxGeometry(0.12, 0.12, 0.08);
+        const packMat = new THREE.MeshStandardMaterial({ color: 0x111315, roughness: 0.6 });
+        const backPack = new THREE.Mesh(packGeom, packMat);
+        backPack.position.set(0, 0, -0.22);
+        helmet.add(backPack);
+
+        // Flashing red status LED on the backpack
+        const statusLedGeom = new THREE.SphereGeometry(0.01, 8, 8);
+        const statusLedMat = new THREE.MeshBasicMaterial({ color: 0xff0033 });
+        const statusLed = new THREE.Mesh(statusLedGeom, statusLedMat);
+        statusLed.position.set(0, 0.04, -0.26);
+        helmet.add(statusLed);
+
+        // Adjust position & rotation offsets to fit Mixamo Head bone perfectly
+        helmet.position.set(0, 0.1, 0.03); // Slightly up and forward relative to Head bone center
+        helmet.rotation.set(0, 0, 0); // Align forward with avatar look direction
+
+        return helmet;
     }
 
     createLaser() {

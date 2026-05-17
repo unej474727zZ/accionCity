@@ -125,7 +125,7 @@ class HeliMissile {
             return;
         }
 
-        if (this.hitPoint && this.position.distanceTo(this.hitPoint) < step * 2.0) {
+        if (this.hitPoint && this.position.distanceTo(this.hitPoint) < step * 2.0 && this.distanceTraveled > 10.0) {
             this.onHit(this.hitPoint, this.hitNormal, this.hitObject);
             this.destroy();
         }
@@ -148,7 +148,9 @@ export class WeaponManager {
         this.assets = assets;
         this.soundManager = this.scene.userData.world ? this.scene.userData.world.soundManager : null;
         if (!this.soundManager) console.warn("WeaponManager: SoundManager not found in World context");
-        console.log("WeaponManager Loaded: VERSION CHECK 9007");
+        this.networkManager = this.scene.userData.world ? this.scene.userData.world.networkManager : null;
+        console.log("WeaponManager Loaded: VERSION CHECK 9008");
+        window.weaponManager = this; // Register globally for Minimap integration
 
         this.rightHandBone = null;
         this.currentWeaponMesh = null;
@@ -156,6 +158,10 @@ export class WeaponManager {
         this.remotePlayers = []; // List of remote players for hit detection
         this.tankShells = []; // List of active tank shells
         this.canisters = []; // List of explosive canisters
+        this.sniperBullets = []; // TRACK ACTIVE SNIPER BULLETS GLOBALLY
+        this.warningActiveTimer = 0; // Cooldown to hold warning HUD displayed for feedback
+        this.lastThreatAngle = 0; // Last tracked threat angle
+        this.lastThreatTime = 0; // Last tracked time to impact
 
         // Weapon Configs (Offsets for valid hand placement)
         // Weapon Configs (Offsets for valid hand placement)
@@ -194,10 +200,13 @@ export class WeaponManager {
         this.maxAmmo = { pistol: 12, rifle: 30, bazooka: 2 };
         this.ammo = { pistol: 12, rifle: 30, bazooka: 2 };
 
+        this.testMissileActive = false; // Test mode for missile HUD & beeps
+
         // Input Setup
         this.setupInput();
         this.createAmmoUI(); // NEW
         this.createRangeFinderUI();
+        this.createMissileWarningUI();
 
         // Effects
         this.flashLight = new THREE.PointLight(0xffaa00, 0, 5);
@@ -238,7 +247,7 @@ export class WeaponManager {
         this.raycastTargets = [];
         this.lastTargetUpdateTime = 0;
         this.rangeFinderThrottle = 0;
-        
+
         // PERFORMANCE: Shared Geometries
         this._sparkGeom = new THREE.SphereGeometry(0.04, 3, 3); // Ultra-low poly
         this._smokeGeom = new THREE.SphereGeometry(0.15, 4, 4);
@@ -346,6 +355,12 @@ export class WeaponManager {
             // Weapon Switching (Only with 1)
             if (e.key === '1') this.cycleWeapon();
             if (e.code === 'KeyT') this.holster();
+            
+            // Toggle HUD test simulation with K key (K is completely free!)
+            if (e.code === 'KeyK') {
+                this.testMissileActive = !this.testMissileActive;
+                console.log(`[TEST MODE] Missile Warning System: ${this.testMissileActive ? "ON" : "OFF"}`);
+            }
 
             // ROTATION CONTROLS (Only if weapon equipped)
             if (this.currentWeaponMesh) {
@@ -422,7 +437,7 @@ export class WeaponManager {
             this.ammoEl.style.color = "#ffaa00";
             return;
         }
-        
+
         const current = this.ammo[this.currentWeaponType];
         const max = this.maxAmmo[this.currentWeaponType];
         this.ammoEl.innerText = `${current} / ${max}`;
@@ -442,12 +457,12 @@ export class WeaponManager {
         const now = Date.now();
         if (now - this.lastTargetUpdateTime > 1000) { // Update target list once per second
             this.lastTargetUpdateTime = now;
-            
+
             // PERFORMANCE: Use the consolidated list from CharacterController
-            this.raycastTargets = (this.characterController && this.characterController.allPhysicTargets && this.characterController.allPhysicTargets.length > 0) ? 
-                this.characterController.allPhysicTargets : 
+            this.raycastTargets = (this.characterController && this.characterController.allPhysicTargets && this.characterController.allPhysicTargets.length > 0) ?
+                this.characterController.allPhysicTargets :
                 (this.characterController.colliders || []);
-            
+
             // Add remote players (WeaponManager logic handles them specially too)
             if (this.remotePlayers) {
                 this.remotePlayers.forEach(p => { if (p.mesh && !this.raycastTargets.includes(p.mesh)) this.raycastTargets.push(p.mesh); });
@@ -661,7 +676,7 @@ export class WeaponManager {
             this.createExplosion(pos, 5.0);
             this.createImpact(pos, norm || new THREE.Vector3(0, 1, 0), 'spark', 5.0, obj); // 5x Scale
 
-            this.applyAreaDamage(pos, 15.0, 1.0);
+            this.applyAreaDamage(pos, 15.0, 1.0, obj);
         });
 
         if (hit) {
@@ -675,19 +690,33 @@ export class WeaponManager {
         }
 
         this.tankShells.push(shell);
+
+        // Network Sync for Tank Cannon
+        if (this.networkManager) {
+            this.networkManager.sendShoot(muzzlePos, bulletDir, 'tank');
+        }
     }
 
-    applyAreaDamage(pos, radius, damageAmount) {
+    applyAreaDamage(pos, radius, damageAmount, hitObject = null) {
         if (!this.characterController || !this.characterController.world) return;
         const vm = this.characterController.world.vehicleManager;
         const npcManager = this.characterController.world.npcManager;
         const affectedVehicles = new Set();
 
+        // 0. Direct Hit Object
+        if (hitObject && vm) {
+            const targetVeh = vm.findVehicleByMesh(hitObject);
+            if (targetVeh) {
+                vm.damageVehicle(targetVeh, damageAmount, hitObject, true);
+                affectedVehicles.add(targetVeh);
+            }
+        }
+
         // 1. Managed Vehicles (O(N) where N is small)
         for (const v of vm.vehicles) {
             if (!v.mesh) continue;
             // Using a simple distance check (not using getWorldPosition to save perf)
-            if (v.mesh.position.distanceTo(pos) < radius) {
+            if (v.mesh.position.distanceTo(pos) < radius && !affectedVehicles.has(v)) {
                 vm.damageVehicle(v, damageAmount, v.mesh, true);
                 affectedVehicles.add(v);
             }
@@ -704,6 +733,41 @@ export class WeaponManager {
             }
         }
 
+        // 2.5 Dynamic NPCs
+        if (vm && vm.dynamicNPCs) {
+            for (const car of vm.dynamicNPCs) {
+                if (!car) continue;
+                if (car.position.distanceTo(pos) < radius && !affectedVehicles.has(car)) {
+                    vm.damageVehicle(car, damageAmount, car, true);
+                    affectedVehicles.add(car);
+                }
+            }
+        }
+
+        // 2.6 Static Environment Vehicles (Buses, Cars not yet pushed)
+        // Need to check scene colliders for vehicles near explosion
+        if (vm) {
+            const worldPos = new THREE.Vector3();
+            this.scene.traverse(c => {
+                if (c.isMesh && c.visible && !affectedVehicles.has(c)) {
+                    // Quick bounding box or distance check
+                    c.getWorldPosition(worldPos);
+                    if (worldPos.distanceTo(pos) < radius) {
+                        const targetVeh = vm.findVehicleByMesh(c);
+                        if (targetVeh && !affectedVehicles.has(targetVeh)) {
+                            // Make sure we aren't hurting our own tank
+                            if (this.characterController && this.characterController.vehicle && this.characterController.vehicle.mesh === targetVeh.mesh) {
+                                return;
+                            }
+                            vm.damageVehicle(targetVeh, damageAmount, c, true);
+                            affectedVehicles.add(targetVeh);
+                            affectedVehicles.add(c);
+                        }
+                    }
+                }
+            });
+        }
+
         // 3. Player
         if (this.character && this.character.position.distanceTo(pos) < radius) {
             if (this.characterController.damage) this.characterController.damage(20);
@@ -712,7 +776,7 @@ export class WeaponManager {
 
     createExplosion(position, radius) {
         // ULTRA-LEAN EXPLOSION: Low intensity, very short life
-        const boomLight = new THREE.PointLight(0xff6600, 2, radius); 
+        const boomLight = new THREE.PointLight(0xff6600, 2, radius);
         boomLight.position.copy(position);
         this.scene.add(boomLight);
         setTimeout(() => { if (this.scene) this.scene.remove(boomLight); }, 60);
@@ -728,10 +792,10 @@ export class WeaponManager {
             this.scene.add(p);
             const start = Date.now();
             const anim = () => {
-                if (Date.now() - start > 300) { 
-                    this.scene.remove(p); 
-                    pMat.dispose(); 
-                    return; 
+                if (Date.now() - start > 300) {
+                    this.scene.remove(p);
+                    pMat.dispose();
+                    return;
                 }
                 p.position.add(vel.clone().multiplyScalar(0.016));
                 vel.y -= 0.8;
@@ -752,7 +816,7 @@ export class WeaponManager {
         }
 
         this.timeSinceLastShot = 0;
-        
+
         // Subtract ammo
         this.ammo[this.currentWeaponType]--;
         this.updateAmmoUI();
@@ -764,23 +828,23 @@ export class WeaponManager {
 
         // 1. MUZZLE POSITION
         // Calculate muzzle position using localToWorld to handle Scale/Rotation correctly
-        const localMuzzle = this.currentWeaponType === 'pistol' ? 
+        const localMuzzle = this.currentWeaponType === 'pistol' ?
             new THREE.Vector3(0, 0.1, -0.4) : // Pistol (Z-forward)
             new THREE.Vector3(0.85, 0.05, 0); // Rifle (+X forward tip)
-        
+
         const muzzlePos = this.currentWeaponMesh.localToWorld(localMuzzle.clone());
 
         // 2. RAYCAST FROM CAMERA (Hitscan)
         const camDir = new THREE.Vector3();
         this.camera.getWorldDirection(camDir);
-        
+
         const raycaster = new THREE.Raycaster(this.camera.position, camDir);
         raycaster.far = 1000;
 
         // Targets: All meshes except self
         const targets = [];
         const currentVehMesh = (this.characterController && this.characterController.vehicle) ? this.characterController.vehicle.mesh : null;
-        
+
         this.scene.traverse(c => {
             if (c.isMesh && !this.isSelf(c) && c.visible) {
                 if (this.isVehiclePart(c, currentVehMesh)) return;
@@ -802,20 +866,20 @@ export class WeaponManager {
 
         // 3. VISUAL BULLET (OR PROJECTILE)
         const bulletDir = targetPoint.clone().sub(muzzlePos).normalize();
-        
+
         if (this.currentWeaponType === 'bazooka') {
             // Spawn a Missile (Reusing TankShell logic since it does exactly what we want)
             // Play a rocket sound? We don't have one, but we can play tank shot sound.
             if (this.soundManager) this.soundManager.playTankShot();
-            
+
             // Adjust muzzle pos for bazooka to be further forward
             muzzlePos.add(bulletDir.clone().multiplyScalar(2.0));
-            
+
             const shell = new TankShell(this.scene, muzzlePos, bulletDir, 100.0, (pos, norm, obj) => {
                 this.createExplosion(pos, 5.0); // Optimized scale from 8.0
                 this.createImpact(pos, norm || new THREE.Vector3(0, 1, 0), 'spark', 6.0, obj); // Optimized scale from 15.0
 
-                this.applyAreaDamage(pos, 15.0, 1.0);
+                this.applyAreaDamage(pos, 15.0, 1.0, obj);
             });
 
             if (hits.length > 0) {
@@ -829,7 +893,7 @@ export class WeaponManager {
             }
 
             this.tankShells.push(shell); // We can reuse the tankShells array for update loop
-            
+
             return; // Skip hitscan effects
         }
 
@@ -840,7 +904,7 @@ export class WeaponManager {
         if (hits.length > 0) {
             const hit = hits[0];
             const normal = hit.face ? hit.face.normal.clone().applyQuaternion(hit.object.quaternion) : new THREE.Vector3(0, 1, 0);
-            
+
             // Type of impact
             let type = 'spark';
             if (this.isRemotePlayer(hit.object)) type = 'blood';
@@ -870,7 +934,7 @@ export class WeaponManager {
             // --- TRASH CAN DESTRUCTION ---
             let trashCan = null;
             let temp = hit.object;
-            while(temp) {
+            while (temp) {
                 if (temp.userData && temp.userData.isTrashCan) {
                     trashCan = temp;
                     break;
@@ -883,11 +947,11 @@ export class WeaponManager {
                 const dmg = (this.currentWeaponType === 'pistol') ? 1 : 5;
                 trashCan.userData.hp -= dmg;
                 console.log(`Trash Can HP: ${trashCan.userData.hp}`);
-                
+
                 if (trashCan.userData.hp <= 0) {
                     // NO EXPLOSION for trash cans as per user request
                     if (trashCan.parent) trashCan.parent.remove(trashCan);
-                    
+
                     // --- CRITICAL: PHYSICS CLEANUP ---
                     if (this.characterController) {
                         this.characterController.colliders = this.characterController.colliders.filter(c => c !== trashCan);
@@ -898,7 +962,7 @@ export class WeaponManager {
                     }
                 }
             }
-            
+
             // Network Hit
             if (this.networkManager) {
                 this.networkManager.sendHit(hit.point, type, impactScale);
@@ -1009,7 +1073,9 @@ export class WeaponManager {
             }
         });
         const hits = ray.intersectObjects(targets, false);
-        const hitPoint = hits.length > 0 ? hits[0].point : targetPoint;
+        // Ignore hits too close to the helicopter camera itself to prevent self-collision
+        const validHit = hits.find(h => h.distance > 15);
+        const hitPoint = validHit ? validHit.point : targetPoint;
 
         // Homing Target Detection (Lock-On)
         let lockedVehicle = null;
@@ -1060,7 +1126,7 @@ export class WeaponManager {
             if (vehManager) {
                 const affectedVehicles = new Set();
                 const worldPos = new THREE.Vector3();
-                
+
                 this.scene.traverse(c => {
                     if (c.isMesh) {
                         c.getWorldPosition(worldPos);
@@ -1092,13 +1158,18 @@ export class WeaponManager {
         this.tankShells.push(missile); // Use same update loop
 
         if (this.soundManager) this.soundManager.playTankShot(); // Reuse heavy sound
+
+        // Network Sync for Helicopter Missile
+        if (this.networkManager) {
+            this.networkManager.sendShoot(spawnPos, missileDir, 'helicopter_missile');
+        }
     }
 
     createImpact(point, normal, type = 'spark', scale = 1.0) {
         const baseMat = type === 'blood' ? this._bloodMat : this._sparkMat;
 
         // 1. SPARKS / PARTICLES
-        const sparkCount = 2 * scale; 
+        const sparkCount = 2 * scale;
         for (let i = 0; i < sparkCount; i++) {
             const pMat = baseMat.clone();
             const p = new THREE.Mesh(this._sparkGeom, pMat);
@@ -1164,11 +1235,11 @@ export class WeaponManager {
 
             const hole = new THREE.Mesh(holeGeom, holeMat);
             hole.userData.type = 'impact_part';
-            
+
             // Initial positioning
             hole.position.copy(point).add(normal.clone().multiplyScalar(0.01));
             hole.lookAt(point.clone().add(normal));
-            
+
             // Parenting logic: Follow the object!
             if (arguments[4] && arguments[4].isMesh) {
                 const object = arguments[4];
@@ -1332,14 +1403,199 @@ export class WeaponManager {
             if (!shell.alive) this.tankShells.splice(i, 1);
         }
 
+        // --- MISSILE WARNING SYSTEM & RADAR ---
+        let incomingThreat = null;
+        let minThreatTime = 999;
+        
+        // Filter dead sniper bullets in real-time
+        if (this.sniperBullets) {
+            this.sniperBullets = this.sniperBullets.filter(b => b.alive);
+        }
+
+        if (this.testMissileActive) {
+            // OPTION B: SIMULATION TEST MODE (Triggered with K key)
+            const orbitAngle = Date.now() * 0.001; // threat orbits player
+            // Create a fake threat position 80m away orbiting the camera
+            const testThreatPos = this.camera.position.clone().add(new THREE.Vector3(
+                Math.cos(orbitAngle) * 80,
+                0,
+                Math.sin(orbitAngle) * 80
+            ));
+            incomingThreat = {
+                position: testThreatPos,
+                direction: new THREE.Vector3(0, 0, 1),
+                speed: 150,
+                isHomingOnMe: true
+            };
+            // Countdown oscillates from 3.99s down to 0.00s over a 4-second period
+            minThreatTime = Math.max(0.1, 4.0 - ((Date.now() * 0.001) % 4.0));
+        } else {
+            const isDriving = this.characterController && this.characterController.isDriving && this.characterController.vehicle;
+            if (isDriving) {
+                const playerPos = this.camera.position;
+                const myVehicle = this.characterController.vehicle;
+
+                // Collect all actual heavy projectile, sniper bullets, and explosive bomb threats in real-time
+                const threats = [];
+
+                // 1. Tank shells / Helicopter missiles
+                for (const shell of this.tankShells) {
+                    if (shell.alive) {
+                        threats.push({
+                            position: shell.position,
+                            direction: shell.direction,
+                            speed: shell.speed || 150,
+                            isHomingOnMe: (shell.targetVehicle && shell.targetVehicle === myVehicle)
+                        });
+                    }
+                }
+
+                // 1.5. Sniper bullets (dynamic threat mapping)
+                if (this.sniperBullets) {
+                    for (const bullet of this.sniperBullets) {
+                        if (bullet.alive) {
+                            threats.push({
+                                position: bullet.position,
+                                direction: bullet.direction,
+                                speed: bullet.speed || 350,
+                                isHomingOnMe: bullet.isHomingOnMe
+                            });
+                        }
+                    }
+                }
+
+                // 2. Bomber plane bombs
+                const world = this.characterController.world;
+                if (world && world.bomber && world.bomber.bombs) {
+                    for (const bomb of world.bomber.bombs) {
+                        if (bomb.alive && bomb.mesh) {
+                            threats.push({
+                                position: bomb.mesh.position,
+                                direction: bomb.velocity.clone().normalize(),
+                                speed: bomb.velocity.length(),
+                                isHomingOnMe: false
+                            });
+                        }
+                    }
+                }
+
+                // Iterate over all active threats to find the most imminent threat heading for our vehicle
+                for (const threat of threats) {
+                    const dist = threat.position.distanceTo(playerPos);
+                    const toPlayer = playerPos.clone().sub(threat.position).normalize();
+                    const dot = threat.direction.dot(toPlayer);
+
+                    const isHomingOnMe = threat.isHomingOnMe;
+
+                    // CRITICAL WARNING (Max Range 300m)
+                    if (dist < 300 && (isHomingOnMe || dot > 0.9)) {
+                        // Make sure the projectile is flying towards us
+                        if (dot > 0 || isHomingOnMe) {
+                            const speed = threat.speed || 150;
+                            const timeToImpact = dist / Math.max(1, speed);
+                            
+                            // Warn if impact is < 4.0 seconds
+                            if (timeToImpact < 4.0 && timeToImpact < minThreatTime) {
+                                minThreatTime = timeToImpact;
+                                incomingThreat = threat;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        if (incomingThreat) {
+            this.warningActiveTimer = 1.5; // Reset HUD display cooldown
+            
+            // Calculate relative direction and transform into camera local space for dynamic 3D-radar projection
+            const toPlayer = this.camera.position;
+            const toThreat = incomingThreat.position.clone().sub(toPlayer).normalize();
+            const localThreat = toThreat.clone().applyQuaternion(this.camera.quaternion.clone().invert());
+            
+            // Exact yaw angle relative to camera view (-z is straight forward)
+            this.lastThreatAngle = Math.atan2(localThreat.x, -localThreat.z);
+            this.lastThreatTime = minThreatTime;
+
+            // Audio beep rate (faster as it gets closer: 0.8s max, 0.08s min)
+            const beepRate = Math.max(0.08, minThreatTime * 0.25); 
+            this.playWarningBeep(beepRate);
+        } else {
+            // Decrement active cooldown timer
+            if (this.warningActiveTimer > 0) {
+                this.warningActiveTimer -= dt;
+            }
+        }
+
+        // Render Warning HUD under active threat or cooldown period
+        if (this.missileWarningContainer) {
+            if (incomingThreat || this.warningActiveTimer > 0) {
+                this.missileWarningContainer.style.display = 'block';
+
+                const myVehicle = this.characterController.vehicle;
+                const timeEl = document.getElementById('missile-time');
+                const radarRing = document.getElementById('missile-radar-ring');
+                const radarBlip = document.getElementById('missile-radar-blip');
+
+                // If cooldown active but no active threat, show 0.00s
+                const displayTime = incomingThreat ? this.lastThreatTime : 0.00;
+
+                if ((myVehicle && myVehicle.type === 'motorcycle') || (this.testMissileActive && !myVehicle)) {
+                    // --- MOTORCYCLE VR VISOR HUD ---
+                    this.missileWarningContainer.style.color = '#ffaa00';
+                    this.missileWarningContainer.style.textShadow = '0 0 8px rgba(255, 170, 0, 0.7)';
+
+                    if (timeEl) {
+                        timeEl.style.color = '#ff3b30'; // Warning red countdown for urgent impact
+                        timeEl.style.textShadow = '0 0 10px #ff3b30';
+                        timeEl.innerText = `IMPACTO: ${displayTime.toFixed(2)}s`;
+                    }
+                    if (radarRing) {
+                        radarRing.style.borderColor = 'rgba(255, 170, 0, 0.45)';
+                        radarRing.style.boxShadow = 'inset 0 0 25px rgba(255, 170, 0, 0.08)';
+                    }
+                    if (radarBlip) {
+                        radarBlip.style.color = '#ff3b30';
+                        radarBlip.style.textShadow = '0 0 12px #ff3b30';
+                    }
+                } else {
+                    // --- TANQUE / HELICÓPTERO / OTROS VEHÍCULOS HUD ---
+                    this.missileWarningContainer.style.color = '#ffaa00';
+                    this.missileWarningContainer.style.textShadow = '0 0 8px rgba(255, 170, 0, 0.7)';
+
+                    if (timeEl) {
+                        timeEl.style.color = '#ff3333';
+                        timeEl.style.textShadow = '0 0 10px #ff3333';
+                        timeEl.innerText = `COLISIÓN: ${displayTime.toFixed(2)}s`;
+                    }
+                    if (radarRing) {
+                        radarRing.style.borderColor = 'rgba(255, 170, 0, 0.45)';
+                        radarRing.style.boxShadow = 'inset 0 0 25px rgba(255, 170, 0, 0.08)';
+                    }
+                    if (radarBlip) {
+                        radarBlip.style.color = '#ff3333'; // Deep warning red for heavy vehicle target locking
+                        radarBlip.style.textShadow = '0 0 12px #ff3333';
+                    }
+                }
+
+                // Update circular radar blip positioning (translates to outer perimeter dynamically)
+                if (radarBlip) {
+                    radarBlip.style.transform = `rotate(${this.lastThreatAngle}rad) translate(0, -95px) rotate(${-this.lastThreatAngle}rad)`;
+                }
+            } else {
+                this.missileWarningContainer.style.display = 'none';
+            }
+        }
+        // ----------------------------------------------------------
+
         // Update Laser Sight
         if (this.laserActive && this.currentWeaponMesh && this.laserMesh.visible) {
             let start;
-            
+
             // Check if we are in First Person or Aiming (ADS)
             const inFirstPerson = (this.characterController && this.characterController.cameraDistance < 0.8);
             const isAiming = (this.characterController && this.characterController.keys && this.characterController.keys.ads);
-            
+
             if (inFirstPerson || isAiming) {
                 // ADS Mode (Tricks the brain)
                 const camPos = this.camera.position.clone();
@@ -1355,10 +1611,10 @@ export class WeaponManager {
             } else {
                 // Hip Fire / 3rd Person
                 // Corrected AWP/Rifle Muzzle: +X orientation, approx 0.85 local
-                const localMuzzle = this.currentWeaponType === 'pistol' ? 
-                    new THREE.Vector3(0, 0.1, -0.4) : 
+                const localMuzzle = this.currentWeaponType === 'pistol' ?
+                    new THREE.Vector3(0, 0.1, -0.4) :
                     new THREE.Vector3(0.85, 0.05, 0); // Muzzle at the tip of the barrel
-                
+
                 this.currentWeaponMesh.updateMatrixWorld(true);
                 start = this.currentWeaponMesh.localToWorld(localMuzzle.clone());
             }
@@ -1388,7 +1644,7 @@ export class WeaponManager {
         }
 
         this.timeSinceLastShot += dt;
-        
+
         // THROTTLE PERFORMANCE-HEAVY UPDATES
         this.rangeFinderThrottle++;
         if (this.rangeFinderThrottle % 5 === 0) {
@@ -1536,18 +1792,18 @@ export class WeaponManager {
 
     reload() {
         if (!this.currentWeaponType || this.isReloading) return;
-        
+
         if (this.currentWeaponType === 'bazooka') {
             console.log("Bazooka must be reloaded by picking up ammo on the map!");
             return; // Bazooka uses pickups, no manual reload
         }
-        
+
         // Don't reload if already full
         if (this.ammo[this.currentWeaponType] === this.maxAmmo[this.currentWeaponType]) return;
 
         this.isReloading = true;
         this.isFiring = false;
-        
+
         console.log("WeaponManager: Reloading...");
         this.updateAmmoUI(); // Shows "RELOADING..."
 
@@ -1589,5 +1845,225 @@ export class WeaponManager {
         // Remove mesh
         this.scene.remove(canister.mesh);
         this.canisters = this.canisters.filter(c => c !== canister);
+    }
+
+    stopFiring() {
+        this.isFiring = false;
+    }
+
+    createMissileWarningUI() {
+        this.missileWarningContainer = document.createElement('div');
+        this.missileWarningContainer.id = 'missile-warning-hud';
+        this.missileWarningContainer.style.position = 'absolute';
+        this.missileWarningContainer.style.top = '40%';
+        this.missileWarningContainer.style.left = '50%';
+        this.missileWarningContainer.style.transform = 'translate(-50%, -50%)';
+        this.missileWarningContainer.style.color = '#ffaa00';
+        this.missileWarningContainer.style.fontFamily = "'Courier New', 'monospace'";
+        this.missileWarningContainer.style.textAlign = 'center';
+        this.missileWarningContainer.style.textShadow = '0 0 8px rgba(255, 170, 0, 0.7)';
+        this.missileWarningContainer.style.pointerEvents = 'none';
+        this.missileWarningContainer.style.display = 'none';
+        this.missileWarningContainer.style.zIndex = '10000';
+        this.missileWarningContainer.style.width = '600px';
+        this.missileWarningContainer.style.height = '300px';
+        this.missileWarningContainer.style.background = 'transparent';
+        this.missileWarningContainer.style.border = 'none';
+        this.missileWarningContainer.style.boxShadow = 'none';
+        this.missileWarningContainer.style.backdropFilter = 'none';
+
+        this.missileWarningContainer.innerHTML = `
+            <!-- Left Curved Arch Frame -->
+            <div style="position: absolute; left: 40px; top: 40px; bottom: 40px; width: 60px; border-left: 2px solid rgba(255, 170, 0, 0.6); border-top: 2px solid rgba(255, 170, 0, 0.2); border-bottom: 2px solid rgba(255, 170, 0, 0.2); border-radius: 60px 0 0 60px; display: flex; flex-direction: column; justify-content: space-around; padding-left: 15px; text-shadow: 0 0 5px rgba(255, 170, 0, 0.5);">
+                <div style="font-size: 9px; color: rgba(255, 170, 0, 0.5); font-weight: bold; text-align: left;">LOCK [OK]</div>
+                <div style="font-size: 9px; color: rgba(255, 170, 0, 0.5); font-weight: bold; text-align: left;">RADAR: ON</div>
+                <div style="font-size: 9px; color: rgba(255, 170, 0, 0.5); font-weight: bold; text-align: left;">HMD: ACT</div>
+            </div>
+
+            <!-- Right Curved Arch Frame -->
+            <div style="position: absolute; right: 40px; top: 40px; bottom: 40px; width: 60px; border-right: 2px solid rgba(255, 170, 0, 0.6); border-top: 2px solid rgba(255, 170, 0, 0.2); border-bottom: 2px solid rgba(255, 170, 0, 0.2); border-radius: 0 60px 60px 0; display: flex; flex-direction: column; justify-content: space-around; align-items: flex-end; padding-right: 15px; text-shadow: 0 0 5px rgba(255, 170, 0, 0.5);">
+                <div style="font-size: 9px; color: rgba(255, 170, 0, 0.5); font-weight: bold; text-align: right;">SYS.ALERT</div>
+                <div style="font-size: 9px; color: rgba(255, 170, 0, 0.5); font-weight: bold; text-align: right;">TGT: MISSL</div>
+                <div style="font-size: 9px; color: rgba(255, 170, 0, 0.5); font-weight: bold; text-align: right;">DEF: STANDBY</div>
+            </div>
+
+            <!-- Left Dynamic Information Panel -->
+            <div style="position: absolute; left: 140px; top: 100px; text-align: left; font-size: 10px; color: rgba(255, 170, 0, 0.85); line-height: 16px; text-shadow: 0 0 6px rgba(255, 170, 0, 0.6);">
+                <div>LOCK-ON ACTIVE</div>
+                <div>CLASS: THREAT</div>
+                <div style="color: #ff3b30; font-weight: bold;">⚠️ WARNING ⚠️</div>
+            </div>
+
+            <!-- Right Dynamic Information Panel & Elegant Timer -->
+            <div style="position: absolute; right: 140px; top: 100px; text-align: left; font-size: 10px; color: rgba(255, 170, 0, 0.85); line-height: 16px; text-shadow: 0 0 6px rgba(255, 170, 0, 0.6);">
+                <div id="missile-time" style="color: #ff3b30; text-shadow: 0 0 10px #ff3b30; font-weight: bold; font-size: 12px;">IMPACTO: --s</div>
+                <div>SPEED: H-VEL</div>
+                <div>FLARES: RDY</div>
+            </div>
+
+            <!-- Center Target Compass / Radar Ring -->
+            <div id="missile-radar-ring" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 220px; height: 220px; border: 1.5px dashed rgba(255, 170, 0, 0.35); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: inset 0 0 25px rgba(255, 170, 0, 0.08); transition: border-color 0.3s ease;">
+                
+                <!-- Inner targeting reticle with axis ticks -->
+                <div style="width: 100px; height: 100px; border: 1.5px solid rgba(255, 170, 0, 0.5); border-radius: 50%; position: relative; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 10px rgba(255, 170, 0, 0.1);">
+                    <!-- Horizontal tick lines -->
+                    <div style="width: 12px; height: 1.5px; background: rgba(255,170,0,0.7); position: absolute; left: 0;"></div>
+                    <div style="width: 12px; height: 1.5px; background: rgba(255,170,0,0.7); position: absolute; right: 0;"></div>
+                    <!-- Vertical tick lines -->
+                    <div style="width: 1.5px; height: 12px; background: rgba(255,170,0,0.7); position: absolute; top: 0;"></div>
+                    <div style="width: 1.5px; height: 12px; background: rgba(255,170,0,0.7); position: absolute; bottom: 0;"></div>
+                    
+                    <!-- Center indicator (goggles lock target crosshair center) -->
+                    <div style="font-size: 16px; color: rgba(255, 170, 0, 0.9); font-weight: bold; text-shadow: 0 0 8px #ffaa00;">+</div>
+                </div>
+
+                <!-- Center player icon representing view forward -->
+                <div style="position: absolute; font-size: 20px; color: rgba(255, 170, 0, 0.9); text-shadow: 0 0 8px rgba(255,170,0,0.8); top: calc(50% - 13px); left: calc(50% - 10px);">▲</div>
+                
+                <!-- Orbiter warning blip (automatically points to center player, rotating in 360 degrees) -->
+                <div id="missile-radar-blip" style="position: absolute; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; font-size: 22px; color: #ff3b30; text-shadow: 0 0 12px #ff3b30; animation: blinker 0.25s linear infinite; transform-origin: center; z-index: 10;">▼</div>
+            </div>
+        `;
+        document.body.appendChild(this.missileWarningContainer);
+
+        // Add blinker animation
+        if (!document.getElementById('missile-warning-style')) {
+            const style = document.createElement('style');
+            style.id = 'missile-warning-style';
+            style.innerHTML = `
+                @keyframes blinker {
+                    0% { opacity: 1.0; transform: scale(1.0); }
+                    50% { opacity: 0.2; transform: scale(1.05); }
+                    100% { opacity: 1.0; transform: scale(1.0); }
+                }
+            `;
+            document.head.appendChild(style);
+        }
+    }
+
+    playWarningBeep(rate) {
+        if (!this.audioCtx) {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            if (!AudioContext) return;
+            this.audioCtx = new AudioContext();
+        }
+
+        // Safety: ensure context is running
+        if (this.audioCtx.state === 'suspended') {
+            this.audioCtx.resume();
+            return; // Wait for next update to play sound
+        }
+
+        const now = this.audioCtx.currentTime;
+        if (now - (this.lastBeepTime || 0) < rate) return;
+        this.lastBeepTime = now;
+
+        const osc = this.audioCtx.createOscillator();
+        const gain = this.audioCtx.createGain();
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(1200, now); // Higher pitch for alarm
+
+        gain.gain.setValueAtTime(0.3, now); // Slightly louder
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1); // Fast decay
+
+        osc.connect(gain);
+        gain.connect(this.audioCtx.destination);
+
+        osc.start(now);
+        osc.stop(now + 0.1);
+    }
+
+    spawnRemoteProjectile(origin, direction, weaponType, shooterId) {
+        const start = new THREE.Vector3(origin.x, origin.y, origin.z);
+        const dir = new THREE.Vector3(direction.x, direction.y, direction.z);
+
+        if (weaponType === 'tank') {
+            const shell = new TankShell(this.scene, start, dir, 150.0, (pos, norm, obj) => {
+                this.createExplosion(pos, 5.0);
+                this.createImpact(pos, norm || new THREE.Vector3(0, 1, 0), 'spark', 5.0, obj);
+                this.applyAreaDamage(pos, 15.0, 1.0, obj);
+            });
+            const raycaster = new THREE.Raycaster(start, dir);
+            raycaster.far = 2000;
+            const targets = [];
+            this.scene.traverse(c => {
+                if (c.isMesh && !this.isSelf(c) && c.visible) {
+                    if (c.userData.type === 'bullet' || c.userData.type === 'impact_part') return;
+                    targets.push(c);
+                }
+            });
+            const hits = raycaster.intersectObjects(targets, false);
+            if (hits.length > 0) {
+                shell.hitPoint = hits[0].point;
+                const worldNormal = hits[0].face ? hits[0].face.normal.clone().transformDirection(hits[0].object.matrixWorld) : new THREE.Vector3(0, 1, 0);
+                shell.hitNormal = worldNormal;
+                shell.hitObject = hits[0].object;
+            } else {
+                shell.hitPoint = start.clone().add(dir.clone().multiplyScalar(500));
+            }
+            shell.shooterId = shooterId;
+            if (this.characterController && this.characterController.vehicle) {
+                shell.targetVehicle = this.characterController.vehicle;
+            }
+            this.tankShells.push(shell);
+        } else if (weaponType === 'bazooka') {
+            const shell = new TankShell(this.scene, start, dir, 150.0, (pos, norm, obj) => {
+                this.createExplosion(pos, 3.5);
+                this.createImpact(pos, norm || new THREE.Vector3(0, 1, 0), 'spark', 3.5, obj);
+                this.applyAreaDamage(pos, 10.0, 1.0, obj);
+            });
+            const raycaster = new THREE.Raycaster(start, dir);
+            raycaster.far = 2000;
+            const targets = [];
+            this.scene.traverse(c => {
+                if (c.isMesh && !this.isSelf(c) && c.visible) {
+                    if (c.userData.type === 'bullet' || c.userData.type === 'impact_part') return;
+                    targets.push(c);
+                }
+            });
+            const hits = raycaster.intersectObjects(targets, false);
+            if (hits.length > 0) {
+                shell.hitPoint = hits[0].point;
+                const worldNormal = hits[0].face ? hits[0].face.normal.clone().transformDirection(hits[0].object.matrixWorld) : new THREE.Vector3(0, 1, 0);
+                shell.hitNormal = worldNormal;
+                shell.hitObject = hits[0].object;
+            } else {
+                shell.hitPoint = start.clone().add(dir.clone().multiplyScalar(500));
+            }
+            shell.shooterId = shooterId;
+            if (this.characterController && this.characterController.vehicle) {
+                shell.targetVehicle = this.characterController.vehicle;
+            }
+            this.tankShells.push(shell);
+        } else if (weaponType === 'helicopter_missile') {
+            const missile = new HeliMissile(this.scene, start, dir, 180.0, (pos, norm, obj) => {
+                this.createExplosion(pos, 6.0);
+                this.createImpact(pos, norm || new THREE.Vector3(0, 1, 0), 'spark', 5.0, obj);
+                this.applyAreaDamage(pos, 15.0, 1.0, obj);
+            });
+            const raycaster = new THREE.Raycaster(start, dir);
+            raycaster.far = 2000;
+            const targets = [];
+            this.scene.traverse(c => {
+                if (c.isMesh && !this.isSelf(c) && c.visible) {
+                    if (c.userData.type === 'bullet' || c.userData.type === 'impact_part') return;
+                    targets.push(c);
+                }
+            });
+            const hits = raycaster.intersectObjects(targets, false);
+            if (hits.length > 0) {
+                missile.hitPoint = hits[0].point;
+                const worldNormal = hits[0].face ? hits[0].face.normal.clone().transformDirection(hits[0].object.matrixWorld) : new THREE.Vector3(0, 1, 0);
+                missile.hitNormal = worldNormal;
+                missile.hitObject = hits[0].object;
+            } else {
+                missile.hitPoint = start.clone().add(dir.clone().multiplyScalar(500));
+            }
+            missile.shooterId = shooterId;
+            if (this.characterController && this.characterController.vehicle) {
+                missile.targetVehicle = this.characterController.vehicle;
+            }
+            this.tankShells.push(missile);
+        }
     }
 }

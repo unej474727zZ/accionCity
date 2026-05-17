@@ -28,6 +28,7 @@ export class Minimap {
         this.isFullMap = false; 
         this.originalSize = 200;
         this._tempVec = new THREE.Vector3();
+        this._worldPos = new THREE.Vector3();
     }
 
     toggleUI() {
@@ -141,26 +142,61 @@ export class Minimap {
             });
         }
 
+        // 4. MISSILES / SHELLS (Threat Radar)
+        if (window.weaponManager && window.weaponManager.tankShells) {
+            const v = character.vehicle;
+            const vPos = v ? v.mesh.position : this._worldPos;
+
+            window.weaponManager.tankShells.forEach(shell => {
+                if (!shell.mesh) return;
+                const dist = shell.mesh.position.distanceTo(vPos);
+                
+                // Only show projectiles within 500m on map
+                if (dist < 500) {
+                    const pos = this.projectToCanvas(shell.mesh.position, activeCamera);
+                    if (pos.z < 1.0 && pos.x >= 0 && pos.x <= width && pos.y >= 0 && pos.y <= height) {
+                        // Trajectory check
+                        const toMe = vPos.clone().sub(shell.mesh.position).normalize();
+                        const forward = shell.direction || new THREE.Vector3(0,0,1).applyQuaternion(shell.mesh.quaternion);
+                        const dot = forward.dot(toMe);
+                        const isThreat = (dot > 0.8 || (v && shell.targetVehicle === v));
+
+                        ctx.fillStyle = isThreat ? '#ff0000' : '#ffff00';
+                        ctx.beginPath();
+                        ctx.arc(pos.x, pos.y, isThreat ? 4 : 2, 0, Math.PI * 2);
+                        ctx.fill();
+
+                        if (isThreat) {
+                            // Direction vector on map
+                            const screenDir = this.projectToCanvas(shell.mesh.position.clone().add(forward.clone().multiplyScalar(10)), activeCamera);
+                            ctx.strokeStyle = '#ff0000';
+                            ctx.lineWidth = 2;
+                            ctx.beginPath();
+                            ctx.moveTo(pos.x, pos.y);
+                            ctx.lineTo(screenDir.x, screenDir.y);
+                            ctx.stroke();
+                        }
+                    }
+                }
+            });
+        }
+
         // 5. JUGADOR LOCAL (Flecha Blanca)
         const playerMesh = character.mesh;
-        const worldPos = new THREE.Vector3();
-        playerMesh.getWorldPosition(worldPos); // Extraer posición real global
+        playerMesh.getWorldPosition(this._worldPos); 
         
-        const footPos = this.projectToCanvas(worldPos, activeCamera);
+        const footPos = this.projectToCanvas(this._worldPos, activeCamera);
         if (footPos.z < 1.0) {
             ctx.save();
             ctx.translate(footPos.x, footPos.y);
             
-            // Si está conduciendo un tanque/heli, ocultamos la flecha blanca
-            // (porque el icono del vehículo ya muestra dónde estamos)
-            // Si es moto, sí la mostramos para saber hacia dónde miramos.
             const hidePlayerIcon = character.isDriving && character.vehicle && character.vehicle.type !== 'motorcycle';
             
             if (!hidePlayerIcon) {
                 let displayYaw = character.yaw;
                 ctx.rotate(-displayYaw + Math.PI); 
                 
-                ctx.fillStyle = character.isDriving ? '#00ffff' : '#ffffff'; // Cian si conduce moto
+                ctx.fillStyle = character.isDriving ? '#00ffff' : '#ffffff'; 
                 ctx.beginPath();
                 ctx.moveTo(0, -10);
                 ctx.lineTo(8, 8);

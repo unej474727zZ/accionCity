@@ -1,13 +1,20 @@
+window.gameStarted = false;
 import { World } from './src/World.js';
 
 const app = document.getElementById('app');
 const world = new World(app);
 
 window.startGame = () => {
+    window.gameStarted = true;
     // Play intro audio
-    const audio = new Audio('sounds/intro.mp3?v=' + Date.now());
-    audio.volume = 0.6;
-    audio.play().catch(e => console.log("Audio play failed", e));
+    window.introAudio = new Audio('sounds/intro.mp3?v=' + Date.now());
+    window.introAudio.volume = 0.6;
+    window.introAudio.play().catch(e => console.log("Audio play failed", e));
+    
+    // Unlock Three.js audio context using the user interaction!
+    if (world && world.soundManager) {
+        world.soundManager.resumeContext();
+    }
     
     const startBtn = document.getElementById('start-game-btn');
     const loadingText = document.getElementById('loading-text');

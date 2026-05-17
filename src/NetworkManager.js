@@ -99,7 +99,8 @@ export class NetworkManager {
                 pitch: pitch,
                 state: state,
                 weaponType: weaponType,
-                firing: firing
+                firing: firing,
+                vehicleType: arguments[6] || null
             });
         }
     }

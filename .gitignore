@@ -2,3 +2,10 @@
 /shelf/
 /workspace.xml
 node_modules/
+
+# Videos and Media
+*.webm
+*.mp4
+*.avi
+*.mp3
+*.wav

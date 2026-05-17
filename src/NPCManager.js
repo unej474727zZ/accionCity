@@ -10,7 +10,7 @@ export class NPCManager {
     }
 
     initParkedCars(count) {
-        const carKeys = ['car1', 'car2', 'car3', 'tank'];
+        const carKeys = ['car1', 'casco', 'car3', 'tank'];
         const availableCars = carKeys.filter(k => this.assets[k]);
 
         if (availableCars.length === 0) return;

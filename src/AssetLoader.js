@@ -19,7 +19,7 @@ export class AssetLoader {
       { name: 'firing', url: 'models/FiringRifle.glb' },
       { name: 'shooting', url: 'models/shooting.glb' },
       { name: 'car1', url: 'models/car1.glb' },
-      { name: 'car2', url: 'models/car2.glb' },
+      { name: 'casco', url: 'models/car2.glb' },
       { name: 'car3', url: 'models/car3.glb' },
       { name: 'motorcycle', url: 'models/motorcycle.glb' },
       { name: 'tank', url: 'models/tank.glb' },
@@ -46,19 +46,32 @@ export class AssetLoader {
     let loadedCount = 0;
     const total = this.modelsToLoad.length;
 
-    const loadPromises = this.modelsToLoad.map(item => {
+    const loadWithRetry = (item, retries = 2) => {
       return new Promise((resolve) => {
-        this.loader.load(item.url, (gltf) => {
+        // Añadimos un cache-buster si es un reintento para forzar una conexión nueva
+        const url = retries < 2 ? `${item.url}?retry=${Date.now()}` : item.url;
+        
+        this.loader.load(url, (gltf) => {
           this.assets[item.name] = gltf;
           loadedCount++;
           if (loadingEl) loadingEl.innerText = `Cargando Assets: ${Math.round((loadedCount/total)*100)}%`;
           resolve();
         }, undefined, (err) => {
-          console.error(`Error loading ${item.name}:`, err);
-          resolve();
+          if (retries > 0) {
+            console.warn(`[REINTENTO] Fallo al cargar ${item.name}. Intentos restantes: ${retries}. Error:`, err);
+            // Reintentar tras un breve delay
+            setTimeout(() => {
+              loadWithRetry(item, retries - 1).then(resolve);
+            }, 500);
+          } else {
+            console.error(`Error definitivo cargando ${item.name}:`, err);
+            resolve(); // Resolvemos de todos modos para no bloquear el juego
+          }
         });
       });
-    });
+    };
+
+    const loadPromises = this.modelsToLoad.map(item => loadWithRetry(item, 2));
 
     await Promise.all(loadPromises);
     if (loadingEl) loadingEl.innerText = "Generando Ciudad...";

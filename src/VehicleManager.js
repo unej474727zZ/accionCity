@@ -296,6 +296,34 @@ export class VehicleManager {
             if (npcCar) return npcCar;
         }
 
+        // Check in Dynamic NPCs
+        if (this.dynamicNPCs) {
+            const dynCar = this.dynamicNPCs.find(car => {
+                let temp = mesh;
+                while (temp) {
+                    if (temp === car) return true;
+                    temp = temp.parent;
+                }
+                return false;
+            });
+            if (dynCar) return dynCar;
+        }
+
+        // NEW: Check if it's a part of the city environment that looks like a vehicle
+        let temp = mesh;
+        while (temp) {
+            const n = temp.name ? temp.name.toLowerCase() : '';
+            // Match common vehicle names in GLTF models
+            if (n.includes('bus') || n.includes('car') || n.includes('van') || n.includes('truck') || n.includes('auto') || n.includes('veh') || n.includes('tank') || n.includes('transporter') || n.includes('wreck') || n.includes('zuk')) {
+                // If we found a match, but it's not the root scene itself
+                if (temp.parent && temp.parent !== this.scene) {
+                    return temp;
+                }
+            }
+            if (temp.parent === this.scene) break;
+            temp = temp.parent;
+        }
+
         return null;
     }
 
@@ -485,32 +513,26 @@ export class VehicleManager {
                     }
                 }
 
-                // ENGINE DETECTION (Object_7 front part)
-                if (isPistol) {
-                    if (hitMesh && hitMesh.name.toLowerCase().includes('object_7')) {
-                        // Check if hit is in the front half of the car
-                        const worldPos = hitMesh.getWorldPosition(new THREE.Vector3());
-                        // Simple check: we need the impact point, but we don't have it here.
-                        // Let's assume hitting Object_7 with a pistol requires ~30 shots if it's the engine.
-                        if (v.pistolHits === undefined) v.pistolHits = 0;
-                        v.pistolHits++;
-                        console.log(`🚗 NPC Engine Hit: ${v.pistolHits}/30`);
-                        if (v.pistolHits >= 30) this.crushNPC(v);
-                        else this.flashRed(v);
-                    }
-                    return; // NPC Cars don't explode from random pistol shots to the back
-                } else {
-                    // Logic for permanent red on NPC cars from Heli
-                    if (isHeli) {
-                        if (amount >= 0.9) v.stayRed = true;
-                        if (amount === 0.1) {
-                            if (v.heliHits === undefined) v.heliHits = 0;
-                            v.heliHits++;
-                            if (v.heliHits >= 5) v.stayRed = true;
-                        }
-                    }
-                    this.crushNPC(v); // Rifles/Missiles still 1-shot NPC cars
+                // TACTICAL urban cover: small arms (pistols, rifles, snipers) do not destroy NPC cars/buses
+                const isHeavyExplosive = (amount >= 0.5);
+
+                if (!isHeavyExplosive) {
+                    // Flash red to indicate hit visual feedback, but deflect bullet completely
+                    this.flashRed(v.mesh || v);
+                    console.log(`🛡️ NPC cover deflected bullet (amount: ${amount})`);
+                    return;
                 }
+
+                // Heavy weapons (Tank Shells, Bomber Bombs, Heli Missiles) destroy NPC cars/buses
+                if (isHeli) {
+                    if (amount >= 0.9) v.stayRed = true;
+                    if (amount === 0.1) {
+                        if (v.heliHits === undefined) v.heliHits = 0;
+                        v.heliHits++;
+                        if (v.heliHits >= 5) v.stayRed = true;
+                    }
+                }
+                this.crushNPC(v);
             }
             return;
         }
@@ -571,7 +593,8 @@ export class VehicleManager {
 
     crushNPC(car) {
         if (this.characterController.weaponManager) {
-            this.characterController.weaponManager.createExplosion(car.position, 2.0);
+            const worldPos = car.getWorldPosition(new THREE.Vector3());
+            this.characterController.weaponManager.createExplosion(worldPos, 2.0);
             if (this.characterController.weaponManager.soundManager) {
                 this.characterController.weaponManager.soundManager.playTankCrush();
             }
@@ -583,7 +606,27 @@ export class VehicleManager {
             const index = this.characterController.world.npcManager.cars.indexOf(car);
             if (index !== -1) this.characterController.world.npcManager.cars.splice(index, 1);
         }
-        this.scene.remove(car);
+
+        if (this.dynamicNPCs) {
+            const index = this.dynamicNPCs.indexOf(car);
+            if (index !== -1) this.dynamicNPCs.splice(index, 1);
+        }
+
+        // Cleanup from colliders to prevent invisible walls
+        if (this.characterController && this.characterController.colliders) {
+            const meshesToRemove = new Set();
+            car.traverse(c => meshesToRemove.add(c));
+            this.characterController.colliders = this.characterController.colliders.filter(c => !meshesToRemove.has(c));
+            if (this.characterController.world) {
+                this.characterController.world.updateRemoteColliders();
+            }
+        }
+
+        if (car.parent) {
+            car.parent.remove(car);
+        } else {
+            this.scene.remove(car);
+        }
     }
 
     pushVehicle(v, dir, force = 5.0) {
@@ -594,7 +637,20 @@ export class VehicleManager {
     }
 
     pushVehicleNPC(car, dir, force = 5.0) {
-        if (!car.pushVelocity) car.pushVelocity = new THREE.Vector3(0, 0, 0);
+        // Initialize dynamic physics state and extract from city mesh if needed
+        if (!car.isDynamicPhysics) {
+            car.isDynamicPhysics = true;
+            car.pushVelocity = new THREE.Vector3(0, 0, 0);
+            
+            // If it's a child of the city, detach it to the scene to maintain physics consistency
+            if (car.parent !== this.scene) {
+                this.scene.attach(car); 
+            }
+            
+            if (!this.dynamicNPCs) this.dynamicNPCs = [];
+            if (!this.dynamicNPCs.includes(car)) this.dynamicNPCs.push(car);
+        }
+        
         const impulse = dir.clone().normalize().multiplyScalar(force);
         car.pushVelocity.add(impulse);
     }
@@ -671,52 +727,71 @@ export class VehicleManager {
         }
 
         // 1.5 UPDATE NPC CARS (Smoke & Pushing)
+        const updateNPCPhysics = (car) => {
+            if (!car) return;
+            // Apply Pushing and Gravity ONLY when moving
+            let isMoving = false;
+            if (car.pushVelocity && car.pushVelocity.length() > 0.01) {
+                const moveDir = car.pushVelocity.clone().normalize();
+                const ray = new THREE.Raycaster(car.position.clone().add(new THREE.Vector3(0, 1.0, 0)), moveDir);
+                ray.far = 1.5;
+                const hits = ray.intersectObjects(this.characterController.colliders, true);
+                
+                // Filter hits to ignore the car itself
+                const obstacleHits = hits.filter(h => {
+                    let p = h.object;
+                    while(p) {
+                        if (p === car) return false;
+                        p = p.parent;
+                    }
+                    return true;
+                });
+                
+                if (obstacleHits.length === 0) {
+                    car.position.add(car.pushVelocity.clone().multiplyScalar(dt));
+                } else {
+                    car.pushVelocity.set(0, 0, 0);
+                }
+                car.pushVelocity.multiplyScalar(Math.max(0, 1.0 - dt * 4.0));
+                isMoving = true;
+
+                // NPC Collision with canisters
+                checkVehicleAgainstCanisters(car, () => this.crushNPC(car));
+            }
+
+            // PERFORMANCE FIX: Only raycast the scenery IF the car is actively being pushed or is currently in the air!
+            if (isMoving || car.position.y > 0.5) {
+                const groundRay = new THREE.Raycaster(car.position.clone().add(new THREE.Vector3(0, 2, 0)), new THREE.Vector3(0, -1, 0));
+                const groundHits = groundRay.intersectObjects(this.characterController.colliders, true);
+                if (groundHits.length > 0 && Math.abs(car.position.y - groundHits[0].point.y) < 3.0) {
+                    car.position.y = groundHits[0].point.y;
+                } else {
+                    car.position.y -= 15.0 * dt; // Fall
+                    if (car.position.y < 0) car.position.y = 0;
+                }
+            }
+            
+            // Apply Smoke for damaged NPC tanks
+            if (car.health === 1 || car.isSmoking || car.pistolHits > 15) {
+                this.spawnSmokeParticle(car.position);
+            }
+            
+            // Stop NPC car if punctured
+            if (car.isPunctured) {
+                if (!car.pushVelocity) car.pushVelocity = new THREE.Vector3();
+            }
+        };
+
         if (this.characterController.world && this.characterController.world.npcManager) {
             const npcCars = this.characterController.world.npcManager.cars;
             for (const car of npcCars) {
-                if (!car) continue;
-                // Apply Pushing and Gravity ONLY when moving
-                let isMoving = false;
-                if (car.pushVelocity && car.pushVelocity.length() > 0.01) {
-                    const moveDir = car.pushVelocity.clone().normalize();
-                    const ray = new THREE.Raycaster(car.position.clone().add(new THREE.Vector3(0, 1.0, 0)), moveDir);
-                    ray.far = 1.5;
-                    const hits = ray.intersectObjects(this.characterController.colliders, true);
-                    
-                    if (hits.length === 0) {
-                        car.position.add(car.pushVelocity.clone().multiplyScalar(dt));
-                    } else {
-                        car.pushVelocity.set(0, 0, 0);
-                    }
-                    car.pushVelocity.multiplyScalar(Math.max(0, 1.0 - dt * 4.0));
-                    isMoving = true;
-
-                    // NPC Collision with canisters
-                    checkVehicleAgainstCanisters(car, () => this.crushNPC(car));
-                }
-
-                // PERFORMANCE FIX: Only raycast the scenery IF the car is actively being pushed or is currently in the air!
-                // This eliminates 50 heavy raycasts per frame, instantly restoring 60 FPS.
-                if (isMoving || car.position.y > 0.5) {
-                    const groundRay = new THREE.Raycaster(car.position.clone().add(new THREE.Vector3(0, 2, 0)), new THREE.Vector3(0, -1, 0));
-                    const groundHits = groundRay.intersectObjects(this.characterController.colliders, true);
-                    if (groundHits.length > 0 && Math.abs(car.position.y - groundHits[0].point.y) < 3.0) {
-                        car.position.y = groundHits[0].point.y;
-                    } else {
-                        car.position.y -= 15.0 * dt; // Fall
-                        if (car.position.y < 0) car.position.y = 0;
-                    }
-                }
-                // Apply Smoke for damaged NPC tanks
-                if (car.health === 1 || car.isSmoking || car.pistolHits > 15) {
-                    this.spawnSmokeParticle(car.position);
-                }
-                
-                // Stop NPC car if punctured
-                if (car.isPunctured) {
-                    if (!car.pushVelocity) car.pushVelocity = new THREE.Vector3();
-                    // NPCs just stop moving under their own power (if they had any, currently they are mostly static or pushed)
-                }
+                updateNPCPhysics(car);
+            }
+        }
+        
+        if (this.dynamicNPCs) {
+            for (const car of this.dynamicNPCs) {
+                updateNPCPhysics(car);
             }
         }
 
@@ -926,14 +1001,29 @@ export class VehicleManager {
                         const car = npcCars[i];
                         if (!car) continue;
                         const dist = v.mesh.position.distanceTo(car.position);
-                        if (dist < pushDist) {
-                            const toCar = car.position.clone().sub(v.mesh.position).normalize();
-                            if (dist < crushDist && speedMag > 2.0) {
-                                if (this.isArmor(car)) {
-                                    // Tank on Tank collision: Push only
-                                    this.pushVehicleNPC(car, toCar, speedMag * 0.5);
-                                } else {
-                                    this.crushNPC(car);
+                        if (dist < crushDist || dist < pushDist) {
+                            const carMesh = car;
+                            const targetVeh = this.findVehicleByMesh(carMesh);
+
+                            if (targetVeh) {
+                                const isManagedTarget = targetVeh.mesh !== undefined;
+                                const actualMesh = isManagedTarget ? targetVeh.mesh : targetVeh;
+
+                                if (actualMesh !== v.mesh) {
+                                    const worldPos = actualMesh.getWorldPosition(new THREE.Vector3());
+                                    const toCar = worldPos.clone().sub(v.mesh.position).normalize();
+
+                                    if (dist < crushDist && speedMag > 1.0) {
+                                        if (this.isArmor(actualMesh)) {
+                                            // Tank on Tank collision: Push only
+                                            if (!isManagedTarget) this.pushVehicleNPC(actualMesh, toCar, speedMag * 0.5);
+                                        } else {
+                                            // Push buses and cars instead of crushing them
+                                            if (!isManagedTarget) this.pushVehicleNPC(actualMesh, toCar, speedMag * 1.5);
+                                        }
+                                    } else if (dist < pushDist && speedMag > 1.0) {
+                                        if (!isManagedTarget) this.pushVehicleNPC(actualMesh, toCar, speedMag * 0.8);
+                                    }
                                 }
                             }
                         }
@@ -1131,9 +1221,36 @@ export class VehicleManager {
                     const wallHits = hits.filter(h => h.distance > 0.1);
 
                     if (wallHits.length > 0) {
-                        blocked = true;
-                        if (wallHits[0].distance < closestDistance) {
-                            closestDistance = wallHits[0].distance;
+                        // Check if we hit a pushable vehicle! If so, don't block the tank!
+                        const hitMesh = wallHits[0].object;
+                        const targetVeh = this.findVehicleByMesh(hitMesh);
+                        
+                        // If it's a vehicle AND we are a tank, don't block. We push through it!
+                        if (targetVeh && v.type === 'tank') {
+                            const isManagedTarget = targetVeh.mesh !== undefined;
+                            const actualMesh = isManagedTarget ? targetVeh.mesh : targetVeh;
+                            
+                            // Prevent self-pushing
+                            if (actualMesh !== v.mesh) {
+                                const speedMag = Math.abs(v.velocity);
+                                if (speedMag > 1.0) {
+                                    // Calculate push direction
+                                    const worldPos = actualMesh.getWorldPosition(new THREE.Vector3());
+                                    const toCar = moveDir.clone();
+                                    
+                                    // Push it!
+                                    if (isManagedTarget) {
+                                        this.pushVehicle(targetVeh, toCar, speedMag * 0.8);
+                                    } else {
+                                        this.pushVehicleNPC(actualMesh, toCar, speedMag * 1.5);
+                                    }
+                                }
+                            }
+                        } else {
+                            blocked = true;
+                            if (wallHits[0].distance < closestDistance) {
+                                closestDistance = wallHits[0].distance;
+                            }
                         }
                     }
                 }
