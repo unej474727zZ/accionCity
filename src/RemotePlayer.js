@@ -24,6 +24,8 @@ export class RemotePlayer {
         this.laserActive = true;
         this.laserMesh = this.createLaser();
         this.raycaster = new THREE.Raycaster();
+        this.currentVehicleType = null;
+        this.vehicleMesh = null;
 
         this.init(initialData);
     }
@@ -268,6 +270,66 @@ export class RemotePlayer {
                 if (this.helmetMesh.parent) this.helmetMesh.parent.remove(this.helmetMesh);
             }
         }
+
+        // --- VEHICLE SYNC ---
+        const newVehicleType = data.vehicleType || null;
+        if (this.currentVehicleType !== newVehicleType) {
+            // Clean up old vehicle mesh
+            if (this.vehicleMesh) {
+                this.scene.remove(this.vehicleMesh);
+                this.vehicleMesh = null;
+            }
+            this.currentVehicleType = newVehicleType;
+
+            if (this.currentVehicleType) {
+                const original = this.assets[this.currentVehicleType]?.scene;
+                if (original) {
+                    this.vehicleMesh = SkeletonUtils ? SkeletonUtils.clone(original) : original.clone();
+                    
+                    // Apply correct scale
+                    let scaleVal = 1.0;
+                    if (this.currentVehicleType === 'motorcycle') scaleVal = 0.9;
+                    else if (this.currentVehicleType === 'tank') scaleVal = 1.2;
+                    else if (this.currentVehicleType === 'helicopter') scaleVal = 1.0;
+                    this.vehicleMesh.scale.setScalar(scaleVal);
+
+                    // Add to scene
+                    this.scene.add(this.vehicleMesh);
+
+                    // If helicopter, we can center the model just like VehicleManager does
+                    if (this.currentVehicleType === 'helicopter') {
+                        const bbox = new THREE.Box3().setFromObject(this.vehicleMesh);
+                        const center = bbox.getCenter(new THREE.Vector3());
+                        this.vehicleMesh.children.forEach(child => {
+                            child.position.x -= center.x;
+                            child.position.y -= center.y;
+                            child.position.z -= center.z;
+                        });
+                        const height = bbox.max.y - bbox.min.y;
+                        this.vehicleMesh.userData.halfHeight = height / 10;
+                    }
+                }
+            }
+        }
+
+        // Update vehicle mesh transform if present
+        if (this.vehicleMesh) {
+            this.vehicleMesh.position.copy(this.mesh.position);
+            this.vehicleMesh.rotation.y = this.yaw;
+
+            if (this.currentVehicleType === 'helicopter' && this.vehicleMesh.userData.halfHeight) {
+                this.vehicleMesh.position.y += this.vehicleMesh.userData.halfHeight;
+            }
+
+            // Sync visibility
+            if (this.currentVehicleType === 'tank' || this.currentVehicleType === 'helicopter') {
+                this.mesh.visible = false; // Hide avatar inside tank/heli
+            } else {
+                this.mesh.visible = true; // Show avatar on motorcycle
+            }
+        } else {
+            this.mesh.visible = true; // Safe fallback
+        }
     }
 
     setFiring(isActive) {
@@ -451,6 +513,7 @@ export class RemotePlayer {
         if (this.nameTag) this.nameTag.remove();
         if (this.mesh) this.scene.remove(this.mesh);
         if (this.laserMesh) this.scene.remove(this.laserMesh);
+        if (this.vehicleMesh) this.scene.remove(this.vehicleMesh);
         this.bullets.forEach(b => b.destroy());
     }
 

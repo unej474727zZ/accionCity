@@ -819,15 +819,14 @@ export class World {
                 }
             }, { passive: true });
 
-            // --- FINAL SPAWN (Safe Street Center) ---
-            this.character.mesh.position.set(-296, 0.5, -20); // Safe street spawn right next to the vehicles!
-
+            // --- FINAL SPAWN ---
+            // Spawn vehicles in their designated positions
             this.vehicleManager.spawnVehicle('motorcycle', new THREE.Vector3(-300, 0.5, -40));
             this.vehicleManager.spawnVehicle('tank', new THREE.Vector3(-300, 0.5, 0));
             this.vehicleManager.spawnVehicle('helicopter', new THREE.Vector3(-300, 0.5, -20));
 
-            // Set camera to player
-            const charSpawn = new THREE.Vector3(-296, 0.5, -20);
+            // Set camera to player using the real character spawn position
+            const charSpawn = this.character.mesh.position;
             this.camera.position.copy(charSpawn).add(new THREE.Vector3(0, 5.5, 10));
             this.camera.lookAt(charSpawn);
 
@@ -1130,8 +1129,11 @@ export class World {
             Object.values(this.remotePlayers).forEach(p => p.update(dt, this.camera));
 
             if (this.character && this.networkManager && !this.isPaused) {
+                const charWorldPos = new THREE.Vector3();
+                this.character.mesh.getWorldPosition(charWorldPos);
+
                 this.networkManager.sendUpdate(
-                    this.character.mesh.position,
+                    charWorldPos,
                     this.character.yaw,
                     this.character.pitch || 0,
                     this.character.state,
@@ -1139,7 +1141,7 @@ export class World {
                     this.weaponManager ? this.weaponManager.isFiring : false,
                     this.character.vehicle ? this.character.vehicle.type : null
                 );
-                localStorage.setItem('characterPosition', JSON.stringify({ x: this.character.mesh.position.x, y: this.character.mesh.position.y, z: this.character.mesh.position.z }));
+                localStorage.setItem('characterPosition', JSON.stringify({ x: charWorldPos.x, y: charWorldPos.y, z: charWorldPos.z }));
             }
 
             // Teleportation
