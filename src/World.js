@@ -59,7 +59,8 @@ export class World {
 
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.renderer.setPixelRatio(0.85); // Lowered from 1.0 for better performance
-        this.renderer.shadowMap.enabled = false;
+        this.renderer.shadowMap.enabled = true;
+        this.renderer.shadowMap.type = THREE.PCFShadowMap; // Optimized shadows
         this.renderer.xr.enabled = true; // Enable WebXR
         container.appendChild(this.renderer.domElement);
 
@@ -98,10 +99,22 @@ export class World {
         const hemiLight = new THREE.HemisphereLight(skyColor, groundColor, 0.6);
         this.scene.add(hemiLight);
 
-        // Directional (Sun)
+        // Directional (Sun/Moon)
         const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
         dirLight.position.set(50, 100, 50); // High sun
-        dirLight.castShadow = false; // SHADOWS DISABLED FOR MOBILE PERFORMANCE
+        dirLight.castShadow = true; 
+        dirLight.shadow.mapSize.width = 1024; // Balanced quality and performance
+        dirLight.shadow.mapSize.height = 1024;
+        dirLight.shadow.camera.near = 0.5;
+        dirLight.shadow.camera.far = 250;
+        
+        // Tight shadow bounds following character to optimize drawcalls
+        const d = 35; 
+        dirLight.shadow.camera.left = -d;
+        dirLight.shadow.camera.right = d;
+        dirLight.shadow.camera.top = d;
+        dirLight.shadow.camera.bottom = -d;
+        dirLight.shadow.bias = -0.0005;
         this.scene.add(dirLight);
 
         // State Flags
@@ -181,20 +194,24 @@ export class World {
                 // SCALE FIX: Increased to 40.0 per user request
                 city.scale.set(40, 40, 40);
 
-                // TEXTURE FIX: Prevent stretching by repeating textures
+                // TEXTURE & SHADOW FIX: Prevent stretching and enable shadow casting/receiving
                 city.traverse((child) => {
-                    if (child.isMesh && child.material) {
-                        // Handle single material or array of materials
-                        const materials = Array.isArray(child.material) ? child.material : [child.material];
+                    if (child.isMesh) {
+                        child.castShadow = true;
+                        child.receiveShadow = true;
+                        if (child.material) {
+                            // Handle single material or array of materials
+                            const materials = Array.isArray(child.material) ? child.material : [child.material];
 
-                        materials.forEach(mat => {
-                            if (mat.map) {
-                                mat.map.wrapS = THREE.RepeatWrapping;
-                                mat.map.wrapT = THREE.RepeatWrapping;
-                                mat.map.repeat.set(1.5, 1.5); // "A little bigger" (1.5x larger details than 2.5)
-                                mat.needsUpdate = true;
-                            }
-                        });
+                            materials.forEach(mat => {
+                                if (mat.map) {
+                                    mat.map.wrapS = THREE.RepeatWrapping;
+                                    mat.map.wrapT = THREE.RepeatWrapping;
+                                    mat.map.repeat.set(1.5, 1.5); // "A little bigger" (1.5x larger details than 2.5)
+                                    mat.needsUpdate = true;
+                                }
+                            });
+                        }
                     }
                 });
 
@@ -226,11 +243,12 @@ export class World {
 
             const floor = new THREE.Mesh(
                 new THREE.PlaneGeometry(1000, 1000), // Huge floor
-                new THREE.MeshBasicMaterial({ map: asphaltTexture })
+                new THREE.MeshLambertMaterial({ map: asphaltTexture })
             );
             floor.name = "AsphaltFloor";
             floor.rotation.x = -Math.PI / 2;
             floor.position.y = 0.01;
+            floor.receiveShadow = true;
             this.scene.add(floor);
 
             // TELEPORTATION PADS
@@ -624,6 +642,109 @@ export class World {
                 }
             };
 
+            this.networkManager.onLocalPlayerIdentified = (data) => {
+                console.log("Local Player Identified Name:", data.name);
+                const nameEl = document.getElementById('cyberpunk-player-name');
+                const cardEl = document.getElementById('cyberpunk-player-card');
+                if (nameEl && cardEl) {
+                    nameEl.innerText = data.name;
+                    cardEl.style.opacity = '1';
+                }
+            };
+
+            // Sincronización Dictatorial de Vehículos (Cyberpunk Style)
+            this.networkManager.onEnterVehicleSuccess = (data) => {
+                const vehicleId = data.vehicleId;
+                console.log(`[NETWORK-VEHICLE] Entry approved for ${vehicleId}`);
+                if (this.vehicleManager && this.vehicleManager.pendingVehicleToEnter) {
+                    this.vehicleManager.executeEnterVehicle(this.vehicleManager.pendingVehicleToEnter);
+                    this.vehicleManager.pendingVehicleToEnter = null;
+                }
+            };
+
+            this.networkManager.onEnterVehicleFailure = (data) => {
+                const vehicleId = data.vehicleId;
+                const reason = data.reason;
+                console.warn(`[NETWORK-VEHICLE] Entry rejected for ${vehicleId}. Reason: ${reason}`);
+                this.vehicleManager.pendingVehicleToEnter = null;
+
+                // --- ESTÉTICA VISUAL PREMIUM: GLOWING TEXT ONLY ---
+                const existing = document.getElementById('cyberpunk-vehicle-notification');
+                if (existing) existing.remove();
+
+                const notif = document.createElement('div');
+                notif.id = 'cyberpunk-vehicle-notification';
+                notif.style.position = 'absolute';
+                notif.style.bottom = '22%';
+                notif.style.left = '50%';
+                notif.style.transform = 'translateX(-50%) translateY(30px)';
+                notif.style.color = '#00ffaa'; // Cyberpunk neon green
+                notif.style.fontFamily = "'Courier New', Courier, monospace";
+                notif.style.fontSize = '24px'; // Aumentado para mayor impacto
+                notif.style.fontWeight = '900';
+                notif.style.letterSpacing = '3px';
+                notif.style.textShadow = '0 0 10px #00ffaa, 0 0 20px #00ffaa, 0 0 30px #00aaff';
+                notif.style.zIndex = '100000';
+                notif.style.textAlign = 'center';
+                notif.style.pointerEvents = 'none';
+                notif.style.opacity = '0';
+                notif.style.transition = 'opacity 0.2s ease-out, transform 0.2s ease-out';
+
+                notif.innerHTML = reason;
+
+                document.body.appendChild(notif);
+
+                // Animate In
+                setTimeout(() => {
+                    notif.style.opacity = '1';
+                    notif.style.transform = 'translateX(-50%) translateY(0)';
+                }, 20);
+
+                // Animate Out
+                setTimeout(() => {
+                    notif.style.opacity = '0';
+                    notif.style.transform = 'translateX(-50%) translateY(-25px)';
+                    setTimeout(() => notif.remove(), 250);
+                }, 4000);
+            };
+
+            this.networkManager.onVehicleStateUpdate = (serverVehicles) => {
+                if (!this.vehicleManager || !this.character) return;
+
+                for (const vehicleId in serverVehicles) {
+                    const serverV = serverVehicles[vehicleId];
+                    const localV = this.vehicleManager.vehicles.find(v => v.id === vehicleId);
+                    if (!localV) continue;
+
+                    // If we are currently driving it, we are the authority, so don't sync its position
+                    if (this.character.isDriving && this.character.vehicle === localV) {
+                        localV.mesh.visible = true;
+                        continue;
+                    }
+
+                    if (serverV.occupiedBy !== null) {
+                        // Someone else is driving it! Hide the parked version
+                        localV.mesh.visible = false;
+                        
+                        // Detach Positional audio of the parked car to keep it quiet
+                        if (localV.engineSoundDrive && localV.engineSoundDrive.isPlaying) {
+                            localV.engineSoundDrive.stop();
+                        }
+                        if (localV.engineSoundStartup && localV.engineSoundStartup.isPlaying) {
+                            localV.engineSoundStartup.stop();
+                        }
+                    } else {
+                        // The vehicle is parked! Make it visible and sync its location
+                        localV.mesh.visible = true;
+                        localV.mesh.position.set(serverV.x, serverV.y, serverV.z);
+                        localV.mesh.rotation.y = serverV.yaw;
+
+                        // Recalculate collision bounding box at its new position
+                        localV.collider.setFromObject(localV.mesh);
+                    }
+                }
+            };
+
             // Eliminado el escuchador de pausa global
 
             // COMBAT SYNC
@@ -642,12 +763,11 @@ export class World {
                     this.weaponManager.createImpact(hitPos, new THREE.Vector3(0, 1, 0), data.type, data.scale);
 
                     // --- DETECTION FOR LOCAL PLAYER ---
-                    if (this.character && this.character.mesh) {
+                    if (this.character && this.character.mesh && !this.character.isDead) {
                         const distToMe = hitPos.distanceTo(this.character.mesh.position);
                         // Increased range to 3.0m to catch headshots (mesh origin is at feet)
                         if (distToMe < 3.0) {
-                            console.log("💥 I GOT HIT!");
-                            this.triggerDamageFlash();
+                            this.character.takeDamage(1);
                             // Create extra blood effect right in front of camera for feedback
                             this.weaponManager.createImpact(hitPos, new THREE.Vector3(0, 1, 0), 'blood', 2.0);
                         }
@@ -658,6 +778,26 @@ export class World {
             // CHAT SYSTEM
             const chatInput = document.getElementById('chat-input');
             const chatMessages = document.getElementById('chat-messages');
+
+            // --- CYBERPUNK RESPAWN BUTTON EVENTS ---
+            const respawnBtn = document.getElementById('respawn-btn');
+            if (respawnBtn) {
+                respawnBtn.addEventListener('click', () => {
+                    if (this.character) this.character.respawn();
+                });
+            }
+
+            const btnStart = document.getElementById('btn-start');
+            if (btnStart) {
+                const handleStartTrigger = (e) => {
+                    e.preventDefault();
+                    if (this.character && this.character.isDead) {
+                        this.character.respawn();
+                    }
+                };
+                btnStart.addEventListener('touchstart', handleStartTrigger);
+                btnStart.addEventListener('mousedown', handleStartTrigger);
+            }
 
             // STATUS INDICATOR
             const statusEl = document.createElement('div');
@@ -820,10 +960,10 @@ export class World {
             }, { passive: true });
 
             // --- FINAL SPAWN ---
-            // Spawn vehicles in their designated positions
-            this.vehicleManager.spawnVehicle('motorcycle', new THREE.Vector3(-300, 0.5, -40));
-            this.vehicleManager.spawnVehicle('tank', new THREE.Vector3(-300, 0.5, 0));
-            this.vehicleManager.spawnVehicle('helicopter', new THREE.Vector3(-300, 0.5, -20));
+            // Spawn vehicles in their designated positions with unique central IDs
+            this.vehicleManager.spawnVehicle('motorcycle', new THREE.Vector3(-300, 0.5, -40), null, 'vehicle_motorcycle');
+            this.vehicleManager.spawnVehicle('tank', new THREE.Vector3(-300, 0.5, 0), null, 'vehicle_tank');
+            this.vehicleManager.spawnVehicle('helicopter', new THREE.Vector3(-300, 0.5, -20), null, 'vehicle_helicopter');
 
             // Set camera to player using the real character spawn position
             const charSpawn = this.character.mesh.position;
@@ -964,15 +1104,29 @@ export class World {
             const dt = Math.min(this.clock.getDelta(), 0.1);
             const time = Date.now() / 1000;
 
-            const sunAngle = Math.PI / 2; // Fixed at Noon
-            const sunRadius = 200;
-            let sunIntensity = 1.5;
+            // Day/Night cycle speed: full cycle every 180 seconds (3 minutes)
+            const dayDuration = 180;
+            const sunAngle = (time * (2 * Math.PI / dayDuration)) % (2 * Math.PI);
+            const sunRadius = 300;
+            
+            // X and Y positions of the sun
+            const sunX = Math.cos(sunAngle) * sunRadius;
+            const sunY = Math.sin(sunAngle) * sunRadius;
+            const sunZ = 50;
+
+            const isDay = sunY > 0;
+            const sunIntensity = isDay ? Math.min(1.5, sunY / 50) : 0.0;
 
             const dirLight = this.scene.children.find(c => c.isDirectionalLight);
             if (dirLight) {
-                dirLight.position.set(0, sunRadius, 50);
+                if (this.character && this.character.mesh) {
+                    dirLight.position.copy(this.character.mesh.position).add(new THREE.Vector3(sunX, Math.max(20, sunY), sunZ));
+                    dirLight.target = this.character.mesh;
+                } else {
+                    dirLight.position.set(sunX, Math.max(20, sunY), sunZ);
+                }
                 dirLight.intensity = sunIntensity;
-                dirLight.castShadow = false; // CRITICAL: Disabled for performance
+                dirLight.castShadow = isDay && !this.isNightVision; // Only shadow during day and when NV is off
             }
 
             let skyHex = 0x87CEEB;
@@ -985,6 +1139,25 @@ export class World {
                 groundHex = 0x004400;
                 fogDist = 200;
                 fogColor = new THREE.Color(0x00FF00);
+            } else {
+                if (!isDay) {
+                    skyHex = 0x020208; // Midnight blue
+                    groundHex = 0x111111;
+                } else {
+                    const sunHeight = Math.sin(sunAngle);
+                    if (sunHeight < 0.25) {
+                        // Sunrise / Sunset: Warm orange/red sky transition!
+                        const factor = sunHeight / 0.25;
+                        const orange = new THREE.Color(0xff5511);
+                        const blue = new THREE.Color(0x87CEEB);
+                        const mixed = orange.clone().lerp(blue, factor);
+                        skyHex = mixed.getHex();
+                        groundHex = 0x332222;
+                    } else {
+                        skyHex = 0x87CEEB;
+                        groundHex = 0x555555;
+                    }
+                }
             }
 
             if (this.minimap && this.minimap.isFullMap && this.character) {
@@ -1026,7 +1199,7 @@ export class World {
                 } else {
                     hemiLight.color.lerp(new THREE.Color(skyHex), dt * 0.5);
                     hemiLight.groundColor.lerp(new THREE.Color(groundHex), dt * 0.5);
-                    hemiLight.intensity = 0.8;
+                    hemiLight.intensity = isDay ? 0.8 : 0.15; // Lower ambient light at night
                 }
             }
 

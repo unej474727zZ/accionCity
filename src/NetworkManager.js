@@ -9,8 +9,13 @@ export class NetworkManager {
         this.onPlayerJoined = null;
         this.onPlayerMoved = null;
         this.onPlayerLeft = null;
+        this.onEnterVehicleSuccess = null;
+        this.onEnterVehicleFailure = null;
+        this.onVehicleStateUpdate = null;
+        this.onLocalPlayerIdentified = null; // Evento para identificar nombre local
 
         this.id = null;
+        this.activeRemotePlayerIds = new Set();
     }
 
     connect() {
@@ -22,7 +27,7 @@ export class NetworkManager {
         this.socket = io(url, {
             reconnection: true,
             reconnectionAttempts: 10,
-            transports: ['websocket', 'polling'],
+            transports: ['polling', 'websocket'],
             path: '/socket.io',
             forceNew: true
         });
@@ -38,8 +43,24 @@ export class NetworkManager {
 
         // 1. Initial State: Load all existing players
         this.socket.on('currentPlayers', (players) => {
+            const localPlayer = players[this.id];
+            if (localPlayer && this.onLocalPlayerIdentified) {
+                this.onLocalPlayerIdentified(localPlayer);
+            }
+
+            // Clean up players that are no longer in the list (ghost prevention)
+            const newKeys = new Set(Object.keys(players).filter(id => id !== this.id));
+            this.activeRemotePlayerIds.forEach((id) => {
+                if (!newKeys.has(id)) {
+                    if (this.onPlayerLeft) this.onPlayerLeft(id);
+                    this.activeRemotePlayerIds.delete(id);
+                }
+            });
+
+            // Join new players
             Object.keys(players).forEach((id) => {
                 if (id !== this.id) {
+                    this.activeRemotePlayerIds.add(id);
                     if (this.onPlayerJoined) this.onPlayerJoined(id, players[id]);
                 }
             });
@@ -47,6 +68,7 @@ export class NetworkManager {
 
         // 2. New Player Joined
         this.socket.on('newPlayer', (data) => {
+            this.activeRemotePlayerIds.add(data.id);
             if (this.onPlayerJoined) this.onPlayerJoined(data.id, data.player);
         });
 
@@ -57,6 +79,7 @@ export class NetworkManager {
 
         // 4. Player Left
         this.socket.on('playerDisconnected', (id) => {
+            this.activeRemotePlayerIds.delete(id);
             if (this.onPlayerLeft) this.onPlayerLeft(id);
         });
 
@@ -77,6 +100,19 @@ export class NetworkManager {
         // 8. Game Pause
         this.socket.on('gamePauseUpdate', (data) => {
             if (this.onGamePause) this.onGamePause(data);
+        });
+
+        // 9. Vehicles Sincronización Dictatorial
+        this.socket.on('enterVehicleSuccess', (data) => {
+            if (this.onEnterVehicleSuccess) this.onEnterVehicleSuccess(data);
+        });
+
+        this.socket.on('enterVehicleFailure', (data) => {
+            if (this.onEnterVehicleFailure) this.onEnterVehicleFailure(data);
+        });
+
+        this.socket.on('vehicleStateUpdate', (data) => {
+            if (this.onVehicleStateUpdate) this.onVehicleStateUpdate(data.vehicles);
         });
     }
 

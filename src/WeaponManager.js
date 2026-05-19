@@ -769,8 +769,8 @@ export class WeaponManager {
         }
 
         // 3. Player
-        if (this.character && this.character.position.distanceTo(pos) < radius) {
-            if (this.characterController.damage) this.characterController.damage(20);
+        if (this.character && this.character.position.distanceTo(pos) < radius && !this.characterController.isDead) {
+            this.characterController.takeDamage(1);
         }
     }
 

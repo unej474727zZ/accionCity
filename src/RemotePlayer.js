@@ -233,6 +233,13 @@ export class RemotePlayer {
             this.playAnimation(this.state);
         }
 
+        // Hide mesh if dead
+        const isAlive = (this.state !== 'dead');
+        this.mesh.visible = isAlive;
+        if (this.weaponMesh) this.weaponMesh.visible = isAlive;
+        if (this.helmetMesh) this.helmetMesh.visible = (isAlive && data.vehicleType === 'motorcycle');
+        if (this.laserMesh) this.laserMesh.visible = (isAlive && (this.state === 'rifle' || this.state === 'pistol' || data.firing));
+
         if (data.weaponType !== this.weaponType) {
             this.setWeapon(data.weaponType);
         }
@@ -298,17 +305,9 @@ export class RemotePlayer {
                 if (oldVehicleType && !newVehicleType) {
                     const localVehicle = this.world.vehicleManager.vehicles.find(v => v.type === oldVehicleType);
                     if (localVehicle) {
-                        // Move the local parked vehicle to where they exited!
-                        localVehicle.mesh.position.copy(this.mesh.position);
-                        // Reset Y position to ground level
-                        localVehicle.mesh.position.y = 0.0;
-                        if (oldVehicleType === 'helicopter' && localVehicle.mesh.userData.halfHeight) {
-                            localVehicle.mesh.position.y += localVehicle.mesh.userData.halfHeight;
-                        }
-                        localVehicle.mesh.rotation.y = this.yaw;
-
-                        // Force update collider bounding box
-                        localVehicle.collider.setFromObject(localVehicle.mesh);
+                        // Con servidor dictatorial centralizado, la posición oficial la dicta 'vehicleStateUpdate'.
+                        // Ya no copiamos la posición local para evitar conflictos y bugs de superposición.
+                        console.log(`[REMOTE-VEHICLE] Remote player exited ${oldVehicleType}. Awaiting server coordinates sync.`);
                     }
                 }
             }
@@ -598,7 +597,7 @@ export class RemotePlayer {
         if (this.nameTag && this.mesh && camera) {
             const pos = this.mesh.position.clone().add(new THREE.Vector3(0, 2.2, 0));
             pos.project(camera);
-            if (pos.z < 1) {
+            if (pos.z < 1 && this.state !== 'dead') {
                 this.nameTag.style.display = 'block';
                 this.nameTag.style.left = `${(pos.x * 0.5 + 0.5) * window.innerWidth}px`;
                 this.nameTag.style.top = `${(-pos.y * 0.5 + 0.5) * window.innerHeight}px`;

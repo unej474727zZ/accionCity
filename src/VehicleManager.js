@@ -35,7 +35,7 @@ export class VehicleManager {
         };
     }
 
-    spawnVehicle(type, position, rotation) {
+    spawnVehicle(type, position, rotation, id = null) {
         if (!this.assets[type]) {
             console.warn(`Vehicle type ${type} not found in assets.`);
             return;
@@ -129,6 +129,7 @@ export class VehicleManager {
         }
 
         const vehicle = {
+            id: id || `vehicle_${type}`,
             mesh: model,
             type: type,
             velocity: 0,
@@ -330,6 +331,20 @@ export class VehicleManager {
     enterVehicle(vehicle) {
         if (!vehicle || this.currentVehicle) return;
 
+        // If connected to multiplayer network, request permission first
+        const net = this.characterController?.world?.networkManager;
+        if (net && net.socket && net.socket.connected) {
+            this.pendingVehicleToEnter = vehicle; // Store to execute upon success
+            net.socket.emit('requestEnterVehicle', { vehicleId: vehicle.id });
+            console.log(`[VEHICLE] Requesting entry to server for vehicle: ${vehicle.id}`);
+            return;
+        }
+
+        // Fallback for single-player / offline
+        this.executeEnterVehicle(vehicle);
+    }
+
+    executeEnterVehicle(vehicle) {
         this.currentVehicle = vehicle;
 
         // Resume context if suspended (Browser autoplay policy)
@@ -345,7 +360,7 @@ export class VehicleManager {
         }
 
         // Notify Character Controller
-        this.characterController.setDriving(true, vehicle); // We'll add this method
+        this.characterController.setDriving(true, vehicle);
     }
 
     exitVehicle() {
@@ -353,7 +368,9 @@ export class VehicleManager {
 
         const v = this.currentVehicle;
         const isTank = v.type === 'tank';
-        const sideOffset = isTank ? 5.0 : 1.2; // 5m para el tanque, para salir bien de las orugas
+        const isHeli = v.type === 'helicopter';
+        // Aumentamos la distancia para que el jugador aterrice bien separado del chasis del vehículo
+        const sideOffset = isTank ? 5.0 : (isHeli ? 4.0 : 2.5);
 
         // Calculate exit position to the left of the vehicle
         const left = new THREE.Vector3(-1.0, 0, 0).applyQuaternion(v.mesh.quaternion);
@@ -385,8 +402,24 @@ export class VehicleManager {
             v.engineSoundDrive.pause();
         }
 
+        // Obtener la posición real del vehículo ANTES de desvincular el personaje
+        const vehiclePos = v.mesh.position.clone();
+        const vehicleYaw = v.mesh.rotation.y;
+
         this.characterController.setDriving(false, null, exitPos);
         this.currentVehicle = null;
+
+        // Notify Server that we exited the vehicle and tell them the final position/yaw of the VEHICLE (not the player)
+        const net = this.characterController?.world?.networkManager;
+        if (net && net.socket && net.socket.connected) {
+            net.socket.emit('exitVehicle', {
+                vehicleId: v.id,
+                x: vehiclePos.x,
+                y: vehiclePos.y,
+                z: vehiclePos.z,
+                yaw: vehicleYaw
+            });
+        }
     }
 
     crushVehicle(v) {
@@ -409,8 +442,11 @@ export class VehicleManager {
             }
         }
 
-        // If it's the current vehicle, force exit
+        // If it's the current vehicle, force exit and KILL driver instantly!
         if (this.currentVehicle === v) {
+            if (this.characterController && !this.characterController.isDead) {
+                this.characterController.takeDamage(3); // 3 damage = Instant Death!
+            }
             this.exitVehicle();
         }
     }
@@ -1082,12 +1118,29 @@ export class VehicleManager {
                     }
                 }
 
-                // Elevation (H/L = Elevate, J = Descend)
+                // Elevation (H/L = Elevate, J = Descend, or Gamepad RT/RB/LT/LB)
                 const keys = this.characterController.keys;
-                if (keys.elevate) {
+                let elevate = keys.elevate;
+                let descend = keys.descend;
+
+                const activeGamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+                let gamepad = null;
+                for (let i = 0; i < activeGamepads.length; i++) { if (activeGamepads[i]) { gamepad = activeGamepads[i]; break; } }
+                if (gamepad) {
+                    // RT (7) or RB (5) to elevate
+                    if ((gamepad.buttons[7] && gamepad.buttons[7].pressed) || (gamepad.buttons[5] && gamepad.buttons[5].pressed)) {
+                        elevate = true;
+                    }
+                    // LT (6) or LB (4) to descend
+                    if ((gamepad.buttons[6] && gamepad.buttons[6].pressed) || (gamepad.buttons[4] && gamepad.buttons[4].pressed)) {
+                        descend = true;
+                    }
+                }
+
+                if (elevate) {
                     v.mesh.position.y += cfg.liftSpeed * dt;
                 }
-                if (keys.descend) {
+                if (descend) {
                     v.mesh.position.y -= cfg.liftSpeed * dt;
                 }
 

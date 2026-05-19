@@ -12,9 +12,7 @@ export default defineConfig({
       'localhost',
       '127.0.0.1'
     ],
-    hmr: {
-      clientPort: 443,
-    },
+    hmr: false,
     proxy: {
       '/socket.io': {
         target: 'http://127.0.0.1:3000',

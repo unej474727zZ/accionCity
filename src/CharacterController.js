@@ -20,6 +20,8 @@ export class CharacterController {
         this._vehicle = null;   // Current Vehicle (Internal state for getter)
         this.state = 'idle'; // idle, walk, run, backward
         this.isJumping = false;
+        this.hp = 3;
+        this.isDead = false;
 
         // Input state
         this.keys = {
@@ -674,6 +676,13 @@ export class CharacterController {
     }
 
     onKeyDown(e) {
+        if (this.isDead) {
+            if (e.code === 'Enter') {
+                this.respawn();
+            }
+            return;
+        }
+
         // console.log("Key pressed:", e.code); // DEBUG: Uncomment if inputs are weird
         // Zoom Map (NumPad and Keyboard + / -)
         if (this.world && this.world.minimap && this.world.minimap.isFullMap) {
@@ -849,6 +858,24 @@ export class CharacterController {
     update(dt) {
         if (!this.mesh) return;
 
+        if (this.isDead) {
+            // Send constant updates to indicate dead state so remote players see us disappear
+            if (this.world && this.world.networkManager && !this.world.isPaused) {
+                const charWorldPos = new THREE.Vector3();
+                this.mesh.getWorldPosition(charWorldPos);
+                this.world.networkManager.sendUpdate(
+                    charWorldPos,
+                    this.yaw,
+                    this.pitch || 0,
+                    'dead',
+                    this.weaponManager ? this.weaponManager.currentWeaponType : 'pistol',
+                    false,
+                    null
+                );
+            }
+            return;
+        }
+
         // Bloquear movimiento y física en modo inspección, pero mantener animaciones
         if (this.world && this.world.isInspectionMode) {
             if (this.mixer) this.mixer.update(dt);
@@ -917,7 +944,7 @@ export class CharacterController {
 
             // Right Stick (Camera Look) 
             // Generic Android controllers often put Right Stick X on 2 or 4. Right Stick Y on 3 or 5.
-            const filterAxis = (val) => (val !== undefined && Math.abs(val) > dz && Math.abs(val) < 0.99) ? val : 0;
+            const filterAxis = (val) => (val !== undefined && Math.abs(val) > dz) ? val : 0;
 
             // For X (Left/Right), we check axis 2 primarily. If dead, check axis 4.
             let rightX = filterAxis(gamepad.axes[2]);
@@ -928,28 +955,36 @@ export class CharacterController {
             if (!rightY) rightY = filterAxis(gamepad.axes[3]);
 
             if (Math.abs(rightX) > 0) {
-                this.yaw -= rightX * 2.5 * dt;
-                if (this.isDriving) this.aimYaw -= rightX * 2.5 * dt;
+                this.yaw -= rightX * 4.5 * dt; // Increased sensitivity from 2.5
+                if (this.isDriving) this.aimYaw -= rightX * 4.5 * dt;
             }
             if (Math.abs(rightY) > 0) {
                 // Pitch needs to be mapped correctly. If UP is positive on Axis 5, this might be inverted.
                 // Standard: UP is negative Y. So pushing UP (-Y) should increase Pitch (look up).
-                this.pitch -= rightY * 1.5 * dt;
-                this.pitch = Math.max(-Math.PI / 4, Math.min(Math.PI / 4, this.pitch));
+                this.pitch -= rightY * 3.0 * dt; // Increased sensitivity from 1.5
+                this.pitch = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, this.pitch)); // Unify pitch limits with mouse
             }
 
             // --- EMPIRICAL PHYSICAL MAPPINGS FOR USER'S CONTROLLER ---
-            // A = 0
-            // X = 3
-            // Y = 4
-            // L = 8
-            // R = 9 (Assumed)
+            if (gamepad) {
+                const activeButtons = [];
+                for (let i = 0; i < gamepad.buttons.length; i++) {
+                    if (gamepad.buttons[i] && (gamepad.buttons[i].pressed || gamepad.buttons[i].value > 0.1)) {
+                        activeButtons.push(`${i} (val:${gamepad.buttons[i].value.toFixed(2)})`);
+                    }
+                }
+                if (activeButtons.length > 0) {
+                    console.log("[Gamepad Debug] Pressed Buttons:", activeButtons.join(", "));
+                }
+            }
 
-            // RUN (User wants Y to run. Controller Y is index 4)
-            if (gamepad.buttons[4] && gamepad.buttons[4].pressed) this.isRunning = true;
+            // RUN (Button B = 1)
+            if (gamepad && gamepad.buttons[1] && gamepad.buttons[1].pressed) {
+                this.isRunning = true;
+            }
 
-            // JUMP / VEHICLE (User wants X to jump/ride. Controller X is index 3)
-            if (gamepad && gamepad.buttons[3] && gamepad.buttons[3].pressed) {
+            // JUMP / VEHICLE (Button A = 0)
+            if (gamepad && gamepad.buttons[0] && gamepad.buttons[0].pressed) {
                 if (!this._gamepadJumpHeld) {
                     if (this.isDriving) {
                         if (this.world && this.world.vehicleManager) {
@@ -979,6 +1014,153 @@ export class CharacterController {
             } else {
                 this._gamepadJumpHeld = false;
             }
+
+            // CAMERA DISTANCE ADJUSTMENT (D-Pad Up = 12, D-Pad Down = 13)
+            const dpadUpPressed = gamepad && gamepad.buttons[12] && gamepad.buttons[12].pressed;
+            const dpadDownPressed = gamepad && gamepad.buttons[13] && gamepad.buttons[13].pressed;
+
+            // Only zoom if we are NOT pressing both (which acts as R1+R2 map toggle)
+            if (dpadUpPressed && !dpadDownPressed) {
+                if (!this._gamepadUpHeld) {
+                    this.cameraDistance = Math.max(0.1, this.cameraDistance - 1.0);
+                    this._gamepadUpHeld = true;
+                    console.log("[Gamepad] Zoom In. Camera distance:", this.cameraDistance);
+                }
+            } else {
+                this._gamepadUpHeld = false;
+            }
+
+            if (dpadDownPressed && !dpadUpPressed) {
+                if (!this._gamepadDownHeld) {
+                    this.cameraDistance = Math.min(15.0, this.cameraDistance + 1.0);
+                    this._gamepadDownHeld = true;
+                    console.log("[Gamepad] Zoom Out. Camera distance:", this.cameraDistance);
+                }
+            } else {
+                this._gamepadDownHeld = false;
+            }
+
+            // TOGGLE MAP (R1 + R2 at the same time = 5 + 7 OR 4 + 5)
+            // Support both standard (5 + 7) and user's specific layout (4 + 5)
+            const mapCombinationPressed = gamepad && (
+                ((gamepad.buttons[5] && (gamepad.buttons[5].pressed || gamepad.buttons[5].value > 0.1)) &&
+                 (gamepad.buttons[7] && (gamepad.buttons[7].pressed || gamepad.buttons[7].value > 0.1))) ||
+                ((gamepad.buttons[4] && (gamepad.buttons[4].pressed || gamepad.buttons[4].value > 0.1)) &&
+                 (gamepad.buttons[5] && (gamepad.buttons[5].pressed || gamepad.buttons[5].value > 0.1)))
+            );
+            this._mapCombinationPressed = mapCombinationPressed;
+
+            if (mapCombinationPressed) {
+                if (!this._mapToggleHeld) {
+                    console.log("[Gamepad Map Toggle] R1+R2 triggered!");
+                    if (this.world && this.world.minimap) {
+                        this.world.minimap.toggleUI();
+                        if (!this.world.minimap.isFullMap) this.world.mapPanningOffset.set(0, 0, 0);
+                        if (this.world.minimap.isFullMap) document.exitPointerLock();
+                        else document.body.requestPointerLock();
+                    }
+                    this._mapToggleHeld = true;
+                }
+            } else {
+                this._mapToggleHeld = false;
+            }
+
+            // TOGGLE CHAT (L1 + L2 at the same time = 4 + 6)
+            const l1Pressed = gamepad && gamepad.buttons[4] && (gamepad.buttons[4].pressed || gamepad.buttons[4].value > 0.1);
+            const l2Pressed = gamepad && gamepad.buttons[6] && (gamepad.buttons[6].pressed || gamepad.buttons[6].value > 0.1);
+            if (l1Pressed && l2Pressed) {
+                if (!this._chatToggleHeld) {
+                    const chat = document.getElementById('chat-container');
+                    const chatInput = document.getElementById('chat-input');
+                    if (chat) {
+                        const isCurrentlyHidden = (chat.style.display === 'none' || !chat.style.display);
+                        
+                        if (isCurrentlyHidden) {
+                            chat.style.display = 'flex';
+                            if (chatInput) {
+                                chatInput.focus();
+                                chatInput.value = '';
+                            }
+                            document.exitPointerLock();
+
+                            // Start Speech-to-Text Recognition
+                            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                            if (SpeechRecognition) {
+                                if (this._speechRecognition) {
+                                    try { this._speechRecognition.stop(); } catch(e){}
+                                }
+                                const recognition = new SpeechRecognition();
+                                recognition.lang = 'es-ES'; // Spanish Language
+                                recognition.interimResults = false;
+                                recognition.maxAlternatives = 1;
+
+                                recognition.onstart = () => {
+                                    if (chatInput) {
+                                        chatInput.placeholder = "🎤 Escuchando... habla ahora";
+                                        chatInput.style.border = "2px solid #ff0055";
+                                        chatInput.style.boxShadow = "0 0 15px #ff0055";
+                                    }
+                                };
+
+                                recognition.onresult = (event) => {
+                                    const speechText = event.results[0][0].transcript;
+                                    if (chatInput) {
+                                        chatInput.value = speechText;
+                                    }
+                                };
+
+                                recognition.onerror = (event) => {
+                                    console.warn("Speech recognition error:", event.error);
+                                    if (chatInput) {
+                                        chatInput.placeholder = "Error de voz... Escribe aquí";
+                                        chatInput.style.border = "";
+                                        chatInput.style.boxShadow = "";
+                                    }
+                                };
+
+                                recognition.onend = () => {
+                                    if (chatInput) {
+                                        chatInput.placeholder = "Escribe aquí...";
+                                        chatInput.style.border = "";
+                                        chatInput.style.boxShadow = "";
+                                    }
+                                    // Send text automatically
+                                    if (chatInput && chatInput.value.trim()) {
+                                        const text = chatInput.value.trim();
+                                        if (this.world && this.world.networkManager) {
+                                            this.world.networkManager.sendChat(text);
+                                        }
+                                        chatInput.value = '';
+                                    }
+                                    // Hide chat and restore lock
+                                    chat.style.display = 'none';
+                                    document.body.requestPointerLock();
+                                    this._speechRecognition = null;
+                                };
+
+                                this._speechRecognition = recognition;
+                                try {
+                                    recognition.start();
+                                } catch (e) {
+                                    console.error("Failed to start speech recognition:", e);
+                                }
+                            }
+                        } else {
+                            // Close chat manually
+                            if (this._speechRecognition) {
+                                try { this._speechRecognition.abort(); } catch(e){}
+                                this._speechRecognition = null;
+                            }
+                            chat.style.display = 'none';
+                            if (chatInput) chatInput.blur();
+                            document.body.requestPointerLock();
+                        }
+                    }
+                    this._chatToggleHeld = true;
+                }
+            } else {
+                this._chatToggleHeld = false;
+            }
         }
 
         // Keyboard/Joystick logic
@@ -995,8 +1177,11 @@ export class CharacterController {
 
         // 3.5 RESTORE ACTION INPUTS
         if (this.weaponManager) {
-            // Firing logic
-            const shootInput = this.keys.fire || (gamepad && gamepad.buttons[9] && gamepad.buttons[9].pressed);
+            // Firing logic: X (2), or default fire keys/Start (9) (R1/RB/5 and R2/RT/7 removed to prevent shooting)
+            const shootInput = this.keys.fire || (gamepad && (
+                (gamepad.buttons[2] && gamepad.buttons[2].pressed) || // X
+                (gamepad.buttons[9] && gamepad.buttons[9].pressed)    // Start
+            ));
             this.weaponManager.isFiring = shootInput;
 
             // TANK FIRE HOOK: If driving a tank and firing, trigger the cannon!
@@ -1004,18 +1189,34 @@ export class CharacterController {
                 this.weaponManager.fireTankCannon();
             }
 
-            // Cycle Weapon (Cruzeta abajo works! D-Pad Down = 13)
-            if (this.keys.weaponCycle || (gamepad && gamepad.buttons[13] && gamepad.buttons[13].pressed)) {
-                if (!this._weaponCycleHeld) {
-                    this.weaponManager.cycleWeapon();
-                    this._weaponCycleHeld = true;
+            // Weapon Cycle and Unholster (Button Y = 3)
+            if (gamepad && gamepad.buttons[3] && gamepad.buttons[3].pressed) {
+                if (!this._gamepadYHeld) {
+                    if (this.weaponManager.isHolstered) {
+                        this.weaponManager.toggleHolster();
+                    } else {
+                        this.weaponManager.cycleWeapon();
+                    }
+                    this._gamepadYHeld = true;
                 }
             } else {
-                this._weaponCycleHeld = false;
+                this._gamepadYHeld = false;
             }
 
-            // Toggle Laser (Gamepad only)
-            if (gamepad && gamepad.buttons[0] && gamepad.buttons[0].pressed) {
+            // Drop/Holster Weapon (D-Pad Right = 15)
+            if (gamepad && gamepad.buttons[15] && gamepad.buttons[15].pressed) {
+                if (!this._gamepadRightHeld) {
+                    if (!this.weaponManager.isHolstered) {
+                        this.weaponManager.holster();
+                    }
+                    this._gamepadRightHeld = true;
+                }
+            } else {
+                this._gamepadRightHeld = false;
+            }
+
+            // Toggle Laser (D-Pad Left = 14)
+            if (gamepad && gamepad.buttons[14] && gamepad.buttons[14].pressed) {
                 if (!this._laserToggleHeld) {
                     this.weaponManager.toggleLaser();
                     this._laserToggleHeld = true;
@@ -1024,27 +1225,37 @@ export class CharacterController {
                 this._laserToggleHeld = false;
             }
 
-            // Toggle Holster (Gamepad reserved for later, e.g. cross down 13 if unused)
-            // Left empty for gamepad for now
-
-            // ADS FOV (Zoom using Gamepad Triggers)
-            const zoomTriggered = (gamepad && ((gamepad.buttons[7] && gamepad.buttons[7].pressed) || (gamepad.buttons[11] && gamepad.buttons[11].pressed)));
+            // ADS FOV (Zoom using Gamepad LT / LB / Right Stick Press)
+            // If they are pressing the map combination, do not trigger ADS zoom.
+            const zoomTriggered = (gamepad && !this._mapCombinationPressed && (
+                (gamepad.buttons[6] && gamepad.buttons[6].pressed) || // LT
+                (gamepad.buttons[4] && gamepad.buttons[4].pressed) || // LB
+                (gamepad.buttons[11] && gamepad.buttons[11].pressed)  // R3 (Right Stick Press)
+            ));
 
             // Helicopters use Left Click for Guns, Right Click for Missiles
             const isHeli = this.isDriving && this.vehicle && this.vehicle.type === 'helicopter';
 
             if (isHeli) {
-                if (this.keys.fire) this.weaponManager.fireHeliGuns();
-                if (this.keys.ads) this.weaponManager.fireHeliMissiles(); // Right click
+                const heliFireGuns = this.keys.fire || (gamepad && (
+                    (gamepad.buttons[7] && gamepad.buttons[7].pressed) || // RT
+                    (gamepad.buttons[5] && gamepad.buttons[5].pressed)    // RB
+                ));
+                const heliFireMissiles = this.keys.ads || (gamepad && (
+                    (gamepad.buttons[6] && gamepad.buttons[6].pressed) || // LT
+                    (gamepad.buttons[2] && gamepad.buttons[2].pressed)    // X
+                ));
+
+                if (heliFireGuns) this.weaponManager.fireHeliGuns();
+                if (heliFireMissiles) this.weaponManager.fireHeliMissiles();
 
                 // If using gamepad zoom, force 30. Otherwise, let world wheel zoom control it.
                 if (zoomTriggered) this.desiredFOV = 30;
-                // DO NOT force back to 75 here for heli, so mouse wheel zoom stays!
             } else {
                 this.desiredFOV = (this.keys.ads || zoomTriggered) ? 30 : 75;
             }
 
-            // Night Vision (Gamepad L1 = 8)
+            // Night Vision (Select button = 8)
             if (gamepad && gamepad.buttons[8] && gamepad.buttons[8].pressed) {
                 if (!this._nvToggleHeld) {
                     if (this.world) this.world.toggleNightVision();
@@ -1054,39 +1265,14 @@ export class CharacterController {
                 this._nvToggleHeld = false;
             }
 
-            // UI Toggle / Photo Mode (Gamepad Select = 10 or 6)
-            if (gamepad && ((gamepad.buttons[10] && gamepad.buttons[10].pressed) || (gamepad.buttons[6] && gamepad.buttons[6].pressed))) {
+            // UI Toggle / Photo Mode (Start button = 9)
+            if (gamepad && gamepad.buttons[9] && gamepad.buttons[9].pressed) {
                 if (!this._uiToggleHeld) {
                     if (this.world) this.world.toggleUI(); // This toggles debug console and mobile controls
                     this._uiToggleHeld = true;
                 }
             } else {
                 this._uiToggleHeld = false;
-            }
-
-            // JUMP / VEHICLE (User wants X to jump/ride. Controller X is index 3)
-            if (gamepad && gamepad.buttons[3] && gamepad.buttons[3].pressed) {
-                if (!this._gamepadJumpHeld) {
-                    if (this.isDriving) {
-                        if (this.world && this.world.vehicleManager) this.world.vehicleManager.exitVehicle();
-                    } else {
-                        let enteredVehicle = false;
-                        if (this.world && this.world.vehicleManager) {
-                            const nearest = this.world.vehicleManager.findNearestVehicle(this.mesh.position, 12.0);
-                            if (nearest) {
-                                this.world.vehicleManager.enterVehicle(nearest);
-                                // SYNC AIM WITH CAMERA ON ENTRY (Gamepad)
-                                this.aimYaw = this.yaw;
-                                this.aimPitch = this.pitch;
-                                enteredVehicle = true;
-                            }
-                        }
-                        if (!enteredVehicle && !this.isDriving) this.triggerJump('gamepad');
-                    }
-                    this._gamepadJumpHeld = true;
-                }
-            } else {
-                this._gamepadJumpHeld = false;
             }
         }
 
@@ -1643,6 +1829,115 @@ PTR LOCK: ${plStatus}
                     action.reset().fadeIn(0.2).play();
                 }
             }
+        }
+    }
+
+    takeDamage(amount) {
+        if (this.isDead) return;
+        this.hp = Math.max(0, this.hp - amount);
+        console.log(`💥 [HEALTH] Local player took ${amount} damage! Current HP: ${this.hp}/3`);
+
+        // Update UI
+        const hpEl = document.getElementById('cyberpunk-player-hp');
+        if (hpEl) {
+            const blocks = "■ ".repeat(this.hp) + "_ ".repeat(3 - this.hp);
+            hpEl.innerText = `❤️ VITAL: [ ${blocks.trim()} ]`;
+            hpEl.style.color = this.hp === 3 ? '#00ffaa' : (this.hp === 2 ? '#ffaa00' : '#ff0055');
+            hpEl.style.textShadow = `0 0 5px ${hpEl.style.color}`;
+        }
+
+        // Flash screen red
+        if (this.world) this.world.triggerDamageFlash();
+
+        if (this.hp <= 0) {
+            this.die();
+        }
+    }
+
+    die() {
+        if (this.isDead) return;
+        this.isDead = true;
+        this.state = 'dead';
+        console.warn("💀 [DEATH] Player has been eliminated!");
+
+        // If driving, force exit vehicle first
+        if (this.isDriving && this.world && this.world.vehicleManager) {
+            this.world.vehicleManager.exitVehicle();
+        }
+
+        // Make mesh invisible
+        if (this.mesh) this.mesh.visible = false;
+
+        // Disable weapon firing
+        if (this.weaponManager) {
+            this.weaponManager.stopFiring();
+        }
+
+        // Show Cyberpunk Death Overlay
+        const deathOverlay = document.getElementById('cyberpunk-death-overlay');
+        if (deathOverlay) {
+            deathOverlay.style.display = 'flex';
+        }
+
+        // Instantly emit final death state update to server so other players see us vanish
+        const net = this.world?.networkManager;
+        if (net && net.socket && net.socket.connected) {
+            const charWorldPos = new THREE.Vector3();
+            this.mesh.getWorldPosition(charWorldPos);
+            net.sendUpdate(
+                charWorldPos,
+                this.yaw,
+                this.pitch || 0,
+                'dead',
+                this.weaponManager ? this.weaponManager.currentWeaponType : 'pistol',
+                false,
+                null
+            );
+        }
+    }
+
+    respawn() {
+        if (!this.isDead) return;
+        this.isDead = false;
+        this.hp = 3;
+        this.state = 'idle';
+
+        // Make mesh visible
+        if (this.mesh) this.mesh.visible = true;
+
+        // Reset health UI
+        const hpEl = document.getElementById('cyberpunk-player-hp');
+        if (hpEl) {
+            hpEl.innerText = `❤️ VITAL: [ ■ ■ ■ ]`;
+            hpEl.style.color = '#00ffaa';
+            hpEl.style.textShadow = '0 0 5px #00ffaa';
+        }
+
+        // Hide Cyberpunk Death Overlay
+        const deathOverlay = document.getElementById('cyberpunk-death-overlay');
+        if (deathOverlay) {
+            deathOverlay.style.display = 'none';
+        }
+
+        // Teleport to original random spawn cluster coordinate
+        const angle = Math.random() * Math.PI * 2;
+        const radius = Math.random() * 5;
+        const spawnX = -298 + Math.cos(angle) * radius;
+        const spawnZ = -40 + Math.sin(angle) * radius;
+        if (this.mesh) {
+            this.mesh.position.set(spawnX, 0.5, spawnZ);
+        }
+        this.yaw = 0;
+        this.pitch = 0;
+
+        console.log("🦾 [RESPAWN] Player respawned successfully at:", spawnX, spawnZ);
+
+        // Force restart animations
+        if (this.mixer) this.mixer.stopAllAction();
+        const clip = this.animations['idle'];
+        if (this.mixer && clip) {
+            const action = this.mixer.clipAction(clip);
+            action.reset().fadeIn(0.2).play();
         }
     }
 

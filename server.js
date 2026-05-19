@@ -13,6 +13,14 @@ const io = require('socket.io')(http, {
 const PORT = process.env.PORT || 3000;
 const WEBHOOK_URL = process.env.NOTIFY_WEBHOOK_URL;
 
+// Shared Vehicle Occupation & Position State (Centralized Server-side state)
+const vehicles = {
+  'vehicle_motorcycle': { id: 'vehicle_motorcycle', type: 'motorcycle', occupiedBy: null, x: -300, y: 0.5, z: -40, yaw: 0 },
+  'vehicle_tank': { id: 'vehicle_tank', type: 'tank', occupiedBy: null, x: -300, y: 0.5, z: 0, yaw: 0 },
+  'vehicle_helicopter': { id: 'vehicle_helicopter', type: 'helicopter', occupiedBy: null, x: -300, y: 0.5, z: -20, yaw: 0 }
+};
+
+
 // Notification Helper
 const sendNotify = async (title, message, color = 0x00ff00) => {
   if (!WEBHOOK_URL) {
@@ -109,6 +117,51 @@ io.on('connection', (socket) => {
   socket.emit('currentPlayers', players);
   socket.broadcast.emit('newPlayer', { id: socket.id, player: players[socket.id] });
 
+  // Send current vehicles state
+  socket.emit('vehicleStateUpdate', { vehicles });
+
+  // Handle vehicle entry request
+  socket.on('requestEnterVehicle', (data) => {
+    const { vehicleId } = data;
+    const vehicle = vehicles[vehicleId];
+    if (!vehicle) return;
+
+    if (vehicle.occupiedBy === null) {
+      // Approve entry
+      vehicle.occupiedBy = socket.id;
+      socket.emit('enterVehicleSuccess', { vehicleId });
+      io.emit('vehicleStateUpdate', { vehicles });
+      
+      const player = players[socket.id];
+      console.log(`🚗 Jugador ${player ? player.name : socket.id} subió a ${vehicle.type}`);
+    } else {
+      // Reject entry
+      const requester = players[socket.id]; // El jugador que está intentando subir
+      const requesterName = requester ? requester.name : 'Player';
+      socket.emit('enterVehicleFailure', { 
+        vehicleId, 
+        reason: `FUCK YOU ${requesterName}!!!`
+      });
+    }
+  });
+
+  // Handle vehicle exit
+  socket.on('exitVehicle', (data) => {
+    const { vehicleId, x, y, z, yaw } = data;
+    const vehicle = vehicles[vehicleId];
+    if (vehicle && vehicle.occupiedBy === socket.id) {
+      vehicle.occupiedBy = null;
+      if (x !== undefined) {
+        vehicle.x = x;
+        vehicle.y = y;
+        vehicle.z = z;
+        vehicle.yaw = yaw;
+      }
+      io.emit('vehicleStateUpdate', { vehicles });
+      console.log(`🚗 Jugador liberó vehículo ${vehicleId}`);
+    }
+  });
+
   // Handle Pause
   socket.on('togglePause', (data) => {
     isPaused = data.paused;
@@ -147,6 +200,15 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
+    // Free any vehicles occupied by this player
+    for (const vehicleId in vehicles) {
+      if (vehicles[vehicleId].occupiedBy === socket.id) {
+        vehicles[vehicleId].occupiedBy = null;
+        io.emit('vehicleStateUpdate', { vehicles });
+        console.log(`🚗 Vehículo ${vehicleId} liberado por desconexión de ${socket.id}`);
+      }
+    }
+
     const player = players[socket.id];
     console.log('User disconnected:', socket.id);
     

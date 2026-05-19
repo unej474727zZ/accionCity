@@ -20,6 +20,18 @@
   <div id="debug-console"
     style="position: absolute; top: 0; left: 0; color: lime; background: rgba(0,0,0,0.5); pointer-events: none; z-index: 9999; font-family: monospace; font-size: 10px; white-space: pre;">
     Debug Info...</div>
+  
+  <!-- Cyberpunk Player ID Card -->
+  <div id="cyberpunk-player-card" style="position: absolute; top: 15px; left: 20px; font-family: 'Courier New', Courier, monospace; z-index: 10000; pointer-events: none; opacity: 0; transition: opacity 0.5s ease-in-out;">
+    <div style="font-size: 9px; color: #ff0055; letter-spacing: 3px; font-weight: bold; margin-bottom: 2px; text-shadow: 0 0 5px #ff0055;">WARZONE ID LINKED</div>
+    <div style="font-size: 18px; color: #00ffaa; font-weight: 900; letter-spacing: 2px; text-shadow: 0 0 10px #00ffaa, 0 0 20px #00aaff;">
+      👤 <span id="cyberpunk-player-name">Player</span>
+    </div>
+    <div id="cyberpunk-player-hp" style="font-size: 11px; color: #00ffaa; letter-spacing: 2px; font-weight: bold; margin-top: 4px; text-shadow: 0 0 5px #00ffaa; transition: color 0.3s, text-shadow 0.3s;">
+      ❤️ VITAL: [ ■ ■ ■ ]
+    </div>
+  </div>
+
   <div id="crosshair" style="display: none;">+</div>
   
   <div id="heli-radar" style="display: none;">
@@ -108,6 +120,35 @@
       <input type="text" id="chat-input" placeholder="Type..." autocomplete="off">
     </div>
   </div>
+
+  <!-- Cyberpunk Death / Elimination Overlay -->
+  <div id="cyberpunk-death-overlay" style="position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(15, 0, 5, 0.94); display: none; flex-direction: column; align-items: center; justify-content: center; z-index: 200000; font-family: 'Courier New', Courier, monospace; color: #ff0055; text-align: center; pointer-events: auto;">
+    <div style="font-size: 14px; letter-spacing: 4px; font-weight: bold; margin-bottom: 10px; text-shadow: 0 0 5px #ff0055; animation: cyberBlink 1.5s infinite alternate;">⚠️ CONEXIÓN DE SUJETO PERDIDA</div>
+    <h1 style="font-size: 60px; font-weight: 900; letter-spacing: 12px; margin: 0 0 30px 0; text-shadow: 0 0 20px #ff0055, 0 0 40px #ff0055; animation: cyberGlitch 0.35s infinite;">ELIMINADO</h1>
+    <button id="respawn-btn" style="padding: 16px 32px; font-family: 'Courier New', Courier, monospace; font-size: 18px; font-weight: bold; letter-spacing: 3px; background: transparent; color: #00ffaa; border: 2px solid #00ffaa; cursor: pointer; box-shadow: 0 0 20px rgba(0, 255, 170, 0.4); text-shadow: 0 0 5px #00ffaa; clip-path: polygon(0% 0%, 90% 0%, 100% 30%, 100% 100%, 10% 100%, 0% 70%); transition: all 0.2s; outline: none;">[ REAPARECER ]</button>
+    <div style="font-size: 11px; color: #666; margin-top: 25px; letter-spacing: 2px;">PRESIONA [F5] O TOCA START / REAPARECER</div>
+  </div>
+
+  <style>
+    @keyframes cyberBlink {
+      0% { opacity: 0.3; }
+      100% { opacity: 1.0; }
+    }
+    @keyframes cyberGlitch {
+      0% { transform: skew(0deg); text-shadow: 0 0 20px #ff0055, 0 0 40px #ff0055; }
+      10% { transform: skew(2deg); text-shadow: -2px 0 red, 2px 0 blue; }
+      20% { transform: skew(-1deg); }
+      30% { transform: skew(0deg); }
+      90% { transform: skew(0deg); }
+      100% { transform: skew(-3deg); text-shadow: -3px 0 #ff0055, 3px 0 #00ffff; }
+    }
+    #respawn-btn:hover {
+      background: #00ffaa !important;
+      color: #000 !important;
+      box-shadow: 0 0 35px #00ffaa !important;
+      text-shadow: none !important;
+    }
+  </style>
 
   <script type="module">
     import './main.js?v=1.3';
