@@ -1126,6 +1126,32 @@ export class World {
                 }
             }
 
+            // --- SYNC VEHICLE VISIBILITY ---
+            if (this.vehicleManager && this.character) {
+                const drivenTypes = new Set();
+                // Check if local player is driving
+                if (this.character.isDriving && this.character.vehicle) {
+                    drivenTypes.add(this.character.vehicle.type);
+                }
+                // Check if any remote player is driving
+                Object.values(this.remotePlayers).forEach(p => {
+                    if (p.currentVehicleType) {
+                        drivenTypes.add(p.currentVehicleType);
+                    }
+                });
+
+                // Sync each local vehicle's visibility
+                this.vehicleManager.vehicles.forEach(v => {
+                    if (this.character.isDriving && this.character.vehicle === v) {
+                        // If local player is driving it, keep it visible (handled by local character controller)
+                        // Do not touch
+                    } else {
+                        // If someone else (or we) are driving this TYPE of vehicle, hide the parked one
+                        v.mesh.visible = !drivenTypes.has(v.type);
+                    }
+                });
+            }
+
             Object.values(this.remotePlayers).forEach(p => p.update(dt, this.camera));
 
             if (this.character && this.networkManager && !this.isPaused) {

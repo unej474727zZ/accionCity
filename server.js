@@ -26,7 +26,7 @@ const sendNotify = async (title, message, color = 0x00ff00) => {
     const response = await fetch(WEBHOOK_URL, {
       method: 'POST',
       headers: { 
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/json; charset=utf-8',
         'Accept': 'application/json'
       },
       body: JSON.stringify({ 
@@ -113,7 +113,7 @@ io.on('connection', (socket) => {
   socket.on('togglePause', (data) => {
     isPaused = data.paused;
     const player = players[socket.id];
-    const status = isPaused ? '⏸️ JUEGO PAUSADO' : '▶️ JUEGO REANUDADO';
+    const status = isPaused ? 'JUEGO PAUSADO' : 'JUEGO REANUDADO';
     
     // Solo mandamos el aviso al correo, NO bloqueamos a los demás
     sendNotify(status, `El jugador **${player ? player.name : 'Desconocido'}** ha ${isPaused ? 'puesto' : 'quitado'} la pausa individualmente.`);
@@ -168,3 +168,43 @@ process.on('SIGINT', async () => {
 http.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
+
+// --- LocaltoNet Tunnel Status Monitor ---
+const PUBLIC_TUNNEL_URL = process.env.PUBLIC_TUNNEL_URL || 'https://ysioakxlt4.localto.net/';
+let wasTunnelOnline = true; // Assume online at startup
+
+const checkTunnel = async () => {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    
+    const response = await fetch(PUBLIC_TUNNEL_URL, { 
+      signal: controller.signal,
+      headers: { 'User-Agent': 'Tunnel-Monitor' }
+    });
+    clearTimeout(timeoutId);
+    
+    // 200 OK or any status below 500 means the server is reachable through the proxy
+    const isOnline = response.ok || response.status < 500;
+    
+    if (isOnline && !wasTunnelOnline) {
+      wasTunnelOnline = true;
+      console.log('🌐 Túnel LocaltoNet REACTIVADO (Online)');
+      sendNotify('🌐 TÚNEL LOCALTONET REACTIVADO', `El acceso público a través de **${PUBLIC_TUNNEL_URL}** vuelve a estar disponible.`, 0x00ff00);
+    } else if (!isOnline && wasTunnelOnline) {
+      wasTunnelOnline = false;
+      console.log('🔴 Túnel LocaltoNet PAUSADO (Offline)');
+      sendNotify('🔴 TÚNEL LOCALTONET PAUSADO', `El acceso público a través de **${PUBLIC_TUNNEL_URL}** ha sido pausado o no responde.`, 0xffa500);
+    }
+  } catch (err) {
+    if (wasTunnelOnline) {
+      wasTunnelOnline = false;
+      console.log('🔴 Túnel LocaltoNet PAUSADO (Offline) - Error:', err.message);
+      sendNotify('🔴 TÚNEL LOCALTONET PAUSADO', `El acceso público a través de **${PUBLIC_TUNNEL_URL}** está fuera de línea. (Error: ${err.message})`, 0xffa500);
+    }
+  }
+};
+
+// Check tunnel status every 10 seconds
+setInterval(checkTunnel, 10000);
+

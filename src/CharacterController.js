@@ -101,6 +101,10 @@ export class CharacterController {
                     // FIX: Prevent bounding-box culling glitches on SkinnedMeshes!
                     child.frustumCulled = false;
                 }
+                if (child.isBone) {
+                    child.userData.restQuaternion = child.quaternion.clone();
+                    child.userData.restPosition = child.position.clone();
+                }
             });
 
             // 2. Setup Animations (Only if GLTF exists)
@@ -1300,16 +1304,16 @@ export class CharacterController {
                         if (pushObj) {
                             const pushForce = dt * 40.0;
                             const pushVec = moveDir.clone().multiplyScalar(pushForce);
-                            
+
                             // Check if the object itself is hitting a wall
                             const pRay = new THREE.Raycaster(pushObj.position.clone().add(new THREE.Vector3(0, 0.5, 0)), moveDir);
-                            pRay.far = 1.0; 
+                            pRay.far = 1.0;
                             const pHits = pRay.intersectObjects(this.colliders, true);
-                            
+
                             // Filter out the object itself from its own raycast
                             const obstacleHits = pHits.filter(h => {
                                 let p = h.object;
-                                while(p) {
+                                while (p) {
                                     if (p === pushObj) return false;
                                     p = p.parent;
                                 }
@@ -1415,7 +1419,7 @@ export class CharacterController {
                     if (child.name.includes('Neck') || child.name.includes('Head')) {
                         // Facing +Z, negative X rotation tilts backwards (UP)
                         // Just the head/neck as requested
-                        child.rotation.x = -this.pitch; 
+                        child.rotation.x = -this.pitch;
                     }
                 }
             });
@@ -1487,6 +1491,7 @@ PTR LOCK: ${plStatus}
     setDriving(isDriving, vehicle, exitPos) {
         this.isDriving = isDriving;
         this._vehicle = vehicle;
+        this.state = isDriving ? 'driving' : 'idle';
         // Removed: this.mesh.position.copy(exitPos) here. 
         // It's now handled after unparenting to ensure world space correctness.
 
@@ -1503,8 +1508,14 @@ PTR LOCK: ${plStatus}
             const cfg = this.world?.vehicleManager?.settings?.[vehicle.type];
             if (cfg && cfg.seatOffset) {
                 this.mesh.position.copy(cfg.seatOffset);
+                if (vehicle.type === 'motorcycle') {
+                    this.mesh.position.add(new THREE.Vector3(0, -0.16, 0.08));
+                }
             } else {
                 this.mesh.position.set(0, 0, 0);
+                if (vehicle.type === 'motorcycle') {
+                    this.mesh.position.add(new THREE.Vector3(0, -0.16, 0.08));
+                }
             }
 
             if (vehicle.type === 'tank' || vehicle.type === 'helicopter') {
@@ -1533,21 +1544,21 @@ PTR LOCK: ${plStatus}
 
             if (vehicle.type === 'motorcycle') {
                 this.mesh.quaternion.set(0, 0, 0, 1);
-                
+
                 // --- RV HELMET LOGIC ---
                 if (!this.helmetMesh) {
                     this.helmetMesh = this.createVRHelmet();
                     console.log("Tactical Cyber VR Helmet procedurally generated.");
                 }
-                
+
                 if (this.headBone && this.helmetMesh) {
                     this.headBone.add(this.helmetMesh);
-                    
+
                     // PROGRAMMATIC SCALE COMPENSATION FOR MIXAMO ARMATURE
                     this.headBone.updateMatrixWorld(true);
                     const worldScale = new THREE.Vector3();
                     this.headBone.getWorldScale(worldScale);
-                    
+
                     if (worldScale.x !== 0 && worldScale.y !== 0 && worldScale.z !== 0) {
                         this.helmetMesh.scale.set(
                             1.0 / worldScale.x,
@@ -1557,7 +1568,7 @@ PTR LOCK: ${plStatus}
                     } else {
                         this.helmetMesh.scale.set(120, 120, 120); // Fallback standard Mixamo compensation
                     }
-                    
+
                     // Position and rotation offsets must also be adjusted for the parent scale:
                     const scaleCompY = worldScale.y !== 0 ? 1.0 / worldScale.y : 120;
                     const scaleCompZ = worldScale.z !== 0 ? 1.0 / worldScale.z : 120;
@@ -1605,7 +1616,7 @@ PTR LOCK: ${plStatus}
             this.isJumping = false;
             this.isGrounded = true;
             this.velocityY = 0;
-            this.state = 'idle';
+            this.state = 'driving';
         }
 
         // Hide weapons while driving
@@ -1617,11 +1628,20 @@ PTR LOCK: ${plStatus}
         // Toggle Animation
         if (this.mixer) {
             this.mixer.stopAllAction();
-            const animName = isDriving ? 'driving' : 'idle';
-            const clip = this.animations[animName] || this.animations['idle'];
-            if (clip) {
-                const action = this.mixer.clipAction(clip);
-                action.reset().fadeIn(0.2).play();
+            if (isDriving) {
+                this.mesh.traverse(child => {
+                    if (child.isBone && child.userData.restQuaternion) {
+                        child.quaternion.copy(child.userData.restQuaternion);
+                        child.position.copy(child.userData.restPosition);
+                    }
+                });
+                this.bones = null;
+            } else {
+                const clip = this.animations['idle'];
+                if (clip) {
+                    const action = this.mixer.clipAction(clip);
+                    action.reset().fadeIn(0.2).play();
+                }
             }
         }
     }
@@ -1658,7 +1678,8 @@ PTR LOCK: ${plStatus}
             // Force position every frame to override any unintended offsets
             const cfg = this.world?.vehicleManager?.settings?.motorcycle;
             if (cfg && cfg.seatOffset) {
-                this.mesh.position.copy(cfg.seatOffset);
+                // Shift down by -0.16 and forward by 0.08 to sit perfectly on seat and reach handlebars!
+                this.mesh.position.copy(cfg.seatOffset).add(new THREE.Vector3(0, 0, -0.1));
             }
 
             if (Math.random() < 0.01) { // Log occasionally to prove it's running
@@ -1684,14 +1705,14 @@ PTR LOCK: ${plStatus}
 
         // 1. Hands to Model (Handlebars)
         applyRel(bones.rArm, 0, 0.5, -1.4);
-        applyRel(bones.lArm, 0.2, -0.5, 1.4);      //applyRel(bones.lArm, 1.2, 0, 1.2); -1.6, -1.3, 0; 0.2, 0, 1.4
+        applyRel(bones.lArm, 0.2, -0.5, 1.4);
 
         // Bend elbows inward
         applyRel(bones.rForeArm, 0, 0.5, 0);
-        applyRel(bones.lForeArm, 0, 0.5, 0);           //applyRel(bones.lForeArm, -1, -1, 1);0, -1, 0
+        applyRel(bones.lForeArm, 0, 0.5, 0);
 
         // 2. Torso Lean (Racing Tuck)
-        applyRel(bones.spine, 1, 0, 0);
+        applyRel(bones.spine, 0.95, 0, 0);
 
         // 3. Lower Body (Tucked Legs)
         applyRel(bones.rThigh, 1.4, 0, -0.2);
@@ -1733,7 +1754,7 @@ PTR LOCK: ${plStatus}
         // Base Spherical Offset (Behind player)
         // Since we face +Z, camera at yaw=0 should be at -Z relative to player.
         let offsetX = -distance * Math.sin(currentYaw) * Math.cos(this.pitch);
-        let offsetY = distance * Math.sin(-this.pitch); 
+        let offsetY = distance * Math.sin(-this.pitch);
         let offsetZ = -distance * Math.cos(currentYaw) * Math.cos(this.pitch);
 
         // HELICOPTER CAMERA OVERRIDE: Nose Camera (Panoramic Exterior)
@@ -2011,7 +2032,7 @@ PTR LOCK: ${plStatus}
         const projectorGeom = new THREE.CylinderGeometry(0.05, 0.05, 0.08, 8);
         projectorGeom.rotateZ(Math.PI / 2);
         const projectorMat = new THREE.MeshStandardMaterial({ color: 0x3a3d40, metalness: 0.9, roughness: 0.2 });
-        
+
         const rightProjector = new THREE.Mesh(projectorGeom, projectorMat);
         rightProjector.position.set(0.22, 0, 0);
         helmet.add(rightProjector);
@@ -2023,7 +2044,7 @@ PTR LOCK: ${plStatus}
         // 4. Side LED Lights (Cyan Glowing rings or points)
         const ledGeom = new THREE.SphereGeometry(0.015, 8, 8);
         const ledMat = new THREE.MeshBasicMaterial({ color: 0x00ffcc });
-        
+
         const rightLed = new THREE.Mesh(ledGeom, ledMat);
         rightLed.position.set(0.23, 0, 0.05);
         helmet.add(rightLed);

@@ -71,6 +71,7 @@ export class RemotePlayer {
             loadAnim('run', 'run');
             loadAnim('backward', 'backward');
             loadAnim('jump', 'jump');
+            loadAnim('driving', 'driving');
             createMask('firing', 'firing');
             createMask('shooting', 'shooting');
 
@@ -82,6 +83,14 @@ export class RemotePlayer {
 
             // SYNC COLOR (Keep textures, add glow)
             this.tintMesh(this.mesh, data.color || 0x00ffaa);
+
+            // Cache rest quaternions and rest positions for all bones
+            this.mesh.traverse(child => {
+                if (child.isBone) {
+                    child.userData.restQuaternion = child.quaternion.clone();
+                    child.userData.restPosition = child.position.clone();
+                }
+            });
 
             // NAME TAG
             this.createNameTag(data.name || `Player ${this.id.substr(0, 4)}`);
@@ -240,12 +249,12 @@ export class RemotePlayer {
             }
             if (this.headBone && this.helmetMesh && !this.helmetMesh.parent) {
                 this.headBone.add(this.helmetMesh);
-                
+
                 // PROGRAMMATIC SCALE COMPENSATION FOR MIXAMO ARMATURE
                 this.headBone.updateMatrixWorld(true);
                 const worldScale = new THREE.Vector3();
                 this.headBone.getWorldScale(worldScale);
-                
+
                 if (worldScale.x !== 0 && worldScale.y !== 0 && worldScale.z !== 0) {
                     this.helmetMesh.scale.set(
                         1.0 / worldScale.x,
@@ -255,7 +264,7 @@ export class RemotePlayer {
                 } else {
                     this.helmetMesh.scale.set(120, 120, 120); // Fallback standard Mixamo compensation
                 }
-                
+
                 // Position and rotation offsets must also be adjusted for the parent scale:
                 const scaleCompY = worldScale.y !== 0 ? 1.0 / worldScale.y : 120;
                 const scaleCompZ = worldScale.z !== 0 ? 1.0 / worldScale.z : 120;
@@ -274,6 +283,8 @@ export class RemotePlayer {
         // --- VEHICLE SYNC ---
         const newVehicleType = data.vehicleType || null;
         if (this.currentVehicleType !== newVehicleType) {
+            const oldVehicleType = this.currentVehicleType;
+
             // Clean up old vehicle mesh
             if (this.vehicleMesh) {
                 this.scene.remove(this.vehicleMesh);
@@ -281,11 +292,46 @@ export class RemotePlayer {
             }
             this.currentVehicleType = newVehicleType;
 
+            // Handle local parked vehicle visibility and position transfers
+            if (this.world && this.world.vehicleManager) {
+                // If they just got OUT of a vehicle
+                if (oldVehicleType && !newVehicleType) {
+                    const localVehicle = this.world.vehicleManager.vehicles.find(v => v.type === oldVehicleType);
+                    if (localVehicle) {
+                        // Move the local parked vehicle to where they exited!
+                        localVehicle.mesh.position.copy(this.mesh.position);
+                        // Reset Y position to ground level
+                        localVehicle.mesh.position.y = 0.0;
+                        if (oldVehicleType === 'helicopter' && localVehicle.mesh.userData.halfHeight) {
+                            localVehicle.mesh.position.y += localVehicle.mesh.userData.halfHeight;
+                        }
+                        localVehicle.mesh.rotation.y = this.yaw;
+
+                        // Force update collider bounding box
+                        localVehicle.collider.setFromObject(localVehicle.mesh);
+                    }
+                }
+            }
+
             if (this.currentVehicleType) {
                 const original = this.assets[this.currentVehicleType]?.scene;
                 if (original) {
                     this.vehicleMesh = SkeletonUtils ? SkeletonUtils.clone(original) : original.clone();
-                    
+
+                    // Auto-detect wheels for spinning
+                    this.vehicleWheels = [];
+                    if (this.currentVehicleType !== 'tank') {
+                        this.vehicleMesh.traverse(child => {
+                            if (child.isMesh) {
+                                const name = child.name.toLowerCase();
+                                if (name.includes('wheel') || name.includes('tire') || name.includes('roda')) {
+                                    this.vehicleWheels.push(child);
+                                }
+                            }
+                        });
+                        console.log(`🏍️ RemotePlayer: Auto-Detected ${this.vehicleWheels.length} Wheels for Spinning.`);
+                    }
+
                     // Apply correct scale
                     let scaleVal = 1.0;
                     if (this.currentVehicleType === 'motorcycle') scaleVal = 0.9;
@@ -312,16 +358,8 @@ export class RemotePlayer {
             }
         }
 
-        // Update vehicle mesh transform if present
+        // Sync visibility
         if (this.vehicleMesh) {
-            this.vehicleMesh.position.copy(this.mesh.position);
-            this.vehicleMesh.rotation.y = this.yaw;
-
-            if (this.currentVehicleType === 'helicopter' && this.vehicleMesh.userData.halfHeight) {
-                this.vehicleMesh.position.y += this.vehicleMesh.userData.halfHeight;
-            }
-
-            // Sync visibility
             if (this.currentVehicleType === 'tank' || this.currentVehicleType === 'helicopter') {
                 this.mesh.visible = false; // Hide avatar inside tank/heli
             } else {
@@ -371,6 +409,20 @@ export class RemotePlayer {
         let actualAnimName = name;
         if (name === 'rifle' || name === 'pistol') actualAnimName = 'idle';
 
+        if (actualAnimName === 'driving') {
+            this.state = name; // Update state to prevent repeated async reseteos!
+            if (this.mixer) this.mixer.stopAllAction();
+            this.mesh.traverse(child => {
+                if (child.isBone && child.userData.restQuaternion) {
+                    child.quaternion.copy(child.userData.restQuaternion);
+                    child.position.copy(child.userData.restPosition);
+                }
+            });
+            this.bones = null;
+            this.currentAction = null;
+            return;
+        }
+
         const clip = this.animations[actualAnimName] || this.animations['idle'];
         if (!clip || !this.mixer) return;
 
@@ -419,10 +471,58 @@ export class RemotePlayer {
     }
 
     update(dt, camera) {
-        if (this.mixer) this.mixer.update(dt);
+        if (this.mixer) {
+            if (this.currentVehicleType !== 'motorcycle') {
+                this.mixer.update(dt);
+            }
+        }
+
+        if (this.currentVehicleType === 'motorcycle') {
+            this.updateDrivingPose();
+        }
+
+        // --- UPDATE VEHICLE MESH TRANSFORM SMOOTHLY EVERY FRAME ---
+        if (this.vehicleMesh) {
+            this.vehicleMesh.position.copy(this.mesh.position);
+            this.vehicleMesh.rotation.y = this.yaw;
+
+            if (this.currentVehicleType === 'motorcycle') {
+                // Shift motorcycle up by +0.16 and backward by -0.08 relative to the avatar's pivot to align perfectly!
+                const offset = new THREE.Vector3(0, 0.16, -0.08);
+                offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
+                this.vehicleMesh.position.add(offset);
+
+                // --- ROTATE REMOTE VEHICLE WHEELS ---
+                if (this.vehicleWheels && this.vehicleWheels.length > 0) {
+                    // Estimate velocity based on position changes
+                    let velocity = 0;
+                    if (this.lastPosition && dt > 0) {
+                        velocity = this.mesh.position.distanceTo(this.lastPosition) / dt;
+                        // Cap it to prevent crazy spin during spawns/jumps
+                        if (velocity > 35) velocity = 35;
+                    }
+                    if (!this.lastPosition) this.lastPosition = new THREE.Vector3();
+                    this.lastPosition.copy(this.mesh.position);
+
+                    // Spin wheels based on estimated velocity
+                    const wheelRotation = (velocity * dt) / 0.35;
+                    this.vehicleWheels.forEach(wheel => {
+                        wheel.rotation.x += wheelRotation;
+                    });
+                }
+            } else {
+                this.lastPosition = null; // Clear position history when not on a motorcycle
+            }
+
+            if (this.currentVehicleType === 'helicopter' && this.vehicleMesh.userData.halfHeight) {
+                this.vehicleMesh.position.y += this.vehicleMesh.userData.halfHeight;
+            }
+        } else {
+            this.lastPosition = null;
+        }
 
         // --- APPLY PITCH TO BONES (Aiming up/down) ---
-        if (this.mesh) {
+        if (this.mesh && this.currentVehicleType !== 'motorcycle') {
             this.mesh.traverse(child => {
                 // Repartimos la inclinación para que no parezca un avestruz (Look natural)
                 if (child.isBone) {
@@ -550,7 +650,7 @@ export class RemotePlayer {
         const projectorGeom = new THREE.CylinderGeometry(0.05, 0.05, 0.08, 8);
         projectorGeom.rotateZ(Math.PI / 2);
         const projectorMat = new THREE.MeshStandardMaterial({ color: 0x3a3d40, metalness: 0.9, roughness: 0.2 });
-        
+
         const rightProjector = new THREE.Mesh(projectorGeom, projectorMat);
         rightProjector.position.set(0.22, 0, 0);
         helmet.add(rightProjector);
@@ -562,7 +662,7 @@ export class RemotePlayer {
         // 4. Side LED Lights (Cyan Glowing rings or points)
         const ledGeom = new THREE.SphereGeometry(0.015, 8, 8);
         const ledMat = new THREE.MeshBasicMaterial({ color: 0x00ffcc });
-        
+
         const rightLed = new THREE.Mesh(ledGeom, ledMat);
         rightLed.position.set(0.23, 0, 0.05);
         helmet.add(rightLed);
@@ -590,6 +690,92 @@ export class RemotePlayer {
         helmet.rotation.set(0, 0, 0); // Align forward with avatar look direction
 
         return helmet;
+    }
+
+    updateDrivingPose() {
+        if (this.currentVehicleType !== 'motorcycle' || !this.mesh) return;
+
+        // OPTIMIZED: Cache bones to avoid traversing every frame
+        if (!this.bones) {
+            this.bones = {};
+            this.mesh.traverse(child => {
+                if (child.isBone) {
+                    const name = child.name;
+                    if (name.endsWith('RightArm')) this.bones.rArm = child;
+                    if (name.endsWith('LeftArm')) this.bones.lArm = child;
+                    if (name.endsWith('RightForeArm')) this.bones.rForeArm = child;
+                    if (name.endsWith('LeftForeArm')) this.bones.lForeArm = child;
+                    if (name.endsWith('RightUpLeg')) this.bones.rThigh = child;
+                    if (name.endsWith('LeftUpLeg')) this.bones.lThigh = child;
+                    if (name.endsWith('RightLeg')) this.bones.rShin = child;
+                    if (name.endsWith('LeftLeg')) this.bones.lShin = child;
+                    if (name.endsWith('Spine')) this.bones.spine = child;
+                    if (name.endsWith('Neck')) this.bones.neck = child;
+                    if (name.endsWith('Hips')) this.bones.hips = child;
+                }
+            });
+        }
+        const bones = this.bones;
+
+        if (this.vehicle && this.vehicle.type === 'motorcycle') {
+            // Rotalo: Math.PI aligns his back to camera and face to handlebars
+            this.mesh.rotation.y = 0;
+
+            // Force position every frame to override any unintended offsets
+            const cfg = this.world?.vehicleManager?.settings?.motorcycle;
+            if (cfg && cfg.seatOffset) {
+                // Shift down by -0.16 and forward by 0.08 to sit perfectly on seat and reach handlebars!
+                this.mesh.position.copy(cfg.seatOffset).add(new THREE.Vector3(0, 0.25, -0.1));
+            }
+
+            if (Math.random() < 0.01) { // Log occasionally to prove it's running
+                const worldPos = new THREE.Vector3();
+                this.mesh.getWorldPosition(worldPos);
+                console.log("🏍️ Rider Local:", this.mesh.position.z.toFixed(2), "World Z:", worldPos.z.toFixed(2));
+            }
+        }
+
+        const applyRel = (bone, pitch, yaw, roll) => {
+            if (!bone) return;
+            if (!bone.userData) bone.userData = {};
+            if (!bone.userData.restQuaternion) {
+                bone.userData.restQuaternion = bone.quaternion.clone();
+            }
+            const q = bone.userData.restQuaternion.clone();
+            if (pitch) q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), pitch));
+            if (yaw) q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw));
+            if (roll) q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), roll));
+            bone.quaternion.copy(q);
+        };
+
+        // 1. Hands to Model (Handlebars)
+        applyRel(bones.rArm, 0, 0.5, -1.4);
+        applyRel(bones.lArm, 0.2, -0.5, 1.4);
+
+        // Bend elbows inward
+        applyRel(bones.rForeArm, 0, 0.5, 0);
+        applyRel(bones.lForeArm, 0, 0.5, 0);
+
+        // 2. Torso Lean (Racing Tuck)
+        applyRel(bones.spine, 0.8, 0, 0);
+
+        // 3. Lower Body (Tucked Legs)
+        applyRel(bones.rThigh, 1.4, 0, -0.2);
+        applyRel(bones.lThigh, 1.4, 0, 0.2);
+
+        // Bend knees back onto footpegs
+        applyRel(bones.rShin, -1.7, -0.6, 0);
+        applyRel(bones.lShin, -1.7, 0.6, 0);
+
+        // 4. Head Position
+        applyRel(bones.neck, -0.4, 0, 0);
+
+        // FORCE MATRIX UPDATES AFTER OVERRIDE
+        if (this.bones) {
+            Object.values(this.bones).forEach(bone => {
+                bone.updateMatrixWorld(true);
+            });
+        }
     }
 
     createLaser() {
