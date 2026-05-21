@@ -48,15 +48,16 @@ export class VehicleManager {
         if (type === 'helicopter') {
             const bbox = new THREE.Box3().setFromObject(model);
             const center = bbox.getCenter(new THREE.Vector3());
-            // Center horizontally (X, Z) and vertically (Y)
+            // Center horizontally (X, Z) only.
+            // The model's origin is already at the bottom (skids), so we don't adjust Y.
             model.children.forEach(child => {
                 child.position.x -= center.x;
-                child.position.y -= center.y;
+                // child.position.y -= bbox.min.y; // Removed: caused helicopter to float 4.6m high
                 child.position.z -= center.z;
             });
             const height = bbox.max.y - bbox.min.y;
-            model.userData.halfHeight = height / 10;
-            console.log(`[HELI] Model centered. Offset applied: ${center.x.toFixed(2)}, ${center.y.toFixed(2)}, ${center.z.toFixed(2)}. Half-height: ${model.userData.halfHeight.toFixed(2)}`);
+            model.userData.halfHeight = height / 2;
+            console.log(`[HELI] Model centered. Offset applied: ${center.x.toFixed(2)}, BOTTOM: ${bbox.min.y.toFixed(2)}, ${center.z.toFixed(2)}. Half-height: ${model.userData.halfHeight.toFixed(2)}`);
         }
 
         model.position.copy(position);
@@ -74,6 +75,7 @@ export class VehicleManager {
             if (child.isMesh) {
                 child.castShadow = true;
                 child.receiveShadow = true;
+                child.frustumCulled = false; // Prevent disappearing when moving children
             }
 
             const name = child.name.toLowerCase();
@@ -405,20 +407,13 @@ export class VehicleManager {
         const vehiclePos = v.mesh.position.clone();
         const vehicleYaw = v.mesh.rotation.y;
 
-        // If it's a helicopter, snap its final parked position to the ground or roof directly below it
-        if (v.type === 'helicopter') {
-            const hRayOrigin = vehiclePos.clone().add(new THREE.Vector3(0, 5, 0));
-            const hRayDir = new THREE.Vector3(0, -1, 0);
-            const hRaycaster = new THREE.Raycaster(hRayOrigin, hRayDir, 0, 500);
-            const hColliders = this.characterController.colliders || [];
-            const hHits = hRaycaster.intersectObjects(hColliders, true);
-            if (hHits.length > 0) {
-                vehiclePos.y = hHits[0].point.y + 0.1;
-            } else {
-                vehiclePos.y = 0.5; // Fallback ground level
-            }
-            v.mesh.position.y = vehiclePos.y; // Sync local mesh position so it lands visually
-        }
+        // Reset vehicle inputs so it doesn't fly away by itself
+        v.isElevating = false;
+        v.isDescending = false;
+        v.velocity = 0;
+
+        // We no longer instantly snap the helicopter here. 
+        // The update loop will now apply a smooth descent when unoccupied.
 
         this.characterController.setDriving(false, null, exitPos);
         this.currentVehicle = null;
@@ -1116,61 +1111,71 @@ export class VehicleManager {
             } // End of isTank block
 
             // 1.8 HELICOPTER FLIGHT LOGIC
-            if (v.type === 'helicopter' && this.currentVehicle === v) {
+            if (v.type === 'helicopter') {
                 const cfg = this.settings.helicopter;
 
                 // Vertical Collision (Find floor/roof below)
-                let minH = (v.halfHeight || 0) + 0.1;
+                // Since the helicopter's local origin is centered on its bottom (Y=0) in spawnVehicle,
+                // minH should just be the floor height + 0.1 safety offset.
+                let minH = 0.1;
                 if (this.characterController && this.characterController.colliders) {
                     const downRay = new THREE.Raycaster(
                         v.mesh.position.clone().add(new THREE.Vector3(0, 1.0, 0)),
                         new THREE.Vector3(0, -1, 0)
                     );
-                    const downHits = downRay.intersectObjects(this.characterController.colliders, true);
+                    // Filter out the helicopter's own mesh from collision
+                    const colliders = this.characterController.colliders.filter(c => c !== v.mesh);
+                    const downHits = downRay.intersectObjects(colliders, true);
                     if (downHits.length > 0) {
-                        minH = downHits[0].point.y + (v.halfHeight || 0) + 0.1;
+                        minH = downHits[0].point.y + 0.1;
                     }
                 }
 
-                // Elevation (H/L = Elevate, J = Descend)
-                const keys = this.characterController.keys;
-                let elevate = keys.elevate;
-                let descend = keys.descend;
+                if (this.currentVehicle === v) {
+                    // PILOTED: Allow elevation control
+                    const keys = this.characterController.keys;
+                    // Combine Keyboard and Gamepad inputs
+                    const elevate = keys.elevate || v.isElevating;
+                    const descend = keys.descend || v.isDescending;
 
-                if (elevate) {
-                    v.mesh.position.y += cfg.liftSpeed * dt;
-                }
-                if (descend) {
-                    v.mesh.position.y -= cfg.liftSpeed * dt;
+                    if (elevate && !descend) {
+                        v.mesh.position.y += cfg.liftSpeed * dt;
+                    } else if (descend && !elevate) {
+                        v.mesh.position.y -= cfg.liftSpeed * dt;
+                    }
+
+                    // Tilt Animation (Pitch and Roll)
+                    let targetPitch = this.characterController ? this.characterController.pitch : 0;
+                    if (input.y !== 0) {
+                        targetPitch += (input.y > 0) ? -Math.PI / 8 : Math.PI / 8;
+                    }
+                    targetPitch = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, targetPitch));
+                    
+                    const bankingFactor = 0.25;
+                    const targetRoll = (v.angularVelocity || 0) * bankingFactor;
+
+                    v.mesh.rotation.order = 'YXZ';
+                    v.mesh.rotation.x = THREE.MathUtils.lerp(v.mesh.rotation.x, targetPitch, dt * 5.0);
+                    v.mesh.rotation.z = THREE.MathUtils.lerp(v.mesh.rotation.z, targetRoll, dt * 5.0);
+
+                } else {
+                    // UNOCCUPIED: SLOW DESCENT (GRAVITY)
+                    // Ensure the helicopter gently lands on the ground/roof
+                    if (v.mesh.position.y > minH) {
+                        v.mesh.position.y -= 8.0 * dt; // Fall speed
+                    }
+
+                    // Level out the tilt when unoccupied
+                    v.mesh.rotation.order = 'YXZ';
+                    v.mesh.rotation.x = THREE.MathUtils.lerp(v.mesh.rotation.x, 0, dt * 2.0);
+                    v.mesh.rotation.z = THREE.MathUtils.lerp(v.mesh.rotation.z, 0, dt * 2.0);
+                    
+                    // Decelerate if it was moving
+                    v.velocity = THREE.MathUtils.lerp(v.velocity, 0, dt * 2.0);
                 }
 
-                // Prevent falling through roofs/floor
+                // Prevent falling through roofs/floor (applies to both piloted and unoccupied)
                 if (v.mesh.position.y < minH) v.mesh.position.y = minH;
-
-                // Tilt Animation (Pitch and Roll)
-                // Let the helicopter body pitch follow the camera's pitch (mouse up/down)
-                let targetPitch = this.characterController ? this.characterController.pitch : 0;
-                let targetRoll = 0;
-
-                // Pitch: W (input.y > 0) tilts forward more (Negative X)
-                if (input.y !== 0) {
-                    targetPitch += (input.y > 0) ? -Math.PI / 8 : Math.PI / 8;
-                }
-
-                // Clamp pitch so it doesn't flip over completely
-                targetPitch = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, targetPitch));
-
-                // Roll: Dynamic banking based on angular velocity (The faster we turn, the more we lean)
-                // This creates the "Grace and Elegance" requested by the user.
-                const bankingFactor = 0.25;
-                targetRoll = (v.angularVelocity || 0) * bankingFactor;
-
-                // HELICOPTER STABILIZATION: Force Euler order to keep axes independent
-                v.mesh.rotation.order = 'YXZ';
-
-                // Smoothly animate the transitions (Increased lerp speeds for responsive grace)
-                v.mesh.rotation.x = THREE.MathUtils.lerp(v.mesh.rotation.x, targetPitch, dt * 5.0);
-                v.mesh.rotation.z = THREE.MathUtils.lerp(v.mesh.rotation.z, targetRoll, dt * 5.0);
 
                 // 1.8 HELICOPTER ROTOR ANIMATION
                 if (v.type === 'helicopter') {
@@ -1317,18 +1322,6 @@ export class VehicleManager {
                     const overlap = bumperLimit - closestDistance;
                     v.mesh.position.add(moveDir.clone().multiplyScalar(-overlap)); // Push out logic
                 }
-            }
-
-            // Helicopter altitude control (responds to L1 / L2 via VehicleManager.elevate/descend)
-            if (v.type === 'helicopter') {
-                const liftSpeed = (this.settings && this.settings.helicopter && this.settings.helicopter.liftSpeed) ? this.settings.helicopter.liftSpeed : 25.0;
-                if (v.isElevating && !v.isDescending) {
-                    v.mesh.position.y += liftSpeed * dt;
-                } else if (v.isDescending && !v.isElevating) {
-                    v.mesh.position.y -= liftSpeed * dt;
-                }
-                // Prevent helicopter from going below a safe altitude (1 meter)
-                v.mesh.position.y = Math.max(1.0, v.mesh.position.y);
             }
 
             // Move (only if velocity not zero'd by collision)

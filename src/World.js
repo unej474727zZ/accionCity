@@ -33,6 +33,7 @@ import { SniperManager } from './SniperManager.js';
 
 export class World {
     constructor(container) {
+        window.world = this;
         this.container = container;
         this.scene = new THREE.Scene();
         this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 200); // FAR PLANE REDUCED EVEN MORE FOR PERFORMANCE
@@ -1030,11 +1031,17 @@ export class World {
         if (chatInput) chatInput.style.display = this.uiVisible ? 'block' : 'none';
         if (chatMessages) chatMessages.style.display = this.uiVisible ? 'block' : 'none';
 
-        const idsToToggle = ['dpad-container', 'shapes-container', 'camera-cross-container', 'btn-l', 'btn-r', 'minimap-canvas', 'zone_joystick', 'zone_right', 'heli-radar'];
+        const idsToToggle = ['dpad-container', 'shapes-container', 'camera-cross-container', 'btn-l', 'btn-r', 'minimap-canvas', 'zone_joystick', 'zone_right'];
         idsToToggle.forEach(id => {
             const el = document.getElementById(id);
             if (el) el.style.display = this.uiVisible ? '' : 'none';
         });
+
+        const heliRadar = document.getElementById('heli-radar');
+        if (heliRadar) {
+            const isHeli = this.character && this.character.isDriving && this.character.vehicle && this.character.vehicle.type === 'helicopter';
+            heliRadar.style.display = (this.uiVisible && isHeli) ? '' : 'none';
+        }
 
         if (this.weaponManager) this.weaponManager.toggleUI(this.uiVisible);
     }
@@ -1137,9 +1144,10 @@ export class World {
             let fogColor = null;
 
             if (this.isNightVision) {
+                const isHeli = this.character && this.character.isDriving && this.character.vehicle && this.character.vehicle.type === 'helicopter';
                 skyHex = 0x002200;
                 groundHex = 0x004400;
-                fogDist = 200;
+                fogDist = isHeli ? 1200 : 200;
                 fogColor = new THREE.Color(0x00FF00);
             } else {
                 if (!isDay) {
@@ -1195,14 +1203,34 @@ export class World {
             const hemiLight = this.scene.children.find(c => c.isHemisphereLight);
             if (hemiLight) {
                 if (this.isNightVision) {
+                    const isHeli = this.character && this.character.isDriving && this.character.vehicle && this.character.vehicle.type === 'helicopter';
                     hemiLight.color.setHex(0x00FF00);
                     hemiLight.groundColor.setHex(0x003300);
-                    hemiLight.intensity = 2.0;
+                    hemiLight.intensity = isHeli ? 1.0 : 2.0;
                 } else {
                     hemiLight.color.lerp(new THREE.Color(skyHex), dt * 0.5);
                     hemiLight.groundColor.lerp(new THREE.Color(groundHex), dt * 0.5);
                     hemiLight.intensity = isDay ? 0.8 : 0.15; // Lower ambient light at night
                 }
+            }
+
+            // Global Gamepad Check for Pause/Unpause (Button 9 = Start on generic controller)
+            const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+            let startPressed = false;
+            for (let i = 0; i < gamepads.length; i++) {
+                const gp = gamepads[i];
+                if (gp && gp.buttons[9] && (gp.buttons[9].pressed || gp.buttons[9].value > 0.1)) {
+                    startPressed = true;
+                    break;
+                }
+            }
+            if (startPressed) {
+                if (!this._globalStartHeld) {
+                    this.togglePause();
+                    this._globalStartHeld = true;
+                }
+            } else {
+                this._globalStartHeld = false;
             }
 
             if (this.character && !this.isPaused) {

@@ -1040,13 +1040,10 @@ export class CharacterController {
                 this._gamepadDownHeld = false;
             }
 
-            // TOGGLE MAP (R1 + R2 at the same time = 5 + 7 OR 4 + 5)
-            // Support both standard (5 + 7) and user's specific layout (4 + 5)
+            // TOGGLE MAP (R1 + R2 physically, which are 5 + 4 on this specific gamepad)
             const mapCombinationPressed = gamepad && (
                 ((gamepad.buttons[5] && (gamepad.buttons[5].pressed || gamepad.buttons[5].value > 0.1)) &&
-                 (gamepad.buttons[7] && (gamepad.buttons[7].pressed || gamepad.buttons[7].value > 0.1))) ||
-                ((gamepad.buttons[4] && (gamepad.buttons[4].pressed || gamepad.buttons[4].value > 0.1)) &&
-                 (gamepad.buttons[5] && (gamepad.buttons[5].pressed || gamepad.buttons[5].value > 0.1)))
+                 (gamepad.buttons[4] && (gamepad.buttons[4].pressed || gamepad.buttons[4].value > 0.1)))
             );
             this._mapCombinationPressed = mapCombinationPressed;
 
@@ -1065,8 +1062,8 @@ export class CharacterController {
                 this._mapToggleHeld = false;
             }
 
-            // TOGGLE CHAT (L1 + L2 at the same time = 4 + 6)
-            const l1Pressed = gamepad && gamepad.buttons[4] && (gamepad.buttons[4].pressed || gamepad.buttons[4].value > 0.1);
+            // TOGGLE CHAT (L1 + L2 physically, which are 7 + 6)
+            const l1Pressed = gamepad && gamepad.buttons[7] && (gamepad.buttons[7].pressed || gamepad.buttons[7].value > 0.1);
             const l2Pressed = gamepad && gamepad.buttons[6] && (gamepad.buttons[6].pressed || gamepad.buttons[6].value > 0.1);
             if (l1Pressed && l2Pressed) {
                 if (!this._chatToggleHeld) {
@@ -1180,24 +1177,25 @@ export class CharacterController {
             // Helicopters use specific controls for altitude, guns, and missiles
             const isHeli = this.isDriving && this.vehicle && this.vehicle.type === 'helicopter';
 
-            // Firing logic: R1 (5) or default fire keys/Start (9)
+            // Firing logic: R2 (button 4)
             const shootInput = this.keys.fire || (gamepad && (
-                (gamepad.buttons[5] && gamepad.buttons[5].pressed) || // R1
-                (gamepad.buttons[9] && gamepad.buttons[9].pressed)    // Start
+                (gamepad.buttons[4] && gamepad.buttons[4].pressed) // R2
             ));
             this.weaponManager.isFiring = shootInput;
 
             // ADS FOV (Zoom using Gamepad)
             // If they are pressing the map combination, do not trigger ADS zoom.
             const zoomTriggered = (gamepad && !this._mapCombinationPressed && (
-                (gamepad.buttons[7] && gamepad.buttons[7].pressed) || // R2 -> zoom
+                (gamepad.buttons[6] && gamepad.buttons[6].pressed) || // L2 -> zoom
                 (gamepad.buttons[11] && gamepad.buttons[11].pressed)  // R3 (Right Stick Press)
             ));
 
             if (isHeli) {
-                // Helicopter Altitude Control: L1 (4) elevate, L2 (6) descend
-                const heliElevate = gamepad && gamepad.buttons[4] && gamepad.buttons[4].pressed;
-                const heliDescend = gamepad && gamepad.buttons[6] && gamepad.buttons[6].pressed;
+                // Helicopter Altitude Control: R1 (elevate), L1 (descend)
+                // R1 = Button 5
+                // L1 = Button 7
+                const heliElevate = gamepad && gamepad.buttons[5] && gamepad.buttons[5].pressed;
+                const heliDescend = gamepad && gamepad.buttons[7] && gamepad.buttons[7].pressed;
 
                 if (heliElevate) this.world.vehicleManager.elevateHelicopter(this.vehicle.id, true);
                 else this.world.vehicleManager.elevateHelicopter(this.vehicle.id, false);
@@ -1205,8 +1203,9 @@ export class CharacterController {
                 if (heliDescend) this.world.vehicleManager.descendHelicopter(this.vehicle.id, true);
                 else this.world.vehicleManager.descendHelicopter(this.vehicle.id, false);
 
-                // Helicopter Fire Control: R1 (5) guns, X (2) missiles
-                const heliFireGuns = this.keys.fire || (gamepad && gamepad.buttons[5] && gamepad.buttons[5].pressed);
+                // Helicopter Fire Control: R2 (guns), X (missiles)
+                // R2 = Button 4
+                const heliFireGuns = this.keys.fire || (gamepad && gamepad.buttons[4] && gamepad.buttons[4].pressed);
                 const heliFireMissiles = this.keys.ads || (gamepad && gamepad.buttons[2] && gamepad.buttons[2].pressed);
 
                 if (heliFireGuns) this.weaponManager.fireHeliGuns();
@@ -1269,15 +1268,7 @@ export class CharacterController {
                 this._nvToggleHeld = false;
             }
 
-            // UI Toggle / Photo Mode (Start button = 9)
-            if (gamepad && gamepad.buttons[9] && gamepad.buttons[9].pressed) {
-                if (!this._uiToggleHeld) {
-                    if (this.world) this.world.toggleUI(); // This toggles debug console and mobile controls
-                    this._uiToggleHeld = true;
-                }
-            } else {
-                this._uiToggleHeld = false;
-            }
+            // Pause Game (Start button = 9) is now handled globally in World.js
 
             this.weaponManager.isFiring = shootInput;
         }

@@ -345,13 +345,15 @@ export class RemotePlayer {
                     if (this.currentVehicleType === 'helicopter') {
                         const bbox = new THREE.Box3().setFromObject(this.vehicleMesh);
                         const center = bbox.getCenter(new THREE.Vector3());
+                        // Center horizontally (X, Z) only.
+                        // The model's origin is already at the bottom (skids), so we don't adjust Y.
                         this.vehicleMesh.children.forEach(child => {
                             child.position.x -= center.x;
-                            child.position.y -= center.y;
+                            // child.position.y -= bbox.min.y; // Removed: caused helicopter to float 4.6m high
                             child.position.z -= center.z;
                         });
                         const height = bbox.max.y - bbox.min.y;
-                        this.vehicleMesh.userData.halfHeight = height / 10;
+                        this.vehicleMesh.userData.halfHeight = height / 2;
                     }
                 }
             }
