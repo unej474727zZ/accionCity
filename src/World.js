@@ -716,10 +716,9 @@ export class World {
                     const localV = this.vehicleManager.vehicles.find(v => v.id === vehicleId);
                     if (!localV) continue;
 
-                    // If we are currently driving it, we are the authority, so don't sync its position
+                    // If we are currently driving it, we are the authority for position/rotation
                     if (this.character.isDriving && this.character.vehicle === localV) {
-                        localV.mesh.visible = true;
-                        continue;
+                        continue; // We are driving, so we are the authority for position/rotation
                     }
 
                     if (serverV.occupiedBy !== null) {
@@ -1104,14 +1103,17 @@ export class World {
             const dt = Math.min(this.clock.getDelta(), 0.1);
             const time = Date.now() / 1000;
 
-            // Day/Night cycle speed: full cycle every 180 seconds (3 minutes)
-            const dayDuration = 180;
+            // Day/Night cycle speed: 1h Day + 30min Night = 90 min total (5400 seconds)
+            const dayDuration = 5400; 
+            // We use a slight offset in the sine calculation to make the day longer than the night
+            // A standard circle is 50/50. To get 66% day (1h) and 33% night (0.5h), we shift the horizon.
             const sunAngle = (time * (2 * Math.PI / dayDuration)) % (2 * Math.PI);
             const sunRadius = 300;
             
             // X and Y positions of the sun
             const sunX = Math.cos(sunAngle) * sunRadius;
-            const sunY = Math.sin(sunAngle) * sunRadius;
+            // Shift the sun "up" slightly so it stays above Y=0 for 1 hour and below for 30 mins
+            const sunY = (Math.sin(sunAngle) * sunRadius) + 150; 
             const sunZ = 50;
 
             const isDay = sunY > 0;

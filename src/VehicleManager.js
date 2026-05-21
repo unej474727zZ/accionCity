@@ -60,9 +60,8 @@ export class VehicleManager {
         }
 
         model.position.copy(position);
-        if (type === 'helicopter' && model.userData.halfHeight) {
-            model.position.y += model.userData.halfHeight;
-        }
+        // Removed: model.position.y += model.userData.halfHeight; 
+        // We now rely on the server position or the explicit ground snap in World.js
         if (rotation) model.rotation.copy(rotation);
 
         // Shadow support
@@ -405,6 +404,21 @@ export class VehicleManager {
         // Obtener la posición real del vehículo ANTES de desvincular el personaje
         const vehiclePos = v.mesh.position.clone();
         const vehicleYaw = v.mesh.rotation.y;
+
+        // If it's a helicopter, snap its final parked position to the ground or roof directly below it
+        if (v.type === 'helicopter') {
+            const hRayOrigin = vehiclePos.clone().add(new THREE.Vector3(0, 5, 0));
+            const hRayDir = new THREE.Vector3(0, -1, 0);
+            const hRaycaster = new THREE.Raycaster(hRayOrigin, hRayDir, 0, 500);
+            const hColliders = this.characterController.colliders || [];
+            const hHits = hRaycaster.intersectObjects(hColliders, true);
+            if (hHits.length > 0) {
+                vehiclePos.y = hHits[0].point.y + 0.1;
+            } else {
+                vehiclePos.y = 0.5; // Fallback ground level
+            }
+            v.mesh.position.y = vehiclePos.y; // Sync local mesh position so it lands visually
+        }
 
         this.characterController.setDriving(false, null, exitPos);
         this.currentVehicle = null;
@@ -1118,24 +1132,10 @@ export class VehicleManager {
                     }
                 }
 
-                // Elevation (H/L = Elevate, J = Descend, or Gamepad RT/RB/LT/LB)
+                // Elevation (H/L = Elevate, J = Descend)
                 const keys = this.characterController.keys;
                 let elevate = keys.elevate;
                 let descend = keys.descend;
-
-                const activeGamepads = navigator.getGamepads ? navigator.getGamepads() : [];
-                let gamepad = null;
-                for (let i = 0; i < activeGamepads.length; i++) { if (activeGamepads[i]) { gamepad = activeGamepads[i]; break; } }
-                if (gamepad) {
-                    // RT (7) or RB (5) to elevate
-                    if ((gamepad.buttons[7] && gamepad.buttons[7].pressed) || (gamepad.buttons[5] && gamepad.buttons[5].pressed)) {
-                        elevate = true;
-                    }
-                    // LT (6) or LB (4) to descend
-                    if ((gamepad.buttons[6] && gamepad.buttons[6].pressed) || (gamepad.buttons[4] && gamepad.buttons[4].pressed)) {
-                        descend = true;
-                    }
-                }
 
                 if (elevate) {
                     v.mesh.position.y += cfg.liftSpeed * dt;
@@ -1319,6 +1319,18 @@ export class VehicleManager {
                 }
             }
 
+            // Helicopter altitude control (responds to L1 / L2 via VehicleManager.elevate/descend)
+            if (v.type === 'helicopter') {
+                const liftSpeed = (this.settings && this.settings.helicopter && this.settings.helicopter.liftSpeed) ? this.settings.helicopter.liftSpeed : 25.0;
+                if (v.isElevating && !v.isDescending) {
+                    v.mesh.position.y += liftSpeed * dt;
+                } else if (v.isDescending && !v.isElevating) {
+                    v.mesh.position.y -= liftSpeed * dt;
+                }
+                // Prevent helicopter from going below a safe altitude (1 meter)
+                v.mesh.position.y = Math.max(1.0, v.mesh.position.y);
+            }
+
             // Move (only if velocity not zero'd by collision)
             if (v.type === 'tank') {
                 // The tank model's forward axis is actually X
@@ -1372,5 +1384,20 @@ export class VehicleManager {
             requestAnimationFrame(anim);
         };
         anim();
+    }
+
+    // --- HELICOPTER FLIGHT CONTROLS ---
+    elevateHelicopter(vehicleId, isPressed) {
+        const vehicle = this.vehicles.find(v => v.id === vehicleId && v.type === 'helicopter');
+        if (vehicle) {
+            vehicle.isElevating = isPressed;
+        }
+    }
+
+    descendHelicopter(vehicleId, isPressed) {
+        const vehicle = this.vehicles.find(v => v.id === vehicleId && v.type === 'helicopter');
+        if (vehicle) {
+            vehicle.isDescending = isPressed;
+        }
     }
 }

@@ -1177,16 +1177,50 @@ export class CharacterController {
 
         // 3.5 RESTORE ACTION INPUTS
         if (this.weaponManager) {
-            // Firing logic: X (2), or default fire keys/Start (9) (R1/RB/5 and R2/RT/7 removed to prevent shooting)
+            // Helicopters use specific controls for altitude, guns, and missiles
+            const isHeli = this.isDriving && this.vehicle && this.vehicle.type === 'helicopter';
+
+            // Firing logic: R1 (5) or default fire keys/Start (9)
             const shootInput = this.keys.fire || (gamepad && (
-                (gamepad.buttons[2] && gamepad.buttons[2].pressed) || // X
+                (gamepad.buttons[5] && gamepad.buttons[5].pressed) || // R1
                 (gamepad.buttons[9] && gamepad.buttons[9].pressed)    // Start
             ));
             this.weaponManager.isFiring = shootInput;
 
-            // TANK FIRE HOOK: If driving a tank and firing, trigger the cannon!
-            if (this.isDriving && this.vehicle && this.vehicle.type === 'tank' && shootInput) {
-                this.weaponManager.fireTankCannon();
+            // ADS FOV (Zoom using Gamepad)
+            // If they are pressing the map combination, do not trigger ADS zoom.
+            const zoomTriggered = (gamepad && !this._mapCombinationPressed && (
+                (gamepad.buttons[7] && gamepad.buttons[7].pressed) || // R2 -> zoom
+                (gamepad.buttons[11] && gamepad.buttons[11].pressed)  // R3 (Right Stick Press)
+            ));
+
+            if (isHeli) {
+                // Helicopter Altitude Control: L1 (4) elevate, L2 (6) descend
+                const heliElevate = gamepad && gamepad.buttons[4] && gamepad.buttons[4].pressed;
+                const heliDescend = gamepad && gamepad.buttons[6] && gamepad.buttons[6].pressed;
+
+                if (heliElevate) this.world.vehicleManager.elevateHelicopter(this.vehicle.id, true);
+                else this.world.vehicleManager.elevateHelicopter(this.vehicle.id, false);
+
+                if (heliDescend) this.world.vehicleManager.descendHelicopter(this.vehicle.id, true);
+                else this.world.vehicleManager.descendHelicopter(this.vehicle.id, false);
+
+                // Helicopter Fire Control: R1 (5) guns, X (2) missiles
+                const heliFireGuns = this.keys.fire || (gamepad && gamepad.buttons[5] && gamepad.buttons[5].pressed);
+                const heliFireMissiles = this.keys.ads || (gamepad && gamepad.buttons[2] && gamepad.buttons[2].pressed);
+
+                if (heliFireGuns) this.weaponManager.fireHeliGuns();
+                if (heliFireMissiles) this.weaponManager.fireHeliMissiles();
+
+                // Camera Zoom logic for Heli
+                this.desiredFOV = (this.cameraDistance < 1.0 || zoomTriggered) ? 30 : 75; 
+            } else {
+                this.desiredFOV = (this.keys.ads || zoomTriggered) ? 30 : 75;
+
+                // TANK FIRE HOOK: If driving a tank and firing, trigger the cannon!
+                if (this.isDriving && this.vehicle && this.vehicle.type === 'tank' && shootInput) {
+                    this.weaponManager.fireTankCannon();
+                }
             }
 
             // Weapon Cycle and Unholster (Button Y = 3)
@@ -1225,36 +1259,6 @@ export class CharacterController {
                 this._laserToggleHeld = false;
             }
 
-            // ADS FOV (Zoom using Gamepad LT / LB / Right Stick Press)
-            // If they are pressing the map combination, do not trigger ADS zoom.
-            const zoomTriggered = (gamepad && !this._mapCombinationPressed && (
-                (gamepad.buttons[6] && gamepad.buttons[6].pressed) || // LT
-                (gamepad.buttons[4] && gamepad.buttons[4].pressed) || // LB
-                (gamepad.buttons[11] && gamepad.buttons[11].pressed)  // R3 (Right Stick Press)
-            ));
-
-            // Helicopters use Left Click for Guns, Right Click for Missiles
-            const isHeli = this.isDriving && this.vehicle && this.vehicle.type === 'helicopter';
-
-            if (isHeli) {
-                const heliFireGuns = this.keys.fire || (gamepad && (
-                    (gamepad.buttons[7] && gamepad.buttons[7].pressed) || // RT
-                    (gamepad.buttons[5] && gamepad.buttons[5].pressed)    // RB
-                ));
-                const heliFireMissiles = this.keys.ads || (gamepad && (
-                    (gamepad.buttons[6] && gamepad.buttons[6].pressed) || // LT
-                    (gamepad.buttons[2] && gamepad.buttons[2].pressed)    // X
-                ));
-
-                if (heliFireGuns) this.weaponManager.fireHeliGuns();
-                if (heliFireMissiles) this.weaponManager.fireHeliMissiles();
-
-                // If using gamepad zoom, force 30. Otherwise, let world wheel zoom control it.
-                if (zoomTriggered) this.desiredFOV = 30;
-            } else {
-                this.desiredFOV = (this.keys.ads || zoomTriggered) ? 30 : 75;
-            }
-
             // Night Vision (Select button = 8)
             if (gamepad && gamepad.buttons[8] && gamepad.buttons[8].pressed) {
                 if (!this._nvToggleHeld) {
@@ -1274,6 +1278,8 @@ export class CharacterController {
             } else {
                 this._uiToggleHeld = false;
             }
+
+            this.weaponManager.isFiring = shootInput;
         }
 
         // Unified update loop skips walking in the physics block below

@@ -218,6 +218,15 @@ io.on('connection', (socket) => {
     
     delete players[socket.id];
     io.emit('playerDisconnected', socket.id);
+
+    // If no players are left, reset vehicles to default positions to prevent them from being left in the sky
+    if (Object.keys(players).length === 0) {
+      console.log('🔄 No players left. Resetting vehicles to default positions.');
+      vehicles['vehicle_motorcycle'] = { id: 'vehicle_motorcycle', type: 'motorcycle', occupiedBy: null, x: -300, y: 0.5, z: -40, yaw: 0 };
+      vehicles['vehicle_tank'] = { id: 'vehicle_tank', type: 'tank', occupiedBy: null, x: -300, y: 0.5, z: 0, yaw: 0 };
+      vehicles['vehicle_helicopter'] = { id: 'vehicle_helicopter', type: 'helicopter', occupiedBy: null, x: -300, y: 0.5, z: -20, yaw: 0 };
+      io.emit('vehicleStateUpdate', { vehicles });
+    }
   });
 });
 
