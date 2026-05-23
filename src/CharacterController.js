@@ -1220,6 +1220,8 @@ export class CharacterController {
                 if (this.isDriving && this.vehicle && this.vehicle.type === 'tank' && shootInput) {
                     this.weaponManager.fireTankCannon();
                 }
+
+
             }
 
             // Weapon Cycle and Unholster (Button Y = 3)
@@ -2284,7 +2286,7 @@ PTR LOCK: ${plStatus}
         if (this.world && this.world.remotePlayers) {
             for (let id in this.world.remotePlayers) {
                 const rp = this.world.remotePlayers[id];
-                if (rp && rp.mesh) {
+                if (rp && rp.mesh && rp.state !== 'dead') {
                     addBlip(rp.mesh.position, 'tank', '웃'); // Player icon
                 }
             }

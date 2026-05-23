@@ -846,21 +846,7 @@ export class World {
                 }
             };
 
-            this.networkManager.onPlayerHit = (data) => {
-                if (this.weaponManager) {
-                    this.weaponManager.createImpact(data.position, null, data.type, data.scale || 1.0);
-                }
 
-                // FEEDBACK FOR LOCAL PLAYER: If I am hit, shake camera and show blood
-                if (this.character && this.character.mesh) {
-                    const dist = this.character.mesh.position.distanceTo(data.position);
-                    if (dist < 1.0) { // I am the one hit!
-                        this.character.shakeCamera(0.2, 0.5);
-                        // Optional: Could add a red flash to UI here
-                        console.log("💥 YOU GOT HIT!");
-                    }
-                }
-            };
 
             if (chatInput) {
                 chatInput.addEventListener('keydown', (e) => e.stopPropagation());

@@ -676,7 +676,7 @@ export class WeaponManager {
             this.createExplosion(pos, 5.0);
             this.createImpact(pos, norm || new THREE.Vector3(0, 1, 0), 'spark', 5.0, obj); // 5x Scale
 
-            this.applyAreaDamage(pos, 15.0, 1.0, obj);
+            this.applyAreaDamage(pos, 15.0, 3.0, obj);
         });
 
         if (hit) {
@@ -770,7 +770,7 @@ export class WeaponManager {
 
         // 3. Player
         if (this.character && this.character.position.distanceTo(pos) < radius && !this.characterController.isDead) {
-            this.characterController.takeDamage(1);
+            this.characterController.takeDamage(damageAmount || 1);
         }
     }
 
@@ -879,7 +879,7 @@ export class WeaponManager {
                 this.createExplosion(pos, 5.0); // Optimized scale from 8.0
                 this.createImpact(pos, norm || new THREE.Vector3(0, 1, 0), 'spark', 6.0, obj); // Optimized scale from 15.0
 
-                this.applyAreaDamage(pos, 15.0, 1.0, obj);
+                this.applyAreaDamage(pos, 15.0, 3.0, obj);
             });
 
             if (hits.length > 0) {
@@ -1840,7 +1840,7 @@ export class WeaponManager {
         if (this.soundManager) this.soundManager.playTankShot();
 
         // Area Damage (Normal radius)
-        this.applyAreaDamage(pos, 8.0, 1.0);
+        this.applyAreaDamage(pos, 8.0, 3.0);
 
         // Remove mesh
         this.scene.remove(canister.mesh);
@@ -1981,7 +1981,7 @@ export class WeaponManager {
             const shell = new TankShell(this.scene, start, dir, 150.0, (pos, norm, obj) => {
                 this.createExplosion(pos, 5.0);
                 this.createImpact(pos, norm || new THREE.Vector3(0, 1, 0), 'spark', 5.0, obj);
-                this.applyAreaDamage(pos, 15.0, 1.0, obj);
+                this.applyAreaDamage(pos, 15.0, 3.0, obj);
             });
             const raycaster = new THREE.Raycaster(start, dir);
             raycaster.far = 2000;
@@ -2010,7 +2010,7 @@ export class WeaponManager {
             const shell = new TankShell(this.scene, start, dir, 150.0, (pos, norm, obj) => {
                 this.createExplosion(pos, 3.5);
                 this.createImpact(pos, norm || new THREE.Vector3(0, 1, 0), 'spark', 3.5, obj);
-                this.applyAreaDamage(pos, 10.0, 1.0, obj);
+                this.applyAreaDamage(pos, 10.0, 3.0, obj);
             });
             const raycaster = new THREE.Raycaster(start, dir);
             raycaster.far = 2000;
@@ -2039,7 +2039,7 @@ export class WeaponManager {
             const missile = new HeliMissile(this.scene, start, dir, 180.0, (pos, norm, obj) => {
                 this.createExplosion(pos, 6.0);
                 this.createImpact(pos, norm || new THREE.Vector3(0, 1, 0), 'spark', 5.0, obj);
-                this.applyAreaDamage(pos, 15.0, 1.0, obj);
+                this.applyAreaDamage(pos, 15.0, 3.0, obj);
             });
             const raycaster = new THREE.Raycaster(start, dir);
             raycaster.far = 2000;

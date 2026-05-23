@@ -360,14 +360,18 @@ export class RemotePlayer {
         }
 
         // Sync visibility
-        if (this.vehicleMesh) {
-            if (this.currentVehicleType === 'tank' || this.currentVehicleType === 'helicopter') {
-                this.mesh.visible = false; // Hide avatar inside tank/heli
-            } else {
-                this.mesh.visible = true; // Show avatar on motorcycle
-            }
+        if (this.state === 'dead') {
+            this.mesh.visible = false;
         } else {
-            this.mesh.visible = true; // Safe fallback
+            if (this.vehicleMesh) {
+                if (this.currentVehicleType === 'tank' || this.currentVehicleType === 'helicopter') {
+                    this.mesh.visible = false; // Hide avatar inside tank/heli
+                } else {
+                    this.mesh.visible = true; // Show avatar on motorcycle
+                }
+            } else {
+                this.mesh.visible = true; // Safe fallback
+            }
         }
     }
 
@@ -511,12 +515,23 @@ export class RemotePlayer {
                         wheel.rotation.x += wheelRotation;
                     });
                 }
+            } else if (this.currentVehicleType === 'tank') {
+                // The remote mesh is at the driver's seat position (Y+5) and camera yaw (+90 deg). 
+                // We reverse these offsets to place the tank tracks properly on the ground and point forward.
+                this.vehicleMesh.position.y -= 5.0;
+                this.vehicleMesh.rotation.y -= Math.PI / 2;
+                this.lastPosition = null; 
             } else {
                 this.lastPosition = null; // Clear position history when not on a motorcycle
             }
 
-            if (this.currentVehicleType === 'helicopter' && this.vehicleMesh.userData.halfHeight) {
-                this.vehicleMesh.position.y += this.vehicleMesh.userData.halfHeight;
+            if (this.currentVehicleType === 'helicopter') {
+                // Compensate for seatOffset to ground the helicopter visually
+                this.vehicleMesh.position.y -= 1.2; 
+                // Also add back the halfHeight we stripped in spawn logic
+                if (this.vehicleMesh.userData.halfHeight) {
+                    this.vehicleMesh.position.y += this.vehicleMesh.userData.halfHeight;
+                }
             }
         } else {
             this.lastPosition = null;

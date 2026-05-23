@@ -203,6 +203,11 @@ export class VehicleManager {
         this.scene.add(model);
         this.vehicles.push(vehicle);
 
+        // Motorcycle specific: Add headlight (REMOVED FOR PERFORMANCE)
+        if (type === 'motorcycle') {
+            vehicle.isHeadlightOn = false;
+        }
+
         // Helicopter specific: identify rotors
         if (type === 'helicopter') {
             vehicle.rotors = [];
@@ -700,6 +705,41 @@ export class VehicleManager {
         car.pushVelocity.add(impulse);
     }
 
+    checkVehicleManslaughter(v) {
+        // Only run over players if WE are driving the vehicle (local authority)
+        if (this.characterController && this.characterController.vehicle === v) {
+            const myPos = v.mesh.position;
+            const hitRadius = v.type === 'tank' ? 4.0 : 2.5; // Tanks have larger hit radius
+            
+            if (this.characterController.world && this.characterController.world.remotePlayers) {
+                for (let id in this.characterController.world.remotePlayers) {
+                    const rp = this.characterController.world.remotePlayers[id];
+                    // If remote player is on foot and alive
+                    if (rp.mesh && !rp.currentVehicleType && rp.state !== 'dead') {
+                        if (rp.mesh.position.distanceTo(myPos) < hitRadius) {
+                            // Cooldown of 1 second to prevent spamming
+                            if (!rp.lastRunOverTime || (Date.now() - rp.lastRunOverTime) > 1000) {
+                                rp.lastRunOverTime = Date.now();
+                                const hits = v.type === 'tank' ? 3 : 1; // 3 hits = Instant Death, 1 hit = fractional damage
+                                console.log(`🚗💥 Atropellaste a ${rp.id} con ${v.type}! Emitiendo ${hits} golpes.`);
+                                
+                                // Send hits via network to trigger global AOE damage at their location
+                                for (let i = 0; i < hits; i++) {
+                                    setTimeout(() => {
+                                        if (this.characterController.world.networkManager) {
+                                            // Scale = 2.0 for big blood effect
+                                            this.characterController.world.networkManager.sendHit(rp.mesh.position, 'blood', 2.0);
+                                        }
+                                    }, i * 50); // Stagger network packets
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     update(dt, input) {
         // 0. CHECK CANISTER COLLISIONS (NEW MECHANIC: Crash = Explosion)
         const canisters = this.characterController?.world?.explosiveCanisters || [];
@@ -730,9 +770,14 @@ export class VehicleManager {
         for (let i = this.vehicles.length - 1; i >= 0; i--) {
             const v = this.vehicles[i];
             
+
+
             // Check collisions if moving
             if (Math.abs(v.velocity) > 1.0 && !v.isCrushed) {
                 checkVehicleAgainstCanisters(v.mesh, () => this.crushVehicle(v));
+                if (Math.abs(v.velocity) > 5.0) {
+                    this.checkVehicleManslaughter(v);
+                }
             }
 
             // A) CRUSH ANIMATION
