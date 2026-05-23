@@ -1043,7 +1043,7 @@ export class CharacterController {
             // TOGGLE MAP (R1 + R2 physically, which are 5 + 4 on this specific gamepad)
             const mapCombinationPressed = gamepad && (
                 ((gamepad.buttons[5] && (gamepad.buttons[5].pressed || gamepad.buttons[5].value > 0.1)) &&
-                 (gamepad.buttons[4] && (gamepad.buttons[4].pressed || gamepad.buttons[4].value > 0.1)))
+                    (gamepad.buttons[4] && (gamepad.buttons[4].pressed || gamepad.buttons[4].value > 0.1)))
             );
             this._mapCombinationPressed = mapCombinationPressed;
 
@@ -1071,7 +1071,7 @@ export class CharacterController {
                     const chatInput = document.getElementById('chat-input');
                     if (chat) {
                         const isCurrentlyHidden = (chat.style.display === 'none' || !chat.style.display);
-                        
+
                         if (isCurrentlyHidden) {
                             chat.style.display = 'flex';
                             if (chatInput) {
@@ -1084,7 +1084,7 @@ export class CharacterController {
                             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
                             if (SpeechRecognition) {
                                 if (this._speechRecognition) {
-                                    try { this._speechRecognition.stop(); } catch(e){}
+                                    try { this._speechRecognition.stop(); } catch (e) { }
                                 }
                                 const recognition = new SpeechRecognition();
                                 recognition.lang = 'es-ES'; // Spanish Language
@@ -1145,7 +1145,7 @@ export class CharacterController {
                         } else {
                             // Close chat manually
                             if (this._speechRecognition) {
-                                try { this._speechRecognition.abort(); } catch(e){}
+                                try { this._speechRecognition.abort(); } catch (e) { }
                                 this._speechRecognition = null;
                             }
                             chat.style.display = 'none';
@@ -1212,7 +1212,7 @@ export class CharacterController {
                 if (heliFireMissiles) this.weaponManager.fireHeliMissiles();
 
                 // Camera Zoom logic for Heli
-                this.desiredFOV = (this.cameraDistance < 1.0 || zoomTriggered) ? 30 : 75; 
+                this.desiredFOV = (this.cameraDistance < 1.0 || zoomTriggered) ? 30 : 75;
             } else {
                 this.desiredFOV = (this.keys.ads || zoomTriggered) ? 30 : 75;
 
@@ -2055,7 +2055,7 @@ PTR LOCK: ${plStatus}
         if (this.isDriving && this._vehicle && this._vehicle.type === 'helicopter') {
             // "Vista de Morro": Positioned exactly on the nose glass surface for panoramic view
             // Based on visuals, the tail is at +Z, so the nose is at -Z.
-            const noseOffset = new THREE.Vector3(0, 0, -5); // Negative Z is Forward
+            const noseOffset = new THREE.Vector3(0, 2, -5); // Negative Z is Forward
             noseOffset.applyQuaternion(this.vehicle.mesh.quaternion);
 
             this.camera.position.copy(this.vehicle.mesh.position).add(noseOffset);

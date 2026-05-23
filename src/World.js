@@ -6,6 +6,7 @@ import { CharacterController } from './CharacterController.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { StereoEffect } from 'three/examples/jsm/effects/StereoEffect.js';
 import { NPCManager } from './NPCManager.js';
+import { BotManager } from './BotManager.js';
 
 import { NetworkManager } from './NetworkManager.js';
 import { RemotePlayer } from './RemotePlayer.js';
@@ -359,6 +360,9 @@ export class World {
             this.npcManager = new NPCManager(this.scene, assets);
             // Reduced density: from 80 to 30 for performance recovery
             this.npcManager.initParkedCars(30);
+
+            // BOT MANAGER (Deathmatch)
+            this.botManager = new BotManager(this.scene, assets, this);
 
             // WEAPON MANAGER (EMOTION!!!)
             this.weaponManager = new WeaponManager(this.scene, this.character, this.camera, assets);
@@ -987,12 +991,19 @@ export class World {
         if (this.npcManager && this.npcManager.cars) {
             dynamicColliders = dynamicColliders.concat(this.npcManager.cars.filter(m => m));
         }
+        if (this.botManager) {
+            dynamicColliders = dynamicColliders.concat(this.botManager.bots.map(b => b.hitBox).filter(m => m));
+        }
 
         this.character.remoteColliders = dynamicColliders;
 
         // CONSOLIDATED COLLIDER LIST for Character Physics (Performance!)
         // Instead of concatenating every frame, we do it here once a second
-        this.character.allPhysicTargets = [...this.character.colliders, ...dynamicColliders];
+        let allTargets = [...this.character.colliders, ...dynamicColliders];
+        if (this.clutterObjects) {
+            allTargets = allTargets.concat(this.clutterObjects);
+        }
+        this.character.allPhysicTargets = allTargets;
 
         this.weaponManager.remotePlayers = Object.values(this.remotePlayers);
     }
@@ -1280,6 +1291,8 @@ export class World {
             }
 
             if (this.npcManager && !this.isPaused) this.npcManager.update(dt);
+            if (this.botManager && !this.isPaused) this.botManager.update(dt);
+            
             if (this.weaponManager && !this.isPaused) {
                 this.weaponManager.remotePlayers = Object.values(this.remotePlayers);
                 this.weaponManager.update(dt);

@@ -656,10 +656,11 @@ export class WeaponManager {
         const raycaster = new THREE.Raycaster(muzzlePos, bulletDir);
         raycaster.far = 2000;
 
+        const vMesh = this.characterController.vehicle ? this.characterController.vehicle.mesh : null;
         const targets = [];
         this.scene.traverse(c => {
-            if (c.isMesh && !this.isSelf(c) && c.visible) {
-                if (c.userData.type === 'bullet' || c.userData.type === 'impact_part') return;
+            if (c.isMesh && !this.isSelf(c) && !this.isVehiclePart(c, vMesh) && c.visible) {
+                if (c.userData.type === 'bullet' || c.userData.type === 'impact_part' || c.userData.isBotVisualMesh) return;
                 targets.push(c);
             }
         });
@@ -740,6 +741,18 @@ export class WeaponManager {
                 if (car.position.distanceTo(pos) < radius && !affectedVehicles.has(car)) {
                     vm.damageVehicle(car, damageAmount, car, true);
                     affectedVehicles.add(car);
+                }
+            }
+        }
+
+        // 2.6 Bots (Deathmatch)
+        const botManager = this.characterController.world.botManager;
+        if (botManager) {
+            for (const bot of botManager.bots) {
+                if (bot.state !== 'dead' && bot.mesh) {
+                    if (bot.mesh.position.distanceTo(pos) < radius) {
+                        bot.takeDamage(damageAmount * 10, this.characterController.character); // Area damage is small (e.g. 15), multiply for bots (HP 100)
+                    }
                 }
             }
         }
@@ -841,27 +854,11 @@ export class WeaponManager {
         const raycaster = new THREE.Raycaster(this.camera.position, camDir);
         raycaster.far = 1000;
 
-        // Targets: All meshes except self
-        const targets = [];
-        const currentVehMesh = (this.characterController && this.characterController.vehicle) ? this.characterController.vehicle.mesh : null;
+        const rayTargets = this.raycastTargets || (this.characterController ? this.characterController.allPhysicTargets : []);
+        const hits = raycaster.intersectObjects(rayTargets, true);
 
-        this.scene.traverse(c => {
-            if (c.isMesh && !this.isSelf(c) && c.visible) {
-                if (this.isVehiclePart(c, currentVehMesh)) return;
-                if (c.userData.type === 'bullet' || c.userData.type === 'impact_part') return;
-                targets.push(c);
-            }
-        });
 
-        // Add remote players
-        if (this.remotePlayers) {
-            this.remotePlayers.forEach(p => {
-                const mesh = p.mesh || (p.isMesh ? p : null);
-                if (mesh) mesh.traverse(c => { if (c.isMesh) targets.push(c); });
-            });
-        }
 
-        const hits = raycaster.intersectObjects(targets, false);
         const targetPoint = hits.length > 0 ? hits[0].point : this.camera.position.clone().add(camDir.multiplyScalar(1000));
 
         // 3. VISUAL BULLET (OR PROJECTILE)
@@ -908,6 +905,23 @@ export class WeaponManager {
             // Type of impact
             let type = 'spark';
             if (this.isRemotePlayer(hit.object)) type = 'blood';
+
+            // Hit Bot?
+            let bot = null;
+            let tempBot = hit.object;
+            while(tempBot) {
+                if (tempBot.userData && tempBot.userData.isBot) {
+                    bot = this.characterController.world.botManager.bots.find(b => b.id === tempBot.userData.botId);
+                    break;
+                }
+                tempBot = tempBot.parent;
+            }
+
+            if (bot) {
+                const dmg = this.currentWeaponType === 'rifle' ? 40 : 25;
+                bot.takeDamage(dmg, this.characterController.character);
+                type = 'blood';
+            }
 
             const impactScale = this.currentWeaponType === 'rifle' ? 2.5 : 1.0;
             this.createImpact(hit.point, normal, type, impactScale, hit.object);
@@ -987,6 +1001,59 @@ export class WeaponManager {
         }
     }
 
+    botShoot(bot, muzzlePos, bulletDir, weaponType) {
+        // Visual Bullet
+        const bullet = new Bullet(this.scene, muzzlePos, bulletDir, 350.0);
+        this.bullets.push(bullet);
+
+        const rayTargets = this.raycastTargets || (this.characterController ? this.characterController.allPhysicTargets : []);
+        const hits = raycaster.intersectObjects(rayTargets, true);
+
+        if (hits.length > 0) {
+            const hit = hits[0];
+            const normal = hit.face ? hit.face.normal.clone().applyQuaternion(hit.object.quaternion) : new THREE.Vector3(0, 1, 0);
+
+            let type = 'spark';
+
+            // Hit Player?
+            if (this.character && hit.object === this.character) {
+                type = 'blood';
+                if (!this.characterController.isDead) {
+                    this.characterController.takeDamage(weaponType === 'rifle' ? 40 : 25);
+                }
+            } else if (this.isRemotePlayer(hit.object)) {
+                type = 'blood';
+            }
+
+            // Hit another Bot?
+            let hitBot = null;
+            let tempBot = hit.object;
+            while(tempBot) {
+                if (tempBot.userData && tempBot.userData.isBot) {
+                    hitBot = this.characterController.world.botManager.bots.find(b => b.id === tempBot.userData.botId);
+                    break;
+                }
+                tempBot = tempBot.parent;
+            }
+            if (hitBot && hitBot.id !== bot.id) {
+                hitBot.takeDamage(weaponType === 'rifle' ? 40 : 25, bot);
+                type = 'blood';
+            }
+
+            this.createImpact(hit.point, normal, type, 1.0, hit.object);
+        }
+
+        // Muzzle Flash
+        const flash = new THREE.PointLight(0xffaa00, 5.0, 5);
+        flash.position.copy(muzzlePos);
+        this.scene.add(flash);
+        setTimeout(() => { if (this.scene) this.scene.remove(flash); }, 50);
+
+        if (this.soundManager) {
+            this.soundManager.playShoot(weaponType);
+        }
+    }
+
     fireHeliGuns() {
         const now = Date.now();
         if (this.lastHeliGunTime && (now - this.lastHeliGunTime < 100)) return; // 10 rounds per second
@@ -1019,29 +1086,29 @@ export class WeaponManager {
 
         if (this.soundManager) this.soundManager.playShoot('rifle');
 
-        // Instant Hitscan for gameplay
-        const ray = new THREE.Raycaster(this.camera.position, camDir);
-        ray.far = 2000;
-        const targets = [];
-        this.scene.traverse(c => {
-            if (c.isMesh && !this.isSelf(c) && !this.isVehiclePart(c, v.mesh) && c.visible) {
-                if (c.userData.type === 'bullet' || c.userData.type === 'impact_part') return;
-                targets.push(c);
-            }
-        });
-        const hits = ray.intersectObjects(targets, false);
+        const rayTargets = this.raycastTargets || (this.characterController ? this.characterController.allPhysicTargets : []);
+        const hits = ray.intersectObjects(rayTargets, true);
 
         if (hits.length > 0) {
             const hit = hits[0];
             const worldNormal = hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld) : new THREE.Vector3(0, 1, 0);
             this.createImpact(hit.point, worldNormal, 'spark', 2.0, hit.object);
 
-            // Damage 
             const obj = hit.object;
             const targetVeh = this.characterController.world.vehicleManager.findVehicleByMesh(obj);
             if (targetVeh) this.characterController.world.vehicleManager.damageVehicle(targetVeh, 0.1, obj, true);
 
-
+            // Hit Bot?
+            let bot = null;
+            let tempBot = obj;
+            while(tempBot) {
+                if (tempBot.userData && tempBot.userData.isBot) {
+                    bot = this.characterController.world.botManager.bots.find(b => b.id === tempBot.userData.botId);
+                    break;
+                }
+                tempBot = tempBot.parent;
+            }
+            if (bot) bot.takeDamage(10, this.characterController.character);
         }
     }
 
@@ -1062,17 +1129,10 @@ export class WeaponManager {
         this.camera.getWorldDirection(camDir);
         const targetPoint = this.camera.position.clone().add(camDir.clone().multiplyScalar(2000));
 
-        // Raycast to find exact target
         const ray = new THREE.Raycaster(this.camera.position, camDir);
         ray.far = 2000;
-        const targets = [];
-        this.scene.traverse(c => {
-            if (c.isMesh && !this.isSelf(c) && !this.isVehiclePart(c, v.mesh) && c.visible) {
-                if (c.userData.type === 'bullet' || c.userData.type === 'impact_part') return;
-                targets.push(c);
-            }
-        });
-        const hits = ray.intersectObjects(targets, false);
+        const rayTargets = this.raycastTargets || (this.characterController ? this.characterController.allPhysicTargets : []);
+        const hits = ray.intersectObjects(rayTargets, true);
         // Ignore hits too close to the helicopter camera itself to prevent self-collision
         const validHit = hits.find(h => h.distance > 15);
         const hitPoint = validHit ? validHit.point : targetPoint;
