@@ -25,5 +25,8 @@ export default defineConfig({
       }
     },
     cors: true
+  },
+  build: {
+    chunkSizeWarningLimit: 1000 // Aumenta el límite de advertencia a 1000 kBs
   }
 });
