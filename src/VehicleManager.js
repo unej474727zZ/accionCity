@@ -468,12 +468,13 @@ export class VehicleManager {
     damageVehicle(v, amount = 1, hitMesh = null, isHeli = false) {
         if (!v || v.isCrushed) return;
 
-        // PISTOL RESTRICTIONS
-        const isPistol = (amount < 0.1); // Pistol dmg is 0.05
+        // LIGHT WEAPONS RESTRICTIONS (Pistols, Rifles, Snipers)
+        const isHeavyExplosive = (amount >= 0.5);
         
-        // Tanks and Helicopters are IMMUNE to pistol damage to the body
-        if (isPistol && (v.type === 'tank' || v.type === 'helicopter')) {
-            console.log(`🛡️ ${v.type} is immune to pistol damage!`);
+        // Tanks, Helicopters, and Transporters (buses/cars) are IMMUNE to light weapon damage to the body.
+        // Only bazookas/missiles (heavy explosives) can destroy them.
+        if (!isHeavyExplosive && v.type !== 'motorcycle') {
+            console.log(`🛡️ ${v.type || 'Vehicle'} is immune to light weapon damage!`);
             
             // SPECIAL CASE: Helicopter Glass
             if (v.type === 'helicopter' && hitMesh) {
@@ -534,7 +535,6 @@ export class VehicleManager {
         if (!isManaged) {
             // NPC car or tank
             if (this.isArmor(v)) {
-                if (isPistol) return; // NPC Tanks immune to pistols too
                 if (v.health === undefined) v.health = 2;
                 v.health -= amount;
                 if (v.health <= 0) this.crushNPC(v);

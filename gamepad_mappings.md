@@ -8,15 +8,23 @@ Hemos implementado las combinaciones de botones para alternar el mapa y el chat 
 
 | Control Físico (Gamepad) | Acción en Juego | Detalles del Comportamiento |
 | :--- | :--- | :--- |
-| **Botón B** (Index 1) | **Saltar / Interactuar Vehículo** | Si estás a pie, salta (o entra a un vehículo si estás a rango de 12m). Si estás conduciendo, te bajas del vehículo. |
+| **Botón A** (Index 0) | **Saltar / Interactuar Vehículo** | Si estás a pie, salta (o entra a un vehículo si estás a rango de 12m). Si estás conduciendo, te bajas del vehículo. |
+| **Botón B** (Index 1) | **Sprint / Correr** | Mantener pulsado para correr a alta velocidad. |
 | **Botón Y** (Index 3) | **Equipar / Cambiar Arma** | Si el arma está guardada (holstered), la hace aparecer. Si ya está afuera, rota (cicla) al siguiente arma. |
+| **Gatillo R2** (Index 4) | **Disparar Arma** | Mantén presionado para disparar (También dispara ametralladoras del Helicóptero o el cañón del Tanque). |
+| **Gatillo L2 / R3** (Index 6 / 11) | **Apuntar (Zoom ADS)** | Aplica el zoom de apuntado bajando el FOV a 30 (También dispara los misiles guiados del Helicóptero). |
 | **Cruz Derecha** (D-Pad Right - Index 15) | **Guardar Arma (Holster)** | Si tienes un arma equipada, la guarda/desequipa en la cartuchera de forma instantánea. |
-| **Select** (Index 8) | **Visor Nocturno (Night Vision)** | Activa o desactiva el filtro visual nocturno (luz verde/visión nocturna) en toda la pantalla. |
 | **Cruz Izquierda** (D-Pad Left - Index 14) | **Láser On/Off** | Enciende o apaga el puntero láser de tu arma para disparar desde la cadera. |
-| **Cruz Arriba** (D-Pad Up - Index 12) | **Acercar Cámara (Zoom In)** | Acerca la cámara hacia el personaje. Al pasar de `0.8` metros entra automáticamente en **Modo Primera Persona**. |
-| **Cruz Abajo** (D-Pad Down - Index 13) | **Alejar Cámara (Zoom Out)** | Aleja la cámara del personaje en Modo Tercera Persona (hasta un límite de `15.0` metros). |
-| **R1 + R2 al mismo tiempo** (Index 5 + 7) | **Mostrar/Quitar Mapa** | Abre el mapa en pantalla completa (y libera el Pointer Lock para poder arrastrarlo). Presionar de nuevo para cerrarlo y volver a apuntar. |
-| **L1 + L2 al mismo tiempo** (Index 4 + 6) | **Mostrar/Quitar Chat (Con Voz)** | Abre el chat multijugador y **activa el micrófono**. Habla para dictar tu mensaje. Se enviará automáticamente cuando termines de hablar. |
+| **Cruz Arriba** (D-Pad Up - Index 12) | **Acercar Cámara (Zoom In)** | Acerca la cámara hacia el personaje. |
+| **Cruz Abajo** (D-Pad Down - Index 13) | **Alejar Cámara (Zoom Out)** | Aleja la cámara del personaje. |
+| **Select** (Index 8) | **Visor Nocturno (Night Vision)** | Activa o desactiva el filtro visual nocturno (luz verde/visión nocturna) en toda la pantalla. |
+| **Start** (Index 9) | **Pausar** | Pausa el juego y la lógica del servidor local. |
+| **R1 + R2 al mismo tiempo** (Index 5 + 4) | **Mostrar/Quitar Mapa** | Abre el mapa en pantalla completa (y libera el Pointer Lock para poder arrastrarlo). Presionar de nuevo para cerrarlo y volver a apuntar. |
+| **L1 + L2 al mismo tiempo** (Index 7 + 6) | **Mostrar/Quitar Chat (Con Voz)** | Abre el chat multijugador y **activa el micrófono**. Habla para dictar tu mensaje. Se enviará automáticamente cuando termines de hablar. |
+
+*Nota Especial - Controles de Vuelo (Helicóptero):*
+*   **R1 (Index 5):** Ascender (Elevar el helicóptero).
+*   **L1 (Index 7):** Descender.
 
 ---
 

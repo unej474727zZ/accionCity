@@ -1007,6 +1007,7 @@ export class WeaponManager {
         this.bullets.push(bullet);
 
         const rayTargets = this.raycastTargets || (this.characterController ? this.characterController.allPhysicTargets : []);
+        const raycaster = new THREE.Raycaster(muzzlePos, bulletDir);
         const hits = raycaster.intersectObjects(rayTargets, true);
 
         if (hits.length > 0) {

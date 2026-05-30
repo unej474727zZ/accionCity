@@ -7,10 +7,10 @@ export class BotManager {
         this.assets = assets;
         this.world = world;
         this.bots = [];
-        this.maxBots = 5;
-        this.spawnRadius = 60; // Max distance to spawn
-        this.minSpawnRadius = 30; // Min distance to spawn
-        this.despawnRadius = 150; // Distance to remove bot
+        this.maxBots = 12; // Increased from 5 to populate city more
+        this.spawnRadius = 80; // Max distance to spawn
+        this.minSpawnRadius = 40; // Min distance to spawn
+        this.despawnRadius = 200; // Distance to remove bot
         
         this.aiTickTimer = 0;
         this.aiTickRate = 0.2; // 5 Hz

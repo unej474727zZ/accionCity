@@ -247,11 +247,17 @@ let wasTunnelOnline = true; // Assume online at startup
 const checkTunnel = async () => {
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
     
     const response = await fetch(PUBLIC_TUNNEL_URL, { 
       signal: controller.signal,
-      headers: { 'User-Agent': 'Tunnel-Monitor' }
+      headers: { 
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1'
+      }
     });
     clearTimeout(timeoutId);
     
@@ -264,8 +270,8 @@ const checkTunnel = async () => {
       sendNotify('🌐 TÚNEL LOCALTONET REACTIVADO', `El acceso público a través de **${PUBLIC_TUNNEL_URL}** vuelve a estar disponible.`, 0x00ff00);
     } else if (!isOnline && wasTunnelOnline) {
       wasTunnelOnline = false;
-      console.log('🔴 Túnel LocaltoNet PAUSADO (Offline)');
-      sendNotify('🔴 TÚNEL LOCALTONET PAUSADO', `El acceso público a través de **${PUBLIC_TUNNEL_URL}** ha sido pausado o no responde.`, 0xffa500);
+      console.log('🔴 Túnel LocaltoNet PAUSADO (Offline) - Status:', response.status);
+      sendNotify('🔴 TÚNEL LOCALTONET PAUSADO', `El acceso público a través de **${PUBLIC_TUNNEL_URL}** ha sido pausado o no responde. Status: ${response.status}`, 0xffa500);
     }
   } catch (err) {
     if (wasTunnelOnline) {
@@ -276,6 +282,6 @@ const checkTunnel = async () => {
   }
 };
 
-// Check tunnel status every 10 seconds
-setInterval(checkTunnel, 10000);
+// Check tunnel status every 5 minutos (300000 ms) para evitar baneos de IP por LocaltoNet
+setInterval(checkTunnel, 300000);
 

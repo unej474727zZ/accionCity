@@ -121,8 +121,13 @@ export class Bot {
             if (Math.random() > 0.5) this.weaponType = 'rifle';
             this.setWeapon(this.weaponType);
             
-            // Start patrolling
-            this.changeState('patrol');
+            // Start by heading towards the player (spawn hunting)
+            if (this.world.character && this.world.character.mesh) {
+                this.targetPoint = this.world.character.mesh.position.clone();
+                this.changeState('hunt');
+            } else {
+                this.changeState('patrol');
+            }
         }
     }
 
@@ -220,6 +225,9 @@ export class Bot {
             this.playAnimation('walk');
             this.firing = false;
             this.targetPoint = this.getRandomNavPoint();
+        } else if (newState === 'hunt') {
+            this.playAnimation('run');
+            this.firing = false;
         } else if (newState === 'combat') {
             this.playAnimation('idle'); // Stop moving when shooting for now
         }
@@ -286,7 +294,10 @@ export class Bot {
             this.die(attacker);
         } else {
             // Turn around / go into combat mode and target attacker
-            if (attacker) this.targetEntity = attacker;
+            if (attacker) {
+                this.targetEntity = attacker;
+                if (attacker.mesh) this.lastKnownPos = attacker.mesh.position.clone();
+            }
             this.changeState('combat');
         }
     }
@@ -301,8 +312,10 @@ export class Bot {
         // Notify any bots that were fighting ME to target my killer
         if (killer) {
             for (let otherBot of this.botManager.bots) {
-                if (otherBot.state === 'combat' && otherBot.targetEntity === this) {
+                if (otherBot.state !== 'dead' && otherBot.targetEntity === this) {
                     otherBot.targetEntity = killer;
+                    if (killer.mesh) otherBot.lastKnownPos = killer.mesh.position.clone();
+                    otherBot.changeState('hunt');
                 }
             }
         }
@@ -326,26 +339,49 @@ export class Bot {
             const isPlayer = (this.targetEntity === this.world.character || this.targetEntity === this.world.characterController?.character);
             
             if (isPlayer && this.world.character.state !== 'dead') {
-                isValid = this.checkLoS(this.world.character.mesh.position);
+                let targetPos = this.world.character.mesh.position.clone();
+                if (this.world.characterController && this.world.characterController.isDriving && this.world.characterController.vehicle) {
+                    targetPos = this.world.characterController.vehicle.mesh.position.clone();
+                } else {
+                    this.world.character.mesh.getWorldPosition(targetPos);
+                }
+                isValid = this.checkLoS(targetPos);
+                if (isValid) this.lastKnownPos = targetPos.clone();
             } else if (!isPlayer && this.targetEntity.state !== 'dead' && this.targetEntity.mesh) {
-                isValid = this.checkLoS(this.targetEntity.mesh.position);
+                let targetPos = new THREE.Vector3();
+                this.targetEntity.mesh.getWorldPosition(targetPos);
+                isValid = this.checkLoS(targetPos);
+                if (isValid) this.lastKnownPos = targetPos.clone();
             }
 
             if (!isValid) {
-                this.targetEntity = null;
-                if (this.state === 'combat') this.changeState('patrol');
+                // Lost sight of target: run to last known position instead of giving up immediately
+                if (this.lastKnownPos) {
+                    this.targetPoint = this.lastKnownPos.clone();
+                    this.changeState('hunt');
+                } else {
+                    this.targetEntity = null;
+                    if (this.state === 'combat') this.changeState('patrol');
+                }
             } else {
                 searchForTarget = false;
+                if (this.state !== 'combat') this.changeState('combat');
             }
         }
 
         if (searchForTarget) {
             let closestTarget = null;
-            let minTargetDist = 50.0; // Vision range
+            let minTargetDist = 80.0; // Vision range increased
             
             // Check local player
-            if (this.world.character && this.world.character.mesh && this.world.character.state !== 'dead' && this.world.character.mesh.visible !== false) {
-                const charPos = this.world.character.mesh.position;
+            if (this.world.character && this.world.character.mesh && this.world.character.state !== 'dead') {
+                let charPos = new THREE.Vector3();
+                if (this.world.characterController && this.world.characterController.isDriving && this.world.characterController.vehicle) {
+                    charPos = this.world.characterController.vehicle.mesh.position.clone();
+                } else {
+                    this.world.character.mesh.getWorldPosition(charPos);
+                }
+                
                 const dist = myPos.distanceTo(charPos);
                 if (dist < minTargetDist) {
                     if (this.checkLoS(charPos)) {
@@ -375,13 +411,20 @@ export class Bot {
         }
 
         // Logic based on state
-        if (this.state === 'patrol') {
+        if (this.state === 'patrol' || this.state === 'hunt') {
             if (this.targetPoint) {
                 const dist = myPos.distanceTo(this.targetPoint);
                 if (dist < 2.0) {
-                    this.targetPoint = this.getRandomNavPoint();
+                    if (this.state === 'hunt') {
+                        // Reached last known pos but didn't find target
+                        this.targetEntity = null;
+                        this.lastKnownPos = null;
+                        this.changeState('patrol');
+                    } else {
+                        this.targetPoint = this.getRandomNavPoint();
+                    }
                 } else {
-                    // Walk towards point
+                    // Walk/Run towards point
                     const dir = this.targetPoint.clone().sub(myPos).normalize();
                     this.yaw = Math.atan2(dir.x, dir.z);
                     
@@ -390,15 +433,45 @@ export class Bot {
                     const colliders = this.world.colliders || [];
                     const hits = this.wallRaycaster.intersectObjects(colliders, false);
                     if (hits.length > 0 && hits[0].distance < 3.0) {
-                        this.targetPoint = this.getRandomNavPoint(); // Turn around
+                        if (this.state === 'hunt') {
+                            this.targetEntity = null;
+                            this.lastKnownPos = null;
+                            this.changeState('patrol'); // Give up hunt if blocked
+                        } else {
+                            this.targetPoint = this.getRandomNavPoint(); // Turn around
+                        }
                     }
                 }
             }
         } else if (this.state === 'combat') {
             if (this.targetEntity) {
-                const tPos = this.targetEntity.mesh.position.clone();
+                // Determine target position (handle player in vehicle)
+                let tPos = this.targetEntity.mesh.position.clone();
+                
+                // If targeting the player and player is driving, target the vehicle instead
+                const isPlayer = (this.targetEntity === this.world.character || this.targetEntity === this.world.characterController?.character);
+                if (isPlayer && this.world.characterController && this.world.characterController.isDriving && this.world.characterController.vehicle) {
+                    tPos = this.world.characterController.vehicle.mesh.position.clone();
+                }
+
                 const dir = tPos.clone().sub(myPos).normalize();
                 this.yaw = Math.atan2(dir.x, dir.z);
+                
+                const dist = myPos.distanceTo(tPos);
+
+                // If too far, run towards target while in combat
+                if (dist > 15.0) {
+                    this.playAnimation('run');
+                    myPos.x += dir.x * this.runSpeed * dt;
+                    myPos.z += dir.z * this.runSpeed * dt;
+                    // simple gravity
+                    if (myPos.y > 0.5) {
+                        myPos.y -= 9.8 * dt;
+                        if (myPos.y < 0.5) myPos.y = 0.5;
+                    }
+                } else {
+                    this.playAnimation('idle');
+                }
                 
                 // Shoot periodically
                 if (Math.random() < 0.2) {
@@ -462,8 +535,8 @@ export class Bot {
         }
 
         // Physical movement update
-        if (this.state === 'patrol' && this.targetPoint) {
-            const speed = this.walkSpeed;
+        if ((this.state === 'patrol' || this.state === 'hunt') && this.targetPoint) {
+            const speed = this.state === 'hunt' ? this.runSpeed : this.walkSpeed;
             const myPos = this.mesh.position;
             const dir = this.targetPoint.clone().sub(myPos).normalize();
             myPos.x += dir.x * speed * dt;
