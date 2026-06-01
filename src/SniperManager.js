@@ -108,10 +108,26 @@ export class SniperManager {
         const ray = new THREE.Raycaster(spawnPos, dir);
         ray.far = 1000;
 
-        const possibleTargets = [...this.world.character.colliders, targetObject];
+        // TARGET CULLING: Only check objects that intersect the bullet's mathematical ray!
+        const possibleTargets = [targetObject];
         this.weaponManager.canisters.forEach(c => possibleTargets.push(c.mesh));
         if (this.world.vehicleManager) {
             this.world.vehicleManager.vehicles.forEach(v => possibleTargets.push(v.mesh));
+        }
+
+        // Filter the 1000+ city meshes so we only test faces of buildings the bullet flies past
+        for (const c of this.world.character.colliders) {
+            if (c.geometry) {
+                if (!c.geometry.boundingSphere) c.geometry.computeBoundingSphere();
+                const center = c.geometry.boundingSphere.center.clone().applyMatrix4(c.matrixWorld);
+                const radius = c.geometry.boundingSphere.radius * Math.max(c.scale.x, c.scale.y, c.scale.z) + 1.0;
+                
+                if (ray.ray.distanceSqToPoint(center) <= (radius * radius)) {
+                    possibleTargets.push(c);
+                }
+            } else {
+                possibleTargets.push(c); // fallback for Groups
+            }
         }
 
         const hits = ray.intersectObjects(possibleTargets, true);

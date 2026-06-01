@@ -998,12 +998,51 @@ export class World {
         this.character.remoteColliders = dynamicColliders;
 
         // CONSOLIDATED COLLIDER LIST for Character Physics (Performance!)
-        // Instead of concatenating every frame, we do it here once a second
         let allTargets = [...this.character.colliders, ...dynamicColliders];
         if (this.clutterObjects) {
             allTargets = allTargets.concat(this.clutterObjects);
         }
-        this.character.allPhysicTargets = allTargets;
+
+        // SPATIAL CULLING & BOUNDING BOX GENERATION
+        const playerPos = this.character.mesh.position;
+        const cullRadiusSq = 80 * 80; // 80m radius
+        
+        let filteredTargets = [];
+        let physicsBoxes = [];
+
+        for (const obj of allTargets) {
+            // Very fast distance check using object position. If it's a huge city block, 
+            // the origin might be far, but we'll accept it if it's within range.
+            // For city blocks, we should always include them if they intersect the player area.
+            
+            let isNear = false;
+            if (obj.userData && obj.userData.isCityBlock) {
+                // We'll tag city blocks later, or just check bounds
+                isNear = true; 
+            } else {
+                const distSq = obj.position.distanceToSquared(playerPos);
+                if (distSq < cullRadiusSq) isNear = true;
+                // Special case for huge objects (floor/city) that might be centered at 0,0
+                if (!isNear && obj.scale.x > 10) isNear = true; 
+            }
+
+            if (isNear) {
+                filteredTargets.push(obj);
+                
+                // Precompute Bounding Boxes for ultra-fast AABB raycasting in CharacterController
+                obj.traverse(child => {
+                    if (child.isMesh) {
+                        if (!child.geometry.boundingBox) child.geometry.computeBoundingBox();
+                        child.updateMatrixWorld(true);
+                        const box = new THREE.Box3().copy(child.geometry.boundingBox).applyMatrix4(child.matrixWorld);
+                        physicsBoxes.push({ box: box, object: obj }); // Keep reference to root object for pushing logic
+                    }
+                });
+            }
+        }
+
+        this.character.allPhysicTargets = filteredTargets;
+        this.character.physicsBoxes = physicsBoxes; // Simplified geometries!
 
         this.weaponManager.remotePlayers = Object.values(this.remotePlayers);
     }

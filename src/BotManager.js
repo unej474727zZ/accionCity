@@ -42,7 +42,12 @@ export class BotManager {
     checkPopulation() {
         if (!this.world.character || !this.world.character.mesh) return;
 
-        const playerPos = this.world.character.mesh.position;
+        let playerPos = new THREE.Vector3();
+        if (this.world.characterController && this.world.characterController.isDriving && this.world.characterController.vehicle) {
+            playerPos = this.world.characterController.vehicle.mesh.position.clone();
+        } else {
+            this.world.character.mesh.getWorldPosition(playerPos);
+        }
 
         // Despawn far away bots
         for (let i = this.bots.length - 1; i >= 0; i--) {
@@ -51,8 +56,13 @@ export class BotManager {
 
             const dist = bot.mesh.position.distanceTo(playerPos);
             if (dist > this.despawnRadius) {
-                bot.dispose();
-                this.bots.splice(i, 1);
+                // Recycle bot instead of destroying to avoid SkeletonUtils.clone lag spike
+                const angle = Math.random() * Math.PI * 2;
+                const spawnDist = this.minSpawnRadius + Math.random() * (this.spawnRadius - this.minSpawnRadius);
+                const spawnX = playerPos.x + Math.cos(angle) * spawnDist;
+                const spawnZ = playerPos.z + Math.sin(angle) * spawnDist;
+                
+                bot.teleport(new THREE.Vector3(spawnX, 0.5, spawnZ));
             }
         }
 

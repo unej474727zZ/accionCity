@@ -1356,20 +1356,33 @@ export class CharacterController {
             rayOrigin.y += 1.0;
             this.groundRaycaster.set(rayOrigin, new THREE.Vector3(0, -1, 0));
 
-            // OPTIMIZED: Use consolidated list from World.js updateRemoteColliders
-            const groundTargets = this.allPhysicTargets.length > 0 ? this.allPhysicTargets : this.colliders;
-
-            // CRITICAL PERFORMANCE: recursive = TRUE for scenery/complex models
-            const intersects = this.groundRaycaster.intersectObjects(groundTargets, true);
-
+            // FAST AABB COLLISION CHECKS (Ground)
             let groundHeight = -99999;
             let foundGround = false;
 
-            if (intersects.length > 0) {
-                const hit = intersects[0];
-                if (hit.distance < 2.5) {
-                    groundHeight = hit.point.y;
-                    foundGround = true;
+            if (this.physicsBoxes && this.physicsBoxes.length > 0) {
+                const targetPt = new THREE.Vector3();
+                for (const pb of this.physicsBoxes) {
+                    if (this.groundRaycaster.ray.intersectBox(pb.box, targetPt)) {
+                        const dist = this.groundRaycaster.ray.origin.y - targetPt.y;
+                        if (dist > 0 && dist < 2.5) {
+                            if (targetPt.y > groundHeight) {
+                                groundHeight = targetPt.y;
+                                foundGround = true;
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Fallback
+                const groundTargets = this.allPhysicTargets && this.allPhysicTargets.length > 0 ? this.allPhysicTargets : this.colliders;
+                const intersects = this.groundRaycaster.intersectObjects(groundTargets, true);
+                if (intersects.length > 0) {
+                    const hit = intersects[0];
+                    if (hit.distance < 2.5) {
+                        groundHeight = hit.point.y;
+                        foundGround = true;
+                    }
                 }
             }
 
@@ -1458,7 +1471,6 @@ export class CharacterController {
                     this.mesh.position.clone().add(new THREE.Vector3(0, 0.1, 0))
                 ];
 
-                const allColliders = this.allPhysicTargets.length > 0 ? this.allPhysicTargets : this.colliders;
                 const moveDist = moveVector.length();
                 const dynFar = moveDist + 1.2;
                 let closestDist = 999;
@@ -1469,7 +1481,26 @@ export class CharacterController {
                     this.raycaster.set(safeOrigin, moveDir);
                     this.raycaster.far = dynFar;
 
-                    const wallHits = this.raycaster.intersectObjects(allColliders, true);
+                    // FAST AABB WALL COLLISION
+                    let bestHit = null;
+                    if (this.physicsBoxes && this.physicsBoxes.length > 0) {
+                        const targetPt = new THREE.Vector3();
+                        for (const pb of this.physicsBoxes) {
+                            if (this.raycaster.ray.intersectBox(pb.box, targetPt)) {
+                                const dist = safeOrigin.distanceTo(targetPt);
+                                if (dist < this.raycaster.far && (!bestHit || dist < bestHit.distance)) {
+                                    bestHit = { distance: dist, point: targetPt.clone(), object: pb.object };
+                                }
+                            }
+                        }
+                    }
+
+                    let wallHits = [];
+                    if (bestHit) wallHits.push(bestHit);
+                    else if (!this.physicsBoxes || this.physicsBoxes.length === 0) {
+                        const allColliders = this.allPhysicTargets && this.allPhysicTargets.length > 0 ? this.allPhysicTargets : this.colliders;
+                        wallHits = this.raycaster.intersectObjects(allColliders, true);
+                    }
 
                     if (wallHits.length > 0) {
                         const hit = wallHits[0];

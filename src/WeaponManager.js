@@ -355,7 +355,7 @@ export class WeaponManager {
             // Weapon Switching (Only with 1)
             if (e.key === '1') this.cycleWeapon();
             if (e.code === 'KeyT') this.holster();
-            
+
             // Toggle HUD test simulation with K key (K is completely free!)
             if (e.code === 'KeyK') {
                 this.testMissileActive = !this.testMissileActive;
@@ -909,7 +909,7 @@ export class WeaponManager {
             // Hit Bot?
             let bot = null;
             let tempBot = hit.object;
-            while(tempBot) {
+            while (tempBot) {
                 if (tempBot.userData && tempBot.userData.isBot) {
                     bot = this.characterController.world.botManager.bots.find(b => b.id === tempBot.userData.botId);
                     break;
@@ -1029,7 +1029,7 @@ export class WeaponManager {
             // Hit another Bot?
             let hitBot = null;
             let tempBot = hit.object;
-            while(tempBot) {
+            while (tempBot) {
                 if (tempBot.userData && tempBot.userData.isBot) {
                     hitBot = this.characterController.world.botManager.bots.find(b => b.id === tempBot.userData.botId);
                     break;
@@ -1102,7 +1102,7 @@ export class WeaponManager {
             // Hit Bot?
             let bot = null;
             let tempBot = obj;
-            while(tempBot) {
+            while (tempBot) {
                 if (tempBot.userData && tempBot.userData.isBot) {
                     bot = this.characterController.world.botManager.bots.find(b => b.id === tempBot.userData.botId);
                     break;
@@ -1467,7 +1467,7 @@ export class WeaponManager {
         // --- MISSILE WARNING SYSTEM & RADAR ---
         let incomingThreat = null;
         let minThreatTime = 999;
-        
+
         // Filter dead sniper bullets in real-time
         if (this.sniperBullets) {
             this.sniperBullets = this.sniperBullets.filter(b => b.alive);
@@ -1554,7 +1554,7 @@ export class WeaponManager {
                         if (dot > 0 || isHomingOnMe) {
                             const speed = threat.speed || 150;
                             const timeToImpact = dist / Math.max(1, speed);
-                            
+
                             // Warn if impact is < 4.0 seconds
                             if (timeToImpact < 4.0 && timeToImpact < minThreatTime) {
                                 minThreatTime = timeToImpact;
@@ -1565,21 +1565,21 @@ export class WeaponManager {
                 }
             }
         }
-        
+
         if (incomingThreat) {
             this.warningActiveTimer = 1.5; // Reset HUD display cooldown
-            
+
             // Calculate relative direction and transform into camera local space for dynamic 3D-radar projection
             const toPlayer = this.camera.position;
             const toThreat = incomingThreat.position.clone().sub(toPlayer).normalize();
             const localThreat = toThreat.clone().applyQuaternion(this.camera.quaternion.clone().invert());
-            
+
             // Exact yaw angle relative to camera view (-z is straight forward)
             this.lastThreatAngle = Math.atan2(localThreat.x, -localThreat.z);
             this.lastThreatTime = minThreatTime;
 
             // Audio beep rate (faster as it gets closer: 0.8s max, 0.08s min)
-            const beepRate = Math.max(0.08, minThreatTime * 0.25); 
+            const beepRate = Math.max(0.08, minThreatTime * 0.25);
             this.playWarningBeep(beepRate);
         } else {
             // Decrement active cooldown timer

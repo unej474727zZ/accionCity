@@ -37,6 +37,7 @@ export class RemotePlayer {
             this.mesh = SkeletonUtils.clone(idleAsset.scene);
             this.mesh.userData.id = this.id;
             this.mesh.name = `RemotePlayer_${this.id}`;
+            this.mesh.scale.set(0.85, 0.85, 0.85);
             this.playerColor = data.color || 0x00ffaa;
             this.scene.add(this.mesh);
 

@@ -49,6 +49,7 @@ export class Bot {
             this.mesh.userData.isBot = true;
             this.mesh.userData.botId = this.id;
             this.mesh.name = `Bot_${this.id}`;
+            this.mesh.scale.set(0.85, 0.85, 0.85);
             
             // Flag visual meshes so raycasters can ignore them to prevent lag
             this.mesh.traverse(child => {
@@ -287,6 +288,18 @@ export class Bot {
         );
     }
 
+    teleport(newPos) {
+        if (!this.mesh) return;
+        this.mesh.position.copy(newPos);
+        this.hp = 100;
+        this.targetEntity = null;
+        this.lastKnownPos = null;
+        if (this.hitBox) {
+            this.hitBox.position.y = 0.9;
+        }
+        this.changeState('patrol');
+    }
+
     takeDamage(amount, attacker) {
         if (this.state === 'dead') return;
         this.hp -= amount;
@@ -462,15 +475,10 @@ export class Bot {
                 // If too far, run towards target while in combat
                 if (dist > 15.0) {
                     this.playAnimation('run');
-                    myPos.x += dir.x * this.runSpeed * dt;
-                    myPos.z += dir.z * this.runSpeed * dt;
-                    // simple gravity
-                    if (myPos.y > 0.5) {
-                        myPos.y -= 9.8 * dt;
-                        if (myPos.y < 0.5) myPos.y = 0.5;
-                    }
+                    this.combatMove = true;
                 } else {
                     this.playAnimation('idle');
+                    this.combatMove = false;
                 }
                 
                 // Shoot periodically
@@ -539,6 +547,19 @@ export class Bot {
             const speed = this.state === 'hunt' ? this.runSpeed : this.walkSpeed;
             const myPos = this.mesh.position;
             const dir = this.targetPoint.clone().sub(myPos).normalize();
+            myPos.x += dir.x * speed * dt;
+            myPos.z += dir.z * speed * dt;
+            
+            // simple gravity
+            if (myPos.y > 0.5) {
+                myPos.y -= 9.8 * dt;
+                if (myPos.y < 0.5) myPos.y = 0.5;
+            }
+        } else if (this.state === 'combat' && this.combatMove) {
+            const speed = this.runSpeed;
+            const myPos = this.mesh.position;
+            // Move forward in the direction of yaw
+            const dir = new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
             myPos.x += dir.x * speed * dt;
             myPos.z += dir.z * speed * dt;
             
