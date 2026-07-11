@@ -25,7 +25,7 @@ export class SniperManager {
 
         this.timer += dt;
         if (this.timer >= this.fireInterval) {
-            console.log(`🎯 Sniper Timer: ${this.timer.toFixed(2)} / ${this.fireInterval.toFixed(2)}`);
+            // console.log(`🎯 Sniper Timer: ${this.timer.toFixed(2)} / ${this.fireInterval.toFixed(2)}`);
             this.timer = 0;
             this.tryFire(playerPos, targetObject);
             // Randomize next shot interval (3 to 15 seconds)
@@ -34,11 +34,6 @@ export class SniperManager {
     }
 
     tryFire(playerPos, targetObject) {
-        if (this.world.cityBlocks.length > 0 && Math.random() < 0.1) {
-            console.log("🏙️ Sample Block 0:", this.world.cityBlocks[0]);
-        }
-        console.log(`🔍 Sniper: Searching building near ${playerPos.x.toFixed(1)}, ${playerPos.z.toFixed(1)}. Total blocks: ${this.world.cityBlocks.length}`);
-
         // 1. Find ANY building nearby to spawn the bullet from
         const buildings = this.world.cityBlocks.filter(b => {
             const centerX = (b.minX + b.maxX) / 2;
@@ -193,9 +188,8 @@ export class SniperManager {
         const point = hit.point;
         const normal = hit.face ? hit.face.normal.clone().transformDirection(obj.matrixWorld) : new THREE.Vector3(0, 1, 0);
 
-        // Effects
         this.weaponManager.createImpact(point, normal, 'spark', 1.0, obj);
-        if (this.world.soundManager) this.world.soundManager.playShoot('rifle');
+        if (this.world.soundManager) this.world.soundManager.playShoot('rifle', point);
 
         // Damage Logic
         if (obj === this.world.character.mesh || obj.parent === this.world.character.mesh) {

@@ -1845,6 +1845,9 @@ PTR LOCK: ${plStatus}
         if (this.mixer) {
             this.mixer.stopAllAction();
             if (isDriving) {
+                // Just let updateDrivingPose handle it in the next frame
+            } else {
+                // RESET BONES TO REST POSE SO ANIMATIONS DON'T GET STUCK IN MOTORCYCLE POSE
                 this.mesh.traverse(child => {
                     if (child.isBone && child.userData.restQuaternion) {
                         child.quaternion.copy(child.userData.restQuaternion);
@@ -1852,7 +1855,7 @@ PTR LOCK: ${plStatus}
                     }
                 });
                 this.bones = null;
-            } else {
+
                 const clip = this.animations['idle'];
                 if (clip) {
                     const action = this.mixer.clipAction(clip);
@@ -1894,6 +1897,7 @@ PTR LOCK: ${plStatus}
         if (this.isDriving && this.world && this.world.vehicleManager) {
             this.world.vehicleManager.exitVehicle();
         }
+        this.isDriving = false; // Force clear driving state
 
         // Make mesh invisible
         if (this.mesh) this.mesh.visible = false;

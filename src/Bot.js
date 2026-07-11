@@ -297,6 +297,8 @@ export class Bot {
         if (this.hitBox) {
             this.hitBox.position.y = 0.9;
         }
+        // FORZAR el reseteo del estado para que changeState no lo bloquee por estar 'dead'
+        this.state = 'idle'; 
         this.changeState('patrol');
     }
 

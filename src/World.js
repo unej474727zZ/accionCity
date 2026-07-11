@@ -30,6 +30,13 @@ import { SniperManager } from './SniperManager.js';
         if (!isFinite(value) || !isFinite(time)) return this;
         return originalSetValue.call(this, value, time);
     };
+    const originalSetTarget = AudioParam.prototype.setTargetAtTime;
+    if (originalSetTarget) {
+        AudioParam.prototype.setTargetAtTime = function (target, startTime, timeConstant) {
+            if (!isFinite(target) || !isFinite(startTime) || !isFinite(timeConstant)) return this;
+            return originalSetTarget.call(this, target, startTime, timeConstant);
+        };
+    }
 })();
 
 export class World {
@@ -609,6 +616,10 @@ export class World {
             if (city) this.character.colliders.push(city);
             if (floor) this.character.colliders.push(floor);
 
+            // --- CRITICAL FIX: CACHE STATIC COLLIDERS AFTER CITY IS ADDED ---
+            this._cachedStaticBoxes = null;
+            this.updateRemoteColliders();
+
             // NETWORK: Connect and Setup Events
             this.networkManager.connect();
 
@@ -998,9 +1009,9 @@ export class World {
         this.character.remoteColliders = dynamicColliders;
 
         // CONSOLIDATED COLLIDER LIST for Character Physics (Performance!)
-        let allTargets = [...this.character.colliders, ...dynamicColliders];
+        let dynamicTargets = [...dynamicColliders];
         if (this.clutterObjects) {
-            allTargets = allTargets.concat(this.clutterObjects);
+            dynamicTargets = dynamicTargets.concat(this.clutterObjects);
         }
 
         // SPATIAL CULLING & BOUNDING BOX GENERATION
@@ -1010,23 +1021,31 @@ export class World {
         let filteredTargets = [];
         let physicsBoxes = [];
 
-        for (const obj of allTargets) {
-            // Very fast distance check using object position. If it's a huge city block, 
-            // the origin might be far, but we'll accept it if it's within range.
-            // For city blocks, we should always include them if they intersect the player area.
-            
-            let isNear = false;
-            if (obj.userData && obj.userData.isCityBlock) {
-                // We'll tag city blocks later, or just check bounds
-                isNear = true; 
-            } else {
-                const distSq = obj.position.distanceToSquared(playerPos);
-                if (distSq < cullRadiusSq) isNear = true;
-                // Special case for huge objects (floor/city) that might be centered at 0,0
-                if (!isNear && obj.scale.x > 10) isNear = true; 
+        // 1. PROCESS STATIC COLLIDERS (City blocks, etc) - Cached!
+        if (!this._cachedStaticBoxes) {
+            this._cachedStaticBoxes = [];
+            this._cachedStaticTargets = [];
+            for (const obj of this.character.colliders) {
+                this._cachedStaticTargets.push(obj);
+                obj.traverse(child => {
+                    if (child.isMesh) {
+                        if (!child.geometry.boundingBox) child.geometry.computeBoundingBox();
+                        child.updateMatrixWorld(true);
+                        const box = new THREE.Box3().copy(child.geometry.boundingBox).applyMatrix4(child.matrixWorld);
+                        this._cachedStaticBoxes.push({ box: box, object: obj });
+                    }
+                });
             }
+            console.log("Cached " + this._cachedStaticBoxes.length + " static physics boxes.");
+        }
+        filteredTargets.push(...this._cachedStaticTargets);
+        physicsBoxes.push(...this._cachedStaticBoxes);
 
-            if (isNear) {
+        // 2. PROCESS DYNAMIC COLLIDERS (Cars, Bots)
+        for (const obj of dynamicTargets) {
+            if (!obj || !obj.position) continue;
+            const distSq = obj.position.distanceToSquared(playerPos);
+            if (distSq < cullRadiusSq) {
                 filteredTargets.push(obj);
                 
                 // Precompute Bounding Boxes for ultra-fast AABB raycasting in CharacterController

@@ -353,11 +353,11 @@ export class WeaponManager {
 
         window.addEventListener('keydown', (e) => {
             // Weapon Switching (Only with 1)
-            if (e.key === '1') this.cycleWeapon();
-            if (e.code === 'KeyT') this.holster();
+            if (e.key === '1' && !e.repeat) this.cycleWeapon();
+            if (e.code === 'KeyT' && !e.repeat) this.holster();
 
             // Toggle HUD test simulation with K key (K is completely free!)
-            if (e.code === 'KeyK') {
+            if (e.code === 'KeyK' && !e.repeat) {
                 this.testMissileActive = !this.testMissileActive;
                 console.log(`[TEST MODE] Missile Warning System: ${this.testMissileActive ? "ON" : "OFF"}`);
             }
@@ -469,7 +469,30 @@ export class WeaponManager {
             }
         }
 
-        const hits = raycaster.intersectObjects(this.raycastTargets, true);
+        const possibleTargets = this.raycastTargets || [];
+        const rayTargets = [];
+
+        // FAST SPATIAL CULLING FOR RANGE FINDER
+        if (this.characterController && this.characterController.physicsBoxes) {
+            for (const pb of this.characterController.physicsBoxes) {
+                if (raycaster.ray.intersectsBox(pb.box)) {
+                    rayTargets.push(pb.object);
+                }
+            }
+            if (this.characterController.world && this.characterController.world.botManager) {
+                this.characterController.world.botManager.bots.forEach(b => { if (b.mesh && !rayTargets.includes(b.mesh)) rayTargets.push(b.mesh); });
+            }
+            if (this.characterController.world && this.characterController.world.vehicleManager) {
+                this.characterController.world.vehicleManager.vehicles.forEach(v => { if (v.mesh && !rayTargets.includes(v.mesh)) rayTargets.push(v.mesh); });
+            }
+            if (this.remotePlayers) {
+                this.remotePlayers.forEach(p => { if (p.mesh && !rayTargets.includes(p.mesh)) rayTargets.push(p.mesh); });
+            }
+        } else {
+            rayTargets.push(...possibleTargets);
+        }
+
+        const hits = raycaster.intersectObjects(rayTargets, true);
         if (hits.length > 0) {
             const dist = hits[0].distance;
             this.rangeEl.innerText = `${dist.toFixed(1)} m`;
@@ -854,7 +877,45 @@ export class WeaponManager {
         const raycaster = new THREE.Raycaster(this.camera.position, camDir);
         raycaster.far = 1000;
 
-        const rayTargets = this.raycastTargets || (this.characterController ? this.characterController.allPhysicTargets : []);
+        const possibleTargets = this.raycastTargets || (this.characterController ? this.characterController.allPhysicTargets : []);
+        const rayTargets = [];
+
+        // FAST SPATIAL CULLING FOR BULLETS (Prevent Freeze!)
+        if (this.characterController && this.characterController.physicsBoxes) {
+            for (const pb of this.characterController.physicsBoxes) {
+                if (raycaster.ray.intersectsBox(pb.box)) {
+                    rayTargets.push(pb.object);
+                }
+            }
+            // CRITICAL FIX: Always include ALL dynamic entities (bots, vehicles) because their cached physicsBoxes might be stale (left behind)!
+            if (this.characterController.world && this.characterController.world.botManager) {
+                this.characterController.world.botManager.bots.forEach(b => { if (b.mesh && !rayTargets.includes(b.mesh)) rayTargets.push(b.mesh); });
+            }
+            if (this.characterController.world && this.characterController.world.vehicleManager) {
+                this.characterController.world.vehicleManager.vehicles.forEach(v => { if (v.mesh && !rayTargets.includes(v.mesh)) rayTargets.push(v.mesh); });
+            }
+            if (this.remotePlayers) {
+                this.remotePlayers.forEach(p => { if (p.mesh && !rayTargets.includes(p.mesh)) rayTargets.push(p.mesh); });
+            }
+            if (this.canisters) {
+                this.canisters.forEach(c => { if (c.mesh && !rayTargets.includes(c.mesh)) rayTargets.push(c.mesh); });
+            }
+        } else {
+            // Fallback: fast bounding sphere check
+            for (const c of possibleTargets) {
+                if (c && c.geometry) {
+                    if (!c.geometry.boundingSphere) c.geometry.computeBoundingSphere();
+                    const center = c.geometry.boundingSphere.center.clone().applyMatrix4(c.matrixWorld);
+                    const radius = c.geometry.boundingSphere.radius * Math.max(c.scale.x, c.scale.y, c.scale.z) + 1.0;
+                    if (raycaster.ray.distanceSqToPoint(center) <= (radius * radius)) {
+                        rayTargets.push(c);
+                    }
+                } else {
+                    rayTargets.push(c);
+                }
+            }
+        }
+
         const hits = raycaster.intersectObjects(rayTargets, true);
 
 
@@ -997,7 +1058,7 @@ export class WeaponManager {
 
         // 7. AUDIO
         if (this.soundManager) {
-            this.soundManager.playShoot(this.currentWeaponType);
+            this.soundManager.playShoot(this.currentWeaponType, muzzlePos);
         }
     }
 
@@ -1006,8 +1067,46 @@ export class WeaponManager {
         const bullet = new Bullet(this.scene, muzzlePos, bulletDir, 350.0);
         this.bullets.push(bullet);
 
-        const rayTargets = this.raycastTargets || (this.characterController ? this.characterController.allPhysicTargets : []);
+        const possibleTargets = this.raycastTargets || (this.characterController ? this.characterController.allPhysicTargets : []);
         const raycaster = new THREE.Raycaster(muzzlePos, bulletDir);
+        raycaster.far = 1000;
+        const rayTargets = [];
+
+        // FAST SPATIAL CULLING FOR BOT BULLETS (Prevent Freeze!)
+        if (this.characterController && this.characterController.physicsBoxes) {
+            for (const pb of this.characterController.physicsBoxes) {
+                if (raycaster.ray.intersectsBox(pb.box)) {
+                    rayTargets.push(pb.object);
+                }
+            }
+            // CRITICAL FIX: Dynamic targets MUST always be checked!
+            if (this.characterController.world && this.characterController.world.botManager) {
+                this.characterController.world.botManager.bots.forEach(b => { if (b.mesh && !rayTargets.includes(b.mesh)) rayTargets.push(b.mesh); });
+            }
+            if (this.characterController.world && this.characterController.world.vehicleManager) {
+                this.characterController.world.vehicleManager.vehicles.forEach(v => { if (v.mesh && !rayTargets.includes(v.mesh)) rayTargets.push(v.mesh); });
+            }
+            if (this.remotePlayers) {
+                this.remotePlayers.forEach(p => { if (p.mesh && !rayTargets.includes(p.mesh)) rayTargets.push(p.mesh); });
+            }
+            // Ensure player is included!
+            if (this.characterController.mesh && !rayTargets.includes(this.characterController.mesh)) rayTargets.push(this.characterController.mesh);
+        } else {
+            // Fallback: fast bounding sphere check
+            for (const c of possibleTargets) {
+                if (c && c.geometry) {
+                    if (!c.geometry.boundingSphere) c.geometry.computeBoundingSphere();
+                    const center = c.geometry.boundingSphere.center.clone().applyMatrix4(c.matrixWorld);
+                    const radius = c.geometry.boundingSphere.radius * Math.max(c.scale.x, c.scale.y, c.scale.z) + 1.0;
+                    if (raycaster.ray.distanceSqToPoint(center) <= (radius * radius)) {
+                        rayTargets.push(c);
+                    }
+                } else {
+                    rayTargets.push(c);
+                }
+            }
+        }
+
         const hits = raycaster.intersectObjects(rayTargets, true);
 
         if (hits.length > 0) {
@@ -1051,7 +1150,7 @@ export class WeaponManager {
         setTimeout(() => { if (this.scene) this.scene.remove(flash); }, 50);
 
         if (this.soundManager) {
-            this.soundManager.playShoot(weaponType);
+            this.soundManager.playShoot(weaponType, muzzlePos);
         }
     }
 
@@ -1085,7 +1184,7 @@ export class WeaponManager {
         this.flashLight.intensity = 5;
         setTimeout(() => { if (this.flashLight) this.flashLight.intensity = 0; }, 50);
 
-        if (this.soundManager) this.soundManager.playShoot('rifle');
+        if (this.soundManager) this.soundManager.playShoot('rifle', spawnPos);
 
         const rayTargets = this.raycastTargets || (this.characterController ? this.characterController.allPhysicTargets : []);
         const hits = ray.intersectObjects(rayTargets, true);

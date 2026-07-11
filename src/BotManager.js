@@ -69,7 +69,19 @@ export class BotManager {
         // Spawn new bots if below max
         const activeBots = this.bots.filter(b => b.state !== 'dead').length;
         if (activeBots < this.maxBots) {
-            this.spawnBot(playerPos);
+            // Reutilizar un bot muerto si existe (Object Pooling)
+            const deadBot = this.bots.find(b => b.state === 'dead');
+            if (deadBot) {
+                const angle = Math.random() * Math.PI * 2;
+                const dist = this.minSpawnRadius + Math.random() * (this.spawnRadius - this.minSpawnRadius);
+                const spawnX = playerPos.x + Math.cos(angle) * dist;
+                const spawnZ = playerPos.z + Math.sin(angle) * dist;
+                deadBot.teleport(new THREE.Vector3(spawnX, 0.5, spawnZ));
+                if (deadBot.mesh) deadBot.mesh.visible = true; // Revive visualmente
+                // console.log(`BotManager: Recycled Bot ${deadBot.id}`);
+            } else if (this.bots.length < this.maxBots) { // Solo crear nuevos si no superamos el límite absoluto
+                this.spawnBot(playerPos);
+            }
         }
     }
 
@@ -88,10 +100,12 @@ export class BotManager {
     }
 
     removeBot(id) {
-        const index = this.bots.findIndex(b => b.id === id);
-        if (index !== -1) {
-            this.bots[index].dispose();
-            this.bots.splice(index, 1);
-        }
+        // En lugar de destruir el bot (lo cual causa lag al tener que instanciar otro),
+        // lo dejamos en el array con state='dead'. El Object Pool lo reciclará.
+        // const index = this.bots.findIndex(b => b.id === id);
+        // if (index !== -1) {
+        //     this.bots[index].dispose();
+        //     this.bots.splice(index, 1);
+        // }
     }
 }

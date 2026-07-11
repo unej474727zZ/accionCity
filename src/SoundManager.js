@@ -44,46 +44,46 @@ export class SoundManager {
 
     loadSounds() {
         // Load Pistol
-        this.loadSoundWithRetry(`sounds/pistolaSoundUno.mp3?v=${Date.now()}`, (buffer) => {
+        this.loadSoundWithRetry(`sounds/pistolaSoundUno.mp3`, (buffer) => {
             this.sounds.pistol = buffer;
             this.createPool('pistol', buffer);
             console.log("SoundManager: Pistol sound loaded + Pool created.");
         });
 
         // Load Rifle
-        this.loadSoundWithRetry(`sounds/rifleSoundUno.mp3?v=${Date.now()}`, (buffer) => {
+        this.loadSoundWithRetry(`sounds/rifleSoundUno.mp3`, (buffer) => {
             this.sounds.rifle = buffer;
             this.createPool('rifle', buffer, 0.3);
             console.log("SoundManager: Rifle sound loaded.");
         });
 
         // TANK: Shots and Crush
-        this.loadSoundWithRetry(`sounds/tank-shots.mp3?v=${Date.now()}`, (buffer) => {
+        this.loadSoundWithRetry(`sounds/tank-shots.mp3`, (buffer) => {
             this.sounds['tank-shot'] = buffer;
             this.createPool('tank-shot', buffer, 2, 3);
         });
-        this.loadSoundWithRetry(`sounds/tank-crush.mp3?v=${Date.now()}`, (buffer) => {
+        this.loadSoundWithRetry(`sounds/tank-crush.mp3`, (buffer) => {
             this.sounds['tank-crush'] = buffer;
             this.createPool('tank-crush', buffer, 0.6, 3);
         });
 
         // Loopable Engine Sounds
-        this.loadSoundWithRetry(`sounds/tank-moving.mp3?v=${Date.now()}`, (buffer) => {
+        this.loadSoundWithRetry(`sounds/tank-moving.mp3`, (buffer) => {
             this.sounds.tankEngine = buffer;
         });
-        this.loadSoundWithRetry(`sounds/helicopterHelice1.mp3?v=${Date.now()}`, (buffer) => {
+        this.loadSoundWithRetry(`sounds/helicopterHelice1.mp3`, (buffer) => {
             this.sounds.heliEngine = buffer;
         });
 
         // Footstep
-        this.loadSoundWithRetry(`sounds/step.mp3?v=${Date.now()}`, (buffer) => {
+        this.loadSoundWithRetry(`sounds/step.mp3`, (buffer) => {
             this.sounds.step = buffer;
             this.createPool('step', buffer, 0.4, 8); // Pool of 8 for rapid steps
             console.log("SoundManager: Step sound loaded.");
         });
 
         // Ambient Background Sound
-        this.loadSoundWithRetry(`sounds/backSound.mp3?v=${Date.now()}`, (buffer) => {
+        this.loadSoundWithRetry(`sounds/backSound.mp3`, (buffer) => {
             this.sounds.ambient = buffer;
             this.ambientAudio = new THREE.Audio(this.listener);
             this.ambientAudio.setBuffer(buffer);
@@ -131,7 +131,7 @@ export class SoundManager {
         });
 
         // Reload Sound
-        this.loadSoundWithRetry(`sounds/reload.mp3?v=${Date.now()}`, (buffer) => {
+        this.loadSoundWithRetry(`sounds/reload.mp3`, (buffer) => {
             this.sounds.reload = buffer;
             this.createPool('reload', buffer, 1.0, 2); // Small pool is enough
             console.log("SoundManager: Reload sound loaded.");
@@ -140,6 +140,9 @@ export class SoundManager {
 
     createPool(type, buffer, volume = 0.4, size = 5) {
         if (!this.pools[type]) this.pools[type] = [];
+        this.poolBaseVolumes = this.poolBaseVolumes || {};
+        this.poolBaseVolumes[type] = volume;
+
         for (let i = 0; i < size; i++) {
             const sound = new THREE.Audio(this.listener);
             sound.setBuffer(buffer);
@@ -149,8 +152,16 @@ export class SoundManager {
         this.poolIndex[type] = 0;
     }
 
-    playShoot(type) {
-        this.playPool(type, 1.0 + (Math.random() * 0.1 - 0.05));
+    playShoot(type, pos = null) {
+        let vol = 1.0;
+        if (pos && this.camera) {
+            const dist = this.camera.position.distanceTo(pos);
+            const maxDist = 150; // Reduced from 250 so helicopters don't hear ground combat loudly
+            if (dist > maxDist) return; // Too far to hear
+            vol = 1.0 - (dist / maxDist);
+            vol = Math.max(0.01, vol * vol); // Quadratic falloff
+        }
+        this.playPool(type, 1.0 + (Math.random() * 0.1 - 0.05), vol);
     }
 
     playTankShot() {
@@ -170,15 +181,17 @@ export class SoundManager {
         this.playPool('reload', 1.0);
     }
 
-    playPool(type, pitch = 1.0) {
+    playPool(type, pitch = 1.0, volumeMult = 1.0) {
         this.resumeContext();
 
         if (!this.pools[type] || this.pools[type].length === 0) return;
 
         const index = this.poolIndex[type];
         const sound = this.pools[type][index];
+        const baseVolume = this.poolBaseVolumes ? (this.poolBaseVolumes[type] || 0.4) : 0.4;
 
         if (sound.isPlaying) sound.stop();
+        sound.setVolume(baseVolume * volumeMult);
         sound.setPlaybackRate(pitch);
         sound.play();
 

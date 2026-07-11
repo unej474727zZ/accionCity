@@ -26,8 +26,9 @@ export class NetworkManager {
 
         this.socket = io(url, {
             reconnection: true,
-            reconnectionAttempts: 10,
-            transports: ['polling', 'websocket'],
+            reconnectionAttempts: 5,
+            reconnectionDelay: 5000,
+            transports: ['websocket'],
             path: '/socket.io',
             forceNew: true
         });
