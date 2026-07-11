@@ -22,6 +22,8 @@ export class RemotePlayer {
         this.headBone = null;
         this.helmetMesh = null;
         this.laserActive = true;
+        this.targetPosition = new THREE.Vector3();
+        this.targetYaw = 0;
         this.laserMesh = this.createLaser();
         this.raycaster = new THREE.Raycaster();
         this.currentVehicleType = null;
@@ -224,9 +226,19 @@ export class RemotePlayer {
 
     updateState(data) {
         if (!this.mesh || data.x === undefined) return;
-        this.mesh.position.set(data.x, data.y, data.z);
-        this.yaw = data.yaw || 0;
-        this.mesh.rotation.y = this.yaw; // Removed + Math.PI to match local player and asset default (+Z)
+        
+        // Initialize targets immediately on first packet
+        if (this.targetPosition.x === 0 && this.targetPosition.y === 0 && this.targetPosition.z === 0) {
+             this.mesh.position.set(data.x, data.y, data.z);
+             this.targetPosition.set(data.x, data.y, data.z);
+             this.yaw = data.yaw || 0;
+             this.targetYaw = this.yaw;
+             this.mesh.rotation.y = this.yaw;
+        } else {
+             this.targetPosition.set(data.x, data.y, data.z);
+             this.targetYaw = data.yaw || 0;
+        }
+        
         this.pitch = data.pitch || 0;
 
         if (this.state !== data.state) {
@@ -477,6 +489,20 @@ export class RemotePlayer {
     }
 
     update(dt, camera) {
+        // LERP Position and Yaw for smooth interpolation between network updates
+        if (this.mesh && this.targetPosition && (this.targetPosition.x !== 0 || this.targetPosition.y !== 0 || this.targetPosition.z !== 0)) {
+            // Lerp factor depends on dt (delta time) to ensure consistent speed regardless of framerate
+            const lerpFactor = Math.min(dt * 15, 1.0); 
+            this.mesh.position.lerp(this.targetPosition, lerpFactor);
+            
+            // Slerp for yaw (shortest path rotation)
+            const diff = this.targetYaw - this.yaw;
+            // Normalize angle diff to -PI to PI
+            const normalizedDiff = Math.atan2(Math.sin(diff), Math.cos(diff));
+            this.yaw += normalizedDiff * lerpFactor;
+            this.mesh.rotation.y = this.yaw;
+        }
+
         if (this.mixer) {
             if (this.currentVehicleType !== 'motorcycle') {
                 this.mixer.update(dt);

@@ -51,6 +51,15 @@ export class World {
         this.networkManager = new NetworkManager();
         this.remotePlayers = {}; // Map id -> Mesh
         this.soundManager = new SoundManager(this.camera); // Initialize centralized manager
+        
+        // OPTIMIZATION: Auto-save character position every 5 seconds instead of every frame
+        setInterval(() => {
+            if (this.character && this.character.mesh) {
+                const charWorldPos = new THREE.Vector3();
+                this.character.mesh.getWorldPosition(charWorldPos);
+                localStorage.setItem('characterPosition', JSON.stringify({ x: charWorldPos.x, y: charWorldPos.y, z: charWorldPos.z }));
+            }
+        }, 5000);
 
         try {
             // r128 WebGLRenderer
@@ -1415,19 +1424,45 @@ export class World {
             Object.values(this.remotePlayers).forEach(p => p.update(dt, this.camera));
 
             if (this.character && this.networkManager && !this.isPaused) {
-                const charWorldPos = new THREE.Vector3();
-                this.character.mesh.getWorldPosition(charWorldPos);
+                const now = performance.now();
+                if (!this.lastSendTime || now - this.lastSendTime > 50) { // 20 Ticks per second
+                    const charWorldPos = new THREE.Vector3();
+                    this.character.mesh.getWorldPosition(charWorldPos);
 
-                this.networkManager.sendUpdate(
-                    charWorldPos,
-                    this.character.yaw,
-                    this.character.pitch || 0,
-                    this.character.state,
-                    this.weaponManager ? this.weaponManager.currentWeaponType : 'pistol',
-                    this.weaponManager ? this.weaponManager.isFiring : false,
-                    this.character.vehicle ? this.character.vehicle.type : null
-                );
-                localStorage.setItem('characterPosition', JSON.stringify({ x: charWorldPos.x, y: charWorldPos.y, z: charWorldPos.z }));
+                    // Check if position or rotation actually changed (optimization)
+                    if (!this.lastSentPos) this.lastSentPos = new THREE.Vector3();
+                    const state = this.character.state;
+                    const weaponType = this.weaponManager ? this.weaponManager.currentWeaponType : 'pistol';
+                    const isFiring = this.weaponManager ? this.weaponManager.isFiring : false;
+                    const vehicleType = this.character.vehicle ? this.character.vehicle.type : null;
+                    const yaw = this.character.yaw;
+                    const pitch = this.character.pitch || 0;
+
+                    const posDist = this.lastSentPos.distanceToSquared(charWorldPos);
+                    const moved = posDist > 0.001;
+                    const turned = Math.abs((this.lastSentYaw || 0) - yaw) > 0.01;
+                    const changedState = this.lastSentState !== state || this.lastSentWeapon !== weaponType || this.lastSentFiring !== isFiring || this.lastSentVehicle !== vehicleType;
+
+                    if (moved || turned || changedState) {
+                        this.networkManager.sendUpdate(
+                            charWorldPos,
+                            yaw,
+                            pitch,
+                            state,
+                            weaponType,
+                            isFiring,
+                            vehicleType
+                        );
+                        
+                        this.lastSendTime = now;
+                        this.lastSentPos.copy(charWorldPos);
+                        this.lastSentYaw = yaw;
+                        this.lastSentState = state;
+                        this.lastSentWeapon = weaponType;
+                        this.lastSentFiring = isFiring;
+                        this.lastSentVehicle = vehicleType;
+                    }
+                }
             }
 
             // Teleportation
