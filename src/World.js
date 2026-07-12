@@ -1034,18 +1034,22 @@ export class World {
         if (!this._cachedStaticBoxes) {
             this._cachedStaticBoxes = [];
             this._cachedStaticTargets = [];
+            
+            // To fix lag: We pre-calculate ONE merged Box3 per static object,
+            // instead of storing 1000s of sub-meshes for raycasting.
             for (const obj of this.character.colliders) {
                 this._cachedStaticTargets.push(obj);
-                obj.traverse(child => {
-                    if (child.isMesh) {
-                        if (!child.geometry.boundingBox) child.geometry.computeBoundingBox();
-                        child.updateMatrixWorld(true);
-                        const box = new THREE.Box3().copy(child.geometry.boundingBox).applyMatrix4(child.matrixWorld);
-                        this._cachedStaticBoxes.push({ box: box, object: obj });
-                    }
-                });
+                
+                obj.updateMatrixWorld(true);
+                const bbox = new THREE.Box3().setFromObject(obj);
+                
+                // Add some safety padding to the box
+                bbox.expandByScalar(0.2); 
+                
+                // Only push ONE box per entire city chunk/floor
+                this._cachedStaticBoxes.push({ box: bbox, object: obj });
             }
-            console.log("Cached " + this._cachedStaticBoxes.length + " static physics boxes.");
+            console.log("Optimized: Cached " + this._cachedStaticBoxes.length + " merged static physics boxes.");
         }
         filteredTargets.push(...this._cachedStaticTargets);
         physicsBoxes.push(...this._cachedStaticBoxes);
