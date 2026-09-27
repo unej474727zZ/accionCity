@@ -69,7 +69,7 @@ export class Minimap {
         };
     }
 
-    update(character, remotePlayers, npcManager, vehicleManager, activeCamera) {
+    update(character, remotePlayers, npcManager, vehicleManager, activeCamera, botManager) {
         if (!character || !character.mesh || !this.ctx || !activeCamera) return;
 
         // CRITICAL PERFORMANCE: Update camera matrices ONCE per frame
@@ -81,17 +81,34 @@ export class Minimap {
 
         ctx.clearRect(0, 0, width, height);
 
-        // 1. NPCs (Cian para autos, Rojo para tanques)
+        // 1. NPCs (Autos civiles)
         if (npcManager && npcManager.cars) {
             npcManager.cars.forEach(car => {
                 const pos = this.projectToCanvas(car.position, activeCamera);
                 if (pos.z < 1.0 && pos.x >= 0 && pos.x <= width && pos.y >= 0 && pos.y <= height) {
-                    if (vehicleManager && vehicleManager.isArmor(car)) {
-                        ctx.fillStyle = 'rgba(255, 0, 0, 0.7)'; // Tank NPC = Rojo semi-transparente
-                        ctx.fillRect(pos.x - 2, pos.y - 2, 4, 4);
-                    } else {
-                        ctx.fillStyle = 'rgba(0, 255, 255, 0.7)'; // Auto normal = Cian semi-transparente
-                        ctx.fillRect(pos.x - 1, pos.y - 1, 2, 2);
+                    ctx.fillStyle = 'rgba(0, 255, 255, 0.7)'; // Auto normal = Cian semi-transparente
+                    ctx.fillRect(pos.x - 1, pos.y - 1, 2, 2);
+                }
+            });
+        }
+
+        // 1.5. PURSUING NPCS (Bright Red Threat Radar)
+        if (botManager && botManager.bots) {
+            botManager.bots.forEach(bot => {
+                if (bot.state !== 'dead' && bot.mesh) {
+                    const pos = this.projectToCanvas(bot.mesh.position, activeCamera);
+                    if (pos.z < 1.0 && pos.x >= 0 && pos.x <= width && pos.y >= 0 && pos.y <= height) {
+                        ctx.fillStyle = '#ff0033';
+                        ctx.beginPath();
+                        ctx.arc(pos.x, pos.y, 4, 0, Math.PI * 2);
+                        ctx.fill();
+
+                        // Threat pulsing ring
+                        ctx.strokeStyle = '#ff0033';
+                        ctx.lineWidth = 1.5;
+                        ctx.beginPath();
+                        ctx.arc(pos.x, pos.y, 6.5, 0, Math.PI * 2);
+                        ctx.stroke();
                     }
                 }
             });

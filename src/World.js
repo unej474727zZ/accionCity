@@ -278,13 +278,11 @@ export class World {
                 new THREE.Vector3(-430, 0, -430)
             ];
 
-            const carKeys = ['car1', 'casco', 'car3', 'car1', 'casco', 'car3', 'tank']; // Tanks are now 1 in 7 probability
-            const tNames = ['transporter', 'transporter1', 'transporter2', 'transporter3'];
-            tNames.forEach((name, i) => {
-                const asset = assets[name];
-                if (asset) {
-                    const pad = asset.scene.clone();
-                    pad.position.copy(transporterPositions[i]);
+            const transporterAsset = assets['transporter'];
+            if (transporterAsset) {
+                transporterPositions.forEach((pos, i) => {
+                    const pad = transporterAsset.scene.clone();
+                    pad.position.copy(pos);
                     // Adjusted scale: clearly visible but logical (avatar 0.5w -> pad ~2.5w)
                     pad.scale.set(0.1, 0.2, 0.1);
                     // Ground level (just above floor at 0.05)
@@ -297,8 +295,8 @@ export class World {
                         triggered: false
                     });
                     console.log(`Transporter ${i} placed at ${pad.position.x}, ${pad.position.z}`);
-                }
-            });
+                });
+            }
 
             this.teleportCooldown = 0;
 
@@ -374,8 +372,8 @@ export class World {
 
             // NPC MANAGER
             this.npcManager = new NPCManager(this.scene, assets);
-            // Reduced density: from 80 to 30 for performance recovery
-            this.npcManager.initParkedCars(30);
+            // Optimized density for RAM and performance
+            this.npcManager.initParkedCars(8);
 
             // BOT MANAGER (Deathmatch)
             this.botManager = new BotManager(this.scene, assets, this);
@@ -429,7 +427,15 @@ export class World {
             this.particles = [];
             this.spawnTargets = this.spawnTargets || [];
 
-            // --- WAR ZONE ENVIRONMENT SATURATION ---
+            // --- SHARED MATERIALS & GEOMETRIES FOR RAM OPTIMIZATION ---
+            const sharedCanisterMaterial = new THREE.MeshStandardMaterial({
+                color: 0xff0000,
+                emissive: 0x440000,
+                roughness: 0.4,
+                metalness: 0.2
+            });
+
+            // --- WAR ZONE ENVIRONMENT SATURATION (OPTIMIZED) ---
             const addScenery = (name, pos, rot = new THREE.Euler(), scale = 1.0, isExplosive = false) => {
                 const asset = assets[name];
                 if (!asset) return null;
@@ -438,9 +444,8 @@ export class World {
                 mesh.rotation.copy(rot);
                 mesh.scale.set(scale, scale, scale);
 
-                // --- CRITICAL FIX: MAKE OBJECTS SOLID ---
                 this.scene.add(mesh);
-                this.character.colliders.push(mesh); // No more passing through!
+                this.character.colliders.push(mesh);
                 this.spawnTargets.push(mesh);
 
                 if (isExplosive) {
@@ -452,13 +457,11 @@ export class World {
                         this.weaponManager.canisters.push(canisterData);
                     }
 
-                    // FORCE RED COLOR (Bombonas Rojas)
+                    // Assign SHARED red material (Zero material clones in GPU memory)
                     if (name === 'canister') {
                         mesh.traverse(child => {
                             if (child.isMesh) {
-                                child.material = child.material.clone();
-                                child.material.color.setHex(0xff0000);
-                                if (child.material.emissive) child.material.emissive.setHex(0x440000);
+                                child.material = sharedCanisterMaterial;
                             }
                         });
                     }
@@ -481,10 +484,7 @@ export class World {
 
                     let isInsideBuilding = false;
                     for (const block of this.cityBlocks) {
-                        // Ignore massive blocks (like the floor itself)
                         if ((block.maxX - block.minX) > 200 || (block.maxZ - block.minZ) > 200) continue;
-
-                        // Add 1.5 units of padding so things don't spawn half-inside a wall
                         if (x > block.minX - 1.5 && x < block.maxX + 1.5 &&
                             z > block.minZ - 1.5 && z < block.maxZ + 1.5) {
                             isInsideBuilding = true;
@@ -499,8 +499,8 @@ export class World {
                 return null;
             };
 
-            // 1. Trash Cans (Solid and Pushable, NOT Explosive)
-            for (let i = 0; i < 100; i++) {
+            // 1. Trash Cans (Optimized: 15 instances)
+            for (let i = 0; i < 15; i++) {
                 const pos = getSafeStreetPos();
                 if (pos) {
                     const mesh = addScenery('trash_can', pos, new THREE.Euler(0, seededRandom() * Math.PI, 0), 0.6, false);
@@ -513,10 +513,11 @@ export class World {
                 }
             }
 
-            // 2. Dumpsters Snapped to Walls (Now pushable!)
-            for (let x = -7; x <= 7; x++) {
-                for (let z = -7; z <= 7; z++) {
-                    if (seededRandom() > 0.4) { // 60% chance
+            // 2. Dumpsters Snapped to Walls (Optimized: 10 instances)
+            let dumpstersPlaced = 0;
+            for (let x = -6; x <= 6 && dumpstersPlaced < 10; x += 2) {
+                for (let z = -6; z <= 6 && dumpstersPlaced < 10; z += 2) {
+                    if (seededRandom() > 0.6) {
                         const side = seededRandom() > 0.5 ? 1 : -1;
                         const axis = seededRandom() > 0.5 ? 'x' : 'z';
                         const pos = new THREE.Vector3(x * 40, 0, z * 40);
@@ -524,38 +525,36 @@ export class World {
                         if (axis === 'x') { pos.x += 19.95 * side; rot = (side > 0) ? 1.57 : -1.57; }
                         else { pos.z += 19.95 * side; rot = (side > 0) ? 0 : 3.14; }
 
-                        const mesh = addScenery(Math.random() > 0.5 ? 'dumpster1' : 'dumpster2', pos, new THREE.Euler(0, rot, 0), 0.8);
+                        const mesh = addScenery('dumpster1', pos, new THREE.Euler(0, rot, 0), 0.8);
                         if (mesh) {
-                            mesh.userData.isTrashCan = true; // Use the same flag for pushing logic
+                            mesh.userData.isTrashCan = true;
                             mesh.userData.hp = 20;
                             mesh.userData.pushVelocity = new THREE.Vector3(0, 0, 0);
                             this.clutterObjects.push(mesh);
+                            dumpstersPlaced++;
                         }
                     }
                 }
             }
 
-            // 3. Wrecks (Small ones pushable, large ones static) - Increased count for "War Zone" feel
-            for (let i = 0; i < 80; i++) {
+            // 3. Wrecks (Optimized: 10 instances)
+            for (let i = 0; i < 10; i++) {
                 const pos = getSafeStreetPos();
                 if (pos) {
                     const type = seededRandom();
                     let mesh = null;
                     let isHeavy = false;
 
-                    if (type < 0.25) {
+                    if (type < 0.3) {
                         mesh = addScenery('tank_wreck', pos, new THREE.Euler(0, seededRandom() * Math.PI, 0), 0.05);
                         isHeavy = true;
-                    } else if (type < 0.5) {
+                    } else if (type < 0.6) {
                         mesh = addScenery('car_wreck_fsc', pos, new THREE.Euler(0, seededRandom() * Math.PI, 0), 0.1);
                         isHeavy = true;
-                    } else if (type < 0.75) {
-                        mesh = addScenery('dumpster1', pos, new THREE.Euler(0, seededRandom() * Math.PI, 0), 0.6);
                     } else {
-                        mesh = addScenery('trash_can', pos, new THREE.Euler(0, seededRandom() * Math.PI, 0), 0.8);
+                        mesh = addScenery('dumpster1', pos, new THREE.Euler(0, seededRandom() * Math.PI, 0), 0.6);
                     }
 
-                    // Only add small items to clutterObjects to allow pushing
                     if (mesh && !isHeavy) {
                         mesh.userData.isTrashCan = true;
                         mesh.userData.pushVelocity = new THREE.Vector3(0, 0, 0);
@@ -564,17 +563,15 @@ export class World {
                 }
             }
 
-            // 4. Explosive Canisters (Bombonas Rojas) - High saturation
+            // 4. Explosive Canisters (Bombonas Rojas - Optimized: 20 instances)
             let canistersSpawned = 0;
             let canisterAttempts = 0;
-            // UPDATE UI
             const loadUI = document.getElementById('loading');
             if (loadUI) loadUI.innerText = 'Generando Ciudad...';
-            await new Promise(r => setTimeout(r, 10)); // Yield to let UI update
 
-            while (canistersSpawned < 200 && canisterAttempts < 2000) {
+            while (canistersSpawned < 20 && canisterAttempts < 200) {
                 canisterAttempts++;
-                const pos = getSafeStreetPos(400); // Reduce range for denser packing without needing 1000 items
+                const pos = getSafeStreetPos(400);
                 if (pos) {
                     pos.y = 0.4;
                     const mesh = addScenery('canister', pos, new THREE.Euler(0, 0, 0), 0.6, true);
@@ -584,35 +581,29 @@ export class World {
                         canistersSpawned++;
                     }
                 }
-
-                // Yield periodically to prevent browser freeze
-                if (canisterAttempts % 100 === 0) {
-                    await new Promise(r => setTimeout(r, 0));
-                }
             }
-            console.log(`🧨 Spawned ${canistersSpawned} explosive canisters.`);
+            console.log(`🧨 Spawned ${canistersSpawned} explosive canisters (Shared Material).`);
 
-            // 5. Procedural Bazooka Ammo Pickups (Floating glowing cylinders)
+            // 5. Procedural Bazooka Ammo Pickups (Optimized: 15 instances, shared geoms/mats)
             const ammoGeom = new THREE.CylinderGeometry(0.1, 0.1, 0.8, 8);
-            ammoGeom.rotateX(Math.PI / 2); // Lay flat
+            ammoGeom.rotateX(Math.PI / 2);
             const ammoMat = new THREE.MeshStandardMaterial({
                 color: 0x00ff00,
                 emissive: 0x00aa00,
                 metalness: 0.8,
                 roughness: 0.2
             });
+            const glowGeom = new THREE.CylinderGeometry(0.15, 0.15, 0.9, 8);
+            glowGeom.rotateX(Math.PI / 2);
+            const glowMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending });
 
-            for (let i = 0; i < 80; i++) { // Scatter 80 ammo pickups around
+            for (let i = 0; i < 15; i++) {
                 const pos = getSafeStreetPos();
                 if (pos) {
-                    pos.y = 1.0; // Float above ground
+                    pos.y = 1.0;
                     const mesh = new THREE.Mesh(ammoGeom, ammoMat);
                     mesh.position.copy(pos);
 
-                    // Add a simple halo/glow with another mesh
-                    const glowGeom = new THREE.CylinderGeometry(0.15, 0.15, 0.9, 8);
-                    glowGeom.rotateX(Math.PI / 2);
-                    const glowMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending });
                     const glowMesh = new THREE.Mesh(glowGeom, glowMat);
                     mesh.add(glowMesh);
 
@@ -1609,7 +1600,7 @@ export class World {
                     this.minimapThrottle++;
                     if (this.minimap && this.character && this.character.mesh && this.minimapThrottle % 10 === 0) {
                         const activeCam = this.minimap.isFullMap ? this.camera : this.minimapCamera;
-                        this.minimap.update(this.character, this.remotePlayers, this.npcManager, this.vehicleManager, activeCam);
+                        this.minimap.update(this.character, this.remotePlayers, this.npcManager, this.vehicleManager, activeCam, this.botManager);
                     }
                 }
             }

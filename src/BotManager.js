@@ -1,33 +1,85 @@
 import * as THREE from 'three';
 import { Bot } from './Bot.js';
 
+// Static scratch vectors to prevent GC pauses
+const _playerPos = new THREE.Vector3();
+const _spawnPos = new THREE.Vector3();
+
 export class BotManager {
     constructor(scene, assets, world) {
         this.scene = scene;
         this.assets = assets;
         this.world = world;
         this.bots = [];
-        this.maxBots = 12; // Increased from 5 to populate city more
-        this.spawnRadius = 80; // Max distance to spawn
-        this.minSpawnRadius = 40; // Min distance to spawn
-        this.despawnRadius = 200; // Distance to remove bot
-        
-        this.aiTickTimer = 0;
-        this.aiTickRate = 0.2; // 5 Hz
+        this.maxBots = 3; // EXACTLY 3 pursuers at all times
+        this.minSpawnRadius = 35;
+        this.maxSpawnRadius = 50;
+        this.despawnRadius = 140; // Max distance before teleporting closer to protagonist
 
-        this.botCounter = 0;
+        this.aiTickTimer = 0;
+        this.aiTickRate = 0.15; // ~6.6 Hz AI evaluations
+
+        this.initialized = false;
+    }
+
+    getPlayerPos(outVec) {
+        if (!this.world.character || !this.world.character.mesh) return false;
+        if (this.world.characterController && this.world.characterController.isDriving && this.world.characterController.vehicle) {
+            outVec.copy(this.world.characterController.vehicle.mesh.position);
+        } else {
+            this.world.character.mesh.getWorldPosition(outVec);
+        }
+        return true;
+    }
+
+    initBots() {
+        if (this.initialized) return;
+        if (!this.getPlayerPos(_playerPos)) return;
+
+        // Spawn 3 pursuers in triangular formation around protagonist
+        const angles = [0, (2 * Math.PI) / 3, (4 * Math.PI) / 3];
+        for (let i = 0; i < this.maxBots; i++) {
+            const angle = angles[i];
+            const dist = 35 + i * 5;
+            _spawnPos.set(
+                _playerPos.x + Math.cos(angle) * dist,
+                0.5,
+                _playerPos.z + Math.sin(angle) * dist
+            );
+
+            const bot = new Bot(this.scene, this.assets, `pursuer_${i + 1}`, _spawnPos, this.world, this, i);
+            this.bots.push(bot);
+        }
+
+        this.initialized = true;
+        console.log(`BotManager: Initialized 3-NPC relentless pursuit squad.`);
     }
 
     update(dt) {
-        // 1. Tick AI periodically (Optimization)
+        if (!this.initialized) {
+            this.initBots();
+            return;
+        }
+
+        // 1. Update Dead Respawn Timers
+        for (let bot of this.bots) {
+            if (bot.state === 'dead') {
+                bot.respawnTimer -= dt;
+                if (bot.respawnTimer <= 0) {
+                    this.recycleBot(bot);
+                }
+            }
+        }
+
+        // 2. Tick AI & Tether Checks
         this.aiTickTimer += dt;
         if (this.aiTickTimer >= this.aiTickRate) {
             this.aiTickTimer = 0;
             this.tickAI();
-            this.checkPopulation();
+            this.checkTether();
         }
 
-        // 2. Update visual and physics per frame
+        // 3. Update Visuals and Physics
         for (let bot of this.bots) {
             bot.update(dt);
         }
@@ -39,73 +91,52 @@ export class BotManager {
         }
     }
 
-    checkPopulation() {
-        if (!this.world.character || !this.world.character.mesh) return;
+    checkTether() {
+        if (!this.getPlayerPos(_playerPos)) return;
 
-        let playerPos = new THREE.Vector3();
-        if (this.world.characterController && this.world.characterController.isDriving && this.world.characterController.vehicle) {
-            playerPos = this.world.characterController.vehicle.mesh.position.clone();
-        } else {
-            this.world.character.mesh.getWorldPosition(playerPos);
-        }
+        // If protagonist drove away and distance > despawnRadius, reposition bot ahead
+        for (let bot of this.bots) {
+            if (bot.state === 'dead' || !bot.mesh) continue;
 
-        // Despawn far away bots
-        for (let i = this.bots.length - 1; i >= 0; i--) {
-            const bot = this.bots[i];
-            if (bot.state === 'dead') continue;
-
-            const dist = bot.mesh.position.distanceTo(playerPos);
+            const dist = bot.mesh.position.distanceTo(_playerPos);
             if (dist > this.despawnRadius) {
-                // Recycle bot instead of destroying to avoid SkeletonUtils.clone lag spike
+                // Re-tether closer so the protagonist is ALWAYS pursued
                 const angle = Math.random() * Math.PI * 2;
-                const spawnDist = this.minSpawnRadius + Math.random() * (this.spawnRadius - this.minSpawnRadius);
-                const spawnX = playerPos.x + Math.cos(angle) * spawnDist;
-                const spawnZ = playerPos.z + Math.sin(angle) * spawnDist;
-                
-                bot.teleport(new THREE.Vector3(spawnX, 0.5, spawnZ));
-            }
-        }
-
-        // Spawn new bots if below max
-        const activeBots = this.bots.filter(b => b.state !== 'dead').length;
-        if (activeBots < this.maxBots) {
-            // Reutilizar un bot muerto si existe (Object Pooling)
-            const deadBot = this.bots.find(b => b.state === 'dead');
-            if (deadBot) {
-                const angle = Math.random() * Math.PI * 2;
-                const dist = this.minSpawnRadius + Math.random() * (this.spawnRadius - this.minSpawnRadius);
-                const spawnX = playerPos.x + Math.cos(angle) * dist;
-                const spawnZ = playerPos.z + Math.sin(angle) * dist;
-                deadBot.teleport(new THREE.Vector3(spawnX, 0.5, spawnZ));
-                if (deadBot.mesh) deadBot.mesh.visible = true; // Revive visualmente
-                // console.log(`BotManager: Recycled Bot ${deadBot.id}`);
-            } else if (this.bots.length < this.maxBots) { // Solo crear nuevos si no superamos el límite absoluto
-                this.spawnBot(playerPos);
+                const spawnDist = 40.0;
+                _spawnPos.set(
+                    _playerPos.x + Math.cos(angle) * spawnDist,
+                    0.5,
+                    _playerPos.z + Math.sin(angle) * spawnDist
+                );
+                bot.respawn(_spawnPos);
+                console.log(`BotManager: Re-tethered Pursuer ${bot.id} at ${spawnDist}m`);
             }
         }
     }
 
-    spawnBot(playerPos) {
-        this.botCounter++;
-        const angle = Math.random() * Math.PI * 2;
-        const dist = this.minSpawnRadius + Math.random() * (this.spawnRadius - this.minSpawnRadius);
-        
-        const spawnX = playerPos.x + Math.cos(angle) * dist;
-        const spawnZ = playerPos.z + Math.sin(angle) * dist;
-        const spawnPos = new THREE.Vector3(spawnX, 0.5, spawnZ);
+    onBotKilled(bot) {
+        // Respawns after 3 seconds
+        bot.respawnTimer = 3.0;
+        console.log(`BotManager: Pursuer ${bot.id} defeated. Respawn in 3 seconds.`);
+    }
 
-        const bot = new Bot(this.scene, this.assets, `bot_${this.botCounter}`, spawnPos, this.world, this);
-        this.bots.push(bot);
-        console.log(`BotManager: Spawned Bot ${this.botCounter} at ${spawnX.toFixed(0)}, ${spawnZ.toFixed(0)}`);
+    recycleBot(bot) {
+        if (!this.getPlayerPos(_playerPos)) return;
+
+        // Respawn at flanking distance (35-45m)
+        const angle = Math.random() * Math.PI * 2;
+        const dist = 35 + Math.random() * 10;
+        _spawnPos.set(
+            _playerPos.x + Math.cos(angle) * dist,
+            0.5,
+            _playerPos.z + Math.sin(angle) * dist
+        );
+
+        bot.respawn(_spawnPos);
+        console.log(`BotManager: Pursuer ${bot.id} respawned and resumed pursuit!`);
     }
 
     removeBot(id) {
-        // En lugar de destruir el bot (lo cual causa lag al tener que instanciar otro),
-        // lo dejamos en el array con state='dead'. El Object Pool lo reciclará.
-        // const index = this.bots.findIndex(b => b.id === id);
-        // if (index !== -1) {
-        //     this.bots[index].dispose();
-        //     this.bots.splice(index, 1);
-        // }
+        // In this architecture, bots are never disposed/deleted from the pool
     }
 }
