@@ -1029,13 +1029,25 @@ export class World {
             // To fix lag: We pre-calculate ONE merged Box3 per static object,
             // instead of storing 1000s of sub-meshes for raycasting.
             for (const obj of this.character.colliders) {
+                     //if (!obj || 
+                       // obj.name.includes("Sketchfab_Scene") || 
+                        //obj.name.includes("Material") || 
+                        //obj.name.includes("AsphaltFloor") || 
+                        //obj.name.includes("Cube003_")) {
+                        //continue; // Ignora el suelo y los grupos gigantes, evitando el muro invisible
+                        if (!obj || obj.name === "Sketchfab_Scene" || obj.name === "AsphaltFloor") {
+                            continue;                     
+                    }
                 this._cachedStaticTargets.push(obj);
                 
                 obj.updateMatrixWorld(true);
                 const bbox = new THREE.Box3().setFromObject(obj);
                 
+                // AÑADE ESTA LÍNEA AQUÍ ABAJO PARA VER QUÉ SE ESTÁ CREANDO:
+                console.log("👉 Caja estática creada para el objeto:", obj.name, "en posición:", obj.position);
+
                 // Add some safety padding to the box
-                bbox.expandByScalar(0.2); 
+                bbox.expandByScalar(0.02); 
                 
                 // Only push ONE box per entire city chunk/floor
                 this._cachedStaticBoxes.push({ box: bbox, object: obj });

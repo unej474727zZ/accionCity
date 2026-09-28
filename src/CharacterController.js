@@ -38,8 +38,8 @@ export class CharacterController {
         };
         this.gamepadJumpHeld = false;
 
-        this.walkSpeed = 5;
-        this.runSpeed = 15.0; // Increased by another 20%
+        this.walkSpeed = 3.0;
+        this.runSpeed = 8.0;
         this.rotationSpeed = 2; // radians per second
 
         // Camera settings
@@ -1360,22 +1360,28 @@ export class CharacterController {
             let groundHeight = -99999;
             let foundGround = false;
 
+            let groundTargets = [];
             if (this.physicsBoxes && this.physicsBoxes.length > 0) {
-                const targetPt = new THREE.Vector3();
+                const boxedObjects = new Set();
                 for (const pb of this.physicsBoxes) {
-                    if (this.groundRaycaster.ray.intersectBox(pb.box, targetPt)) {
-                        const dist = this.groundRaycaster.ray.origin.y - targetPt.y;
-                        if (dist > 0 && dist < 2.5) {
-                            if (targetPt.y > groundHeight) {
-                                groundHeight = targetPt.y;
-                                foundGround = true;
-                            }
-                        }
+                    boxedObjects.add(pb.object);
+                    if (this.groundRaycaster.ray.intersectsBox(pb.box)) {
+                        groundTargets.push(pb.object);
+                    }
+                }
+                
+                // Add any colliders that were explicitly excluded from physicsBoxes (like the floor)
+                for (const col of this.colliders) {
+                    if (!boxedObjects.has(col)) {
+                        groundTargets.push(col);
                     }
                 }
             } else {
                 // Fallback
-                const groundTargets = this.allPhysicTargets && this.allPhysicTargets.length > 0 ? this.allPhysicTargets : this.colliders;
+                groundTargets = this.allPhysicTargets && this.allPhysicTargets.length > 0 ? this.allPhysicTargets : this.colliders;
+            }
+
+            if (groundTargets.length > 0) {
                 const intersects = this.groundRaycaster.intersectObjects(groundTargets, true);
                 if (intersects.length > 0) {
                     const hit = intersects[0];
@@ -1481,25 +1487,29 @@ export class CharacterController {
                     this.raycaster.set(safeOrigin, moveDir);
                     this.raycaster.far = dynFar;
 
-                    // FAST AABB WALL COLLISION
-                    let bestHit = null;
+                    // FAST SPATIAL CULLING WALL COLLISION
+                    let wallTargets = [];
                     if (this.physicsBoxes && this.physicsBoxes.length > 0) {
-                        const targetPt = new THREE.Vector3();
+                        const boxedObjects = new Set();
                         for (const pb of this.physicsBoxes) {
-                            if (this.raycaster.ray.intersectBox(pb.box, targetPt)) {
-                                const dist = safeOrigin.distanceTo(targetPt);
-                                if (dist < this.raycaster.far && (!bestHit || dist < bestHit.distance)) {
-                                    bestHit = { distance: dist, point: targetPt.clone(), object: pb.object };
-                                }
+                            boxedObjects.add(pb.object);
+                            if (this.raycaster.ray.intersectsBox(pb.box)) {
+                                wallTargets.push(pb.object);
                             }
                         }
+                        // Add any colliders that were explicitly excluded from physicsBoxes (like the city group)
+                        for (const col of this.colliders) {
+                            if (!boxedObjects.has(col)) {
+                                wallTargets.push(col);
+                            }
+                        }
+                    } else {
+                        wallTargets = this.allPhysicTargets && this.allPhysicTargets.length > 0 ? this.allPhysicTargets : this.colliders;
                     }
 
                     let wallHits = [];
-                    if (bestHit) wallHits.push(bestHit);
-                    else if (!this.physicsBoxes || this.physicsBoxes.length === 0) {
-                        const allColliders = this.allPhysicTargets && this.allPhysicTargets.length > 0 ? this.allPhysicTargets : this.colliders;
-                        wallHits = this.raycaster.intersectObjects(allColliders, true);
+                    if (wallTargets.length > 0) {
+                        wallHits = this.raycaster.intersectObjects(wallTargets, true);
                     }
 
                     if (wallHits.length > 0) {

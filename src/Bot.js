@@ -59,8 +59,8 @@ export class Bot {
         this.raycaster = new THREE.Raycaster();
         this.wallRaycaster = new THREE.Raycaster();
 
-        // 3 distinct squad colors
-        const squadColors = [0xff2222, 0xdd1144, 0xbb0022];
+        // 3 distinct squad colors (Red, Green, Blue)
+        const squadColors = [0xff2222, 0x22ff22, 0x2222ff];
         this.playerColor = squadColors[botIndex % squadColors.length];
 
         this.init(initialPos);
