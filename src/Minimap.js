@@ -9,10 +9,11 @@ export class Minimap {
         const existing = document.getElementById('minimap-canvas');
         if (existing) existing.remove();
 
+        this.originalSize = window.innerWidth <= 800 ? 120 : 200;
         this.canvas = document.createElement('canvas');
         this.canvas.id = 'minimap-canvas';
-        this.canvas.width = 200;
-        this.canvas.height = 200;
+        this.canvas.width = this.originalSize;
+        this.canvas.height = this.originalSize;
         this.canvas.style.position = 'absolute';
         this.canvas.style.top = '10px';
         this.canvas.style.right = '10px';
@@ -26,7 +27,6 @@ export class Minimap {
         this.ctx = this.canvas.getContext('2d');
 
         this.isFullMap = false; 
-        this.originalSize = 200;
         this._tempVec = new THREE.Vector3();
         this._worldPos = new THREE.Vector3();
     }

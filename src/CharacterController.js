@@ -197,13 +197,13 @@ export class CharacterController {
             // No animations (mixer stays null)
         }
 
-        // Teleport to a random location across the map and drop from the sky!
-        const spawnX = (Math.random() - 0.5) * 800; // -400 to 400
-        const spawnZ = (Math.random() - 0.5) * 800; // -400 to 400
+        // Teleport to a safe location (middle of the map) and drop from the sky!
+        const spawnX = 0;
+        const spawnZ = 0;
         
         this.mesh.position.set(spawnX, 100, spawnZ); // Drop from sky
         this.yaw = 0;
-        console.log("Spawned at Random Location:", this.mesh.position);
+        console.log("Spawned at Safe Location:", this.mesh.position);
 
         /* DISABLED PERSISTENCE FOR NOW
         const savedPos = JSON.parse(localStorage.getItem('playerPos'));
