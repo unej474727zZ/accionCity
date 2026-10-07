@@ -15,7 +15,7 @@ import { Minimap } from './Minimap.js';
 import { SoundManager } from './SoundManager.js';
 import { Bomber } from './Bomber.js';
 import { SniperManager } from './SniperManager.js';
-
+import { AutoPilot } from './AutoPilot.js';
 
 // --- CRITICAL AUDIO PATCH (Anti-Crash) ---
 // Prevents browser thread lock when Three.js sends non-finite numbers to Web Audio
@@ -51,6 +51,7 @@ export class World {
         this.networkManager = new NetworkManager();
         this.remotePlayers = {}; // Map id -> Mesh
         this.soundManager = new SoundManager(this.camera); // Initialize centralized manager
+        this.autoPilot = new AutoPilot(this);
         
         // OPTIMIZATION: Auto-save character position every 5 seconds instead of every frame
         setInterval(() => {
@@ -1306,6 +1307,7 @@ export class World {
 
             if (this.character && !this.isPaused) {
                 this.character.update(dt);
+                if (this.autoPilot) this.autoPilot.update(dt);
                 if (!this.colliderThrottle) this.colliderThrottle = 0;
                 this.colliderThrottle++;
                 if (this.colliderThrottle % 60 === 0) {

@@ -59,8 +59,8 @@ export class Bot {
         this.raycaster = new THREE.Raycaster();
         this.wallRaycaster = new THREE.Raycaster();
 
-        // 3 distinct squad colors (Red, Green, Blue)
-        const squadColors = [0xff2222, 0x22ff22, 0x2222ff];
+        // 3 distinct squad colors (Fluorescent / Radioactive)
+        const squadColors = [0x00ff00, 0x00ffff, 0xff00ff]; // Neon Green, Cyan, Magenta
         this.playerColor = squadColors[botIndex % squadColors.length];
 
         this.init(initialPos);
@@ -173,6 +173,13 @@ export class Bot {
                     child.material.transparent = false;
                     child.material.opacity = 1.0;
                     child.material.color.setHex(colorHex);
+                    
+                    // Make them radioactive / fluorescent
+                    if (child.material.emissive !== undefined) {
+                        child.material.emissive.setHex(colorHex);
+                        child.material.emissiveIntensity = 2.0;
+                    }
+                    
                     child.material.needsUpdate = true;
                 }
             }

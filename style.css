@@ -287,6 +287,11 @@ body {
   /* Clear of Map (200px + 10px + padding) */
 }
 
+#btn-master-toggle {
+  top: 10px;
+  right: 280px;
+}
+
 .toggle-btn {
   width: 40px;
   height: 40px;
@@ -623,3 +628,21 @@ body {
 }
 .left-wing { left: 0; }
 .right-wing { right: 0; }
+
+/* =========================================
+   MEDIA QUERIES (MOBILE RESPONSIVENESS)
+   ========================================= */
+@media screen and (max-width: 800px) {
+  #minimap-canvas {
+    width: 120px !important;
+    height: 120px !important;
+  }
+  
+  #btn-map-toggle {
+    right: 140px;
+  }
+  
+  #btn-master-toggle {
+    right: 190px;
+  }
+}

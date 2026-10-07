@@ -32,27 +32,62 @@ export class BotManager {
         return true;
     }
 
+    getRandomSpawnPos(outVec) {
+        let attempts = 0;
+        let valid = false;
+        while (!valid && attempts < 100) {
+            attempts++;
+            const rx = (Math.random() - 0.5) * 800;
+            const rz = (Math.random() - 0.5) * 800;
+            
+            // Check distance to other bots
+            valid = true;
+            for (let bot of this.bots) {
+                if (!bot.mesh) continue;
+                const dx = bot.mesh.position.x - rx;
+                const dz = bot.mesh.position.z - rz;
+                if (Math.sqrt(dx*dx + dz*dz) < 100) {
+                    valid = false;
+                    break;
+                }
+            }
+            
+            // Check if inside building
+            if (valid && this.world && this.world.cityBlocks) {
+                for (const block of this.world.cityBlocks) {
+                    // Ignore truly massive meshes (like the entire ground), but include scaled up buildings.
+                    // Increased max limit to 1000 to catch the scaled city buildings.
+                    if ((block.maxX - block.minX) > 1000 || (block.maxZ - block.minZ) > 1000) continue;
+                    
+                    // Increased safety margin from 2 to 6 meters to avoid spawning inside walls
+                    if (rx > block.minX - 6 && rx < block.maxX + 6 && rz > block.minZ - 6 && rz < block.maxZ + 6) {
+                        valid = false;
+                        break;
+                    }
+                }
+            }
+
+            if (valid) {
+                outVec.set(rx, 0.5, rz); // Street level
+                return;
+            }
+        }
+        // Fallback
+        outVec.set((Math.random() - 0.5) * 800, 0.5, (Math.random() - 0.5) * 800);
+    }
+
     initBots() {
         if (this.initialized) return;
-        if (!this.getPlayerPos(_playerPos)) return;
 
-        // Spawn 3 pursuers in triangular formation around protagonist
-        const angles = [0, (2 * Math.PI) / 3, (4 * Math.PI) / 3];
+        // Spawn 3 pursuers completely random on the map
         for (let i = 0; i < this.maxBots; i++) {
-            const angle = angles[i];
-            const dist = 35 + i * 5;
-            _spawnPos.set(
-                _playerPos.x + Math.cos(angle) * dist,
-                0.5,
-                _playerPos.z + Math.sin(angle) * dist
-            );
-
+            this.getRandomSpawnPos(_spawnPos);
             const bot = new Bot(this.scene, this.assets, `pursuer_${i + 1}`, _spawnPos, this.world, this, i);
             this.bots.push(bot);
         }
 
         this.initialized = true;
-        console.log(`BotManager: Initialized 3-NPC relentless pursuit squad.`);
+        console.log(`BotManager: Initialized 3-NPC random spawn squad.`);
     }
 
     update(dt) {
@@ -76,7 +111,7 @@ export class BotManager {
         if (this.aiTickTimer >= this.aiTickRate) {
             this.aiTickTimer = 0;
             this.tickAI();
-            this.checkTether();
+            // Tether check completely disabled as per user request!
         }
 
         // 3. Update Visuals and Physics
@@ -92,26 +127,7 @@ export class BotManager {
     }
 
     checkTether() {
-        if (!this.getPlayerPos(_playerPos)) return;
-
-        // If protagonist drove away and distance > despawnRadius, reposition bot ahead
-        for (let bot of this.bots) {
-            if (bot.state === 'dead' || !bot.mesh) continue;
-
-            const dist = bot.mesh.position.distanceTo(_playerPos);
-            if (dist > this.despawnRadius) {
-                // Re-tether closer so the protagonist is ALWAYS pursued
-                const angle = Math.random() * Math.PI * 2;
-                const spawnDist = 40.0;
-                _spawnPos.set(
-                    _playerPos.x + Math.cos(angle) * spawnDist,
-                    0.5,
-                    _playerPos.z + Math.sin(angle) * spawnDist
-                );
-                bot.respawn(_spawnPos);
-                console.log(`BotManager: Re-tethered Pursuer ${bot.id} at ${spawnDist}m`);
-            }
-        }
+        // Disabled tethering! NPCs now stay where they are or wander.
     }
 
     onBotKilled(bot) {
@@ -121,19 +137,9 @@ export class BotManager {
     }
 
     recycleBot(bot) {
-        if (!this.getPlayerPos(_playerPos)) return;
-
-        // Respawn at flanking distance (35-45m)
-        const angle = Math.random() * Math.PI * 2;
-        const dist = 35 + Math.random() * 10;
-        _spawnPos.set(
-            _playerPos.x + Math.cos(angle) * dist,
-            0.5,
-            _playerPos.z + Math.sin(angle) * dist
-        );
-
+        this.getRandomSpawnPos(_spawnPos);
         bot.respawn(_spawnPos);
-        console.log(`BotManager: Pursuer ${bot.id} respawned and resumed pursuit!`);
+        console.log(`BotManager: Pursuer ${bot.id} respawned in random map location!`);
     }
 
     removeBot(id) {

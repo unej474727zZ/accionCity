@@ -197,14 +197,13 @@ export class CharacterController {
             // No animations (mixer stays null)
         }
 
-        // User requested: "Spawn near the motorcycle" with 5m circular dispersion to avoid superposition
-        const angle = Math.random() * Math.PI * 2;
-        const radius = Math.random() * 5; // 5m Radius dispersion
-        const spawnX = -298 + Math.cos(angle) * radius;
-        const spawnZ = -40 + Math.sin(angle) * radius;
-        this.mesh.position.set(spawnX, 0.5, spawnZ);
+        // Teleport to a random location across the map and drop from the sky!
+        const spawnX = (Math.random() - 0.5) * 800; // -400 to 400
+        const spawnZ = (Math.random() - 0.5) * 800; // -400 to 400
+        
+        this.mesh.position.set(spawnX, 100, spawnZ); // Drop from sky
         this.yaw = 0;
-        console.log("Spawned at Cluster with offset:", this.mesh.position);
+        console.log("Spawned at Random Location:", this.mesh.position);
 
         /* DISABLED PERSISTENCE FOR NOW
         const savedPos = JSON.parse(localStorage.getItem('playerPos'));
@@ -526,6 +525,14 @@ export class CharacterController {
             }
         }, null);
 
+        // MASTER CONTROLS TOGGLE
+        bindBtn('btn-master-toggle', () => {
+            const controls = document.getElementById('mobile-controls');
+            if (controls) {
+                controls.style.display = (controls.style.display === 'none') ? 'block' : 'none';
+            }
+        }, null);
+
         // EXTRA: RIGHT D-PAD removed from Camera Control as per user request
         // (Zoom is now handled explicitly by btn-cam-up/down)
         const bindCamBtn = (id, key) => {
@@ -564,38 +571,45 @@ export class CharacterController {
     setFiring(isActive) {
         if (!this.mixer) return;
 
-        // Determine which mask to use based on weapon
         const isRifle = (this.weaponManager && this.weaponManager.currentWeaponType === 'rifle');
-        const targetClipName = isRifle ? 'firing' : 'shooting'; // 'firing' is rifle, 'shooting' is pistol
-        const otherClipName = isRifle ? 'shooting' : 'firing';
-
-        // Get Actions
-        const targetClip = this.animations[targetClipName];
-        if (!targetClip) return;
-        const targetAction = this.mixer.clipAction(targetClip);
-
-        // Fade OUT the other mask if it's running
-        const otherClip = this.animations[otherClipName];
-        if (otherClip) {
-            const otherAction = this.mixer.clipAction(otherClip);
-            if (otherAction.isRunning()) otherAction.fadeOut(0.2);
-        }
+        const rifleClip = this.animations['firing'];
+        const pistolClip = this.animations['shooting'];
+        const rifleAction = rifleClip ? this.mixer.clipAction(rifleClip) : null;
+        const pistolAction = pistolClip ? this.mixer.clipAction(pistolClip) : null;
+        
+        const targetAction = isRifle ? rifleAction : pistolAction;
+        const otherAction = isRifle ? pistolAction : rifleAction;
 
         if (isActive) {
-            // Only play if not already playing or fading in
-            if (!targetAction.isRunning() || targetAction.getEffectiveWeight() < 0.1) {
+            // Fade out the wrong mask if it's currently running
+            if (otherAction && otherAction.isRunning() && otherAction.getEffectiveWeight() > 0 && !otherAction._isFadingOut) {
+                otherAction.fadeOut(0.2);
+                otherAction._isFadingOut = true;
+            }
+            
+            if (targetAction && (!targetAction.isRunning() || targetAction.getEffectiveWeight() < 0.1 || targetAction._isFadingOut)) {
                 targetAction.reset();
                 targetAction.enabled = true;
                 targetAction.setLoop(THREE.LoopRepeat);
                 targetAction.clampWhenFinished = false;
-                // High weight to override arms COMPLETELY (Reference: 50.0)
                 targetAction.setEffectiveWeight(1.0);
                 targetAction.play();
                 targetAction.fadeIn(0.2);
+                targetAction._isFadingOut = false;
             }
+            this._lastFiringState = true;
         } else {
-            if (targetAction.isRunning()) {
-                targetAction.fadeOut(0.2);
+            // Smoothly fade out both masks ONCE when holstered
+            if (this._lastFiringState !== false) {
+                if (rifleAction && rifleAction.isRunning() && rifleAction.getEffectiveWeight() > 0 && !rifleAction._isFadingOut) {
+                    rifleAction.fadeOut(0.2);
+                    rifleAction._isFadingOut = true;
+                }
+                if (pistolAction && pistolAction.isRunning() && pistolAction.getEffectiveWeight() > 0 && !pistolAction._isFadingOut) {
+                    pistolAction.fadeOut(0.2);
+                    pistolAction._isFadingOut = true;
+                }
+                this._lastFiringState = false;
             }
         }
     }
@@ -1639,13 +1653,15 @@ export class CharacterController {
         }
 
         // Apply pitch to local player bones so they appear correct in mirrors/others
+        // And importantly, apply to Spine so the arms/weapon aim up and down!
         if (this.mesh && !this.isDriving) {
             this.mesh.traverse(child => {
                 if (child.isBone) {
-                    if (child.name.includes('Neck') || child.name.includes('Head')) {
+                    const name = child.name.toLowerCase();
+                    if (name.includes('spine') || name.includes('neck') || name.includes('head')) {
                         // Facing +Z, negative X rotation tilts backwards (UP)
-                        // Just the head/neck as requested
-                        child.rotation.x = -this.pitch;
+                        // Distribute the pitch across multiple bones so it looks natural
+                        child.rotation.x = -this.pitch * 0.2; 
                     }
                 }
             });
@@ -1963,13 +1979,12 @@ PTR LOCK: ${plStatus}
             deathOverlay.style.display = 'none';
         }
 
-        // Teleport to original random spawn cluster coordinate
-        const angle = Math.random() * Math.PI * 2;
-        const radius = Math.random() * 5;
-        const spawnX = -298 + Math.cos(angle) * radius;
-        const spawnZ = -40 + Math.sin(angle) * radius;
+        // Teleport to a random location across the map and drop from the sky!
+        const spawnX = (Math.random() - 0.5) * 800; // -400 to 400
+        const spawnZ = (Math.random() - 0.5) * 800; // -400 to 400
+        
         if (this.mesh) {
-            this.mesh.position.set(spawnX, 0.5, spawnZ);
+            this.mesh.position.set(spawnX, 100, spawnZ); // Drop from sky
         }
         this.yaw = 0;
         this.pitch = 0;

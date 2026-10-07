@@ -362,12 +362,15 @@ export class WeaponManager {
                 console.log(`[TEST MODE] Missile Warning System: ${this.testMissileActive ? "ON" : "OFF"}`);
             }
 
-            // ROTATION CONTROLS (Only if weapon equipped)
+            // ROTATION & POSITION CONTROLS (Only if weapon equipped)
             if (this.currentWeaponMesh) {
                 const step = 0.05; // Finer control
+                const posStep = 0.02; // Fine control for position
                 const rot = this.currentWeaponMesh.rotation;
+                const pos = this.currentWeaponMesh.position;
                 let changed = false;
 
+                // ROTATION
                 // X Axis: 8 (Up), 2 (Down)
                 if (e.key === '8') { rot.x += step; changed = true; }
                 if (e.key === '2') { rot.x -= step; changed = true; }
@@ -380,9 +383,22 @@ export class WeaponManager {
                 if (e.key === 'q' || e.key === 'Q') { rot.z += step; changed = true; }
                 if (e.key === 'e' || e.key === 'E') { rot.z -= step; changed = true; }
 
+                // POSITION
+                // X Axis: J / L
+                if (e.key === 'j' || e.key === 'J') { pos.x -= posStep; changed = true; }
+                if (e.key === 'l' || e.key === 'L') { pos.x += posStep; changed = true; }
+                
+                // Y Axis: I / K
+                if (e.key === 'i' || e.key === 'I') { pos.y += posStep; changed = true; }
+                if (e.key === 'k' || e.key === 'K') { pos.y -= posStep; changed = true; }
+                
+                // Z Axis: U / O
+                if (e.key === 'u' || e.key === 'U') { pos.z += posStep; changed = true; }
+                if (e.key === 'o' || e.key === 'O') { pos.z -= posStep; changed = true; }
+
                 if (changed) {
                     this.updateDebugDisplay();
-                    console.log(`ROTATION: X=${rot.x.toFixed(2)}, Y=${rot.y.toFixed(2)}, Z=${rot.z.toFixed(2)}`);
+                    console.log(`WEAPON TUNE - POS: X=${pos.x.toFixed(2)}, Y=${pos.y.toFixed(2)}, Z=${pos.z.toFixed(2)} | ROT: X=${rot.x.toFixed(2)}, Y=${rot.y.toFixed(2)}, Z=${rot.z.toFixed(2)}`);
                 }
             }
         });
@@ -394,7 +410,8 @@ export class WeaponManager {
     updateDebugDisplay() {
         if (this.currentWeaponMesh && this.debugEl) {
             const r = this.currentWeaponMesh.rotation;
-            this.debugEl.innerText = `CONTROLS: 8/2(X) 4/6(Y) Q/E(Z)\nROT: X=${r.x.toFixed(2)} Y=${r.y.toFixed(2)} Z=${r.z.toFixed(2)}`;
+            const p = this.currentWeaponMesh.position;
+            this.debugEl.innerText = `ROT(8/2,4/6,Q/E): ${r.x.toFixed(2)} ${r.y.toFixed(2)} ${r.z.toFixed(2)} | POS(J/L,I/K,U/O): ${p.x.toFixed(2)} ${p.y.toFixed(2)} ${p.z.toFixed(2)}`;
         }
     }
 
