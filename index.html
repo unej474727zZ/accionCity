@@ -10,7 +10,27 @@
     #eruda-node { z-index: 99999999 !important; }
   </style>
   <script src="//cdn.jsdelivr.net/npm/eruda"></script>
-  <script>eruda.init();</script>
+  <script>
+    eruda.init();
+    // Intercept logs for custom copy button
+    window.__customLogs = [];
+    const _oldLog = console.log;
+    const _oldWarn = console.warn;
+    const _oldError = console.error;
+    console.log = function() { _oldLog.apply(console, arguments); window.__customLogs.push("[LOG] " + Array.from(arguments).join(" ")); };
+    console.warn = function() { _oldWarn.apply(console, arguments); window.__customLogs.push("[WARN] " + Array.from(arguments).join(" ")); };
+    console.error = function() { _oldError.apply(console, arguments); window.__customLogs.push("[ERR] " + Array.from(arguments).join(" ")); };
+    window.copyCustomLogs = function() {
+      const text = window.__customLogs.join("\n");
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      alert("Logs copiados (" + window.__customLogs.length + " lineas). Puedes pegarlos en WhatsApp.");
+    };
+  </script>
 </head>
 
 <body>
@@ -121,6 +141,7 @@
   <div id="toggles-container">
     <div id="btn-chat-toggle" class="psp-btn toggle-btn">💬</div>
     <div id="btn-master-toggle" class="psp-btn toggle-btn">🎮</div>
+    <div onclick="window.copyCustomLogs()" class="psp-btn toggle-btn" style="right: 50px; background: rgba(255,0,0,0.5); font-size: 14px; width: auto; padding: 0 10px; line-height: 40px; white-space: nowrap;">📋 COPIAR LOG</div>
   </div>
   
   <div id="chat-container" style="display: none;">

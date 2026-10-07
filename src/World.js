@@ -1595,7 +1595,7 @@ export class World {
                         if (this.minimapCamera && this.character && this.character.mesh) {
                             this.minimapCamera.position.x = this.character.mesh.position.x;
                             this.minimapCamera.position.z = this.character.mesh.position.z;
-                            const size = 200;
+                            const size = minimapEl.width;
                             const glX = window.innerWidth - size - 10;
                             const glY = window.innerHeight - size - 10;
                             this.renderer.setViewport(glX, glY, size, size);
