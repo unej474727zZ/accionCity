@@ -10,7 +10,6 @@ export class AssetLoader {
     
     this.assets = {};
     this.modelsToLoad = [
-      { name: 'city', url: 'models/city_pack_3.glb' },
       { name: 'idle', url: 'models/Idle.glb' },
       { name: 'walk', url: 'models/Walking.glb' },
       { name: 'run', url: 'models/Running.glb' },
@@ -34,7 +33,10 @@ export class AssetLoader {
       { name: 'dumpster2', url: 'models/dumpster.glb' },
       { name: 'car_wreck_fsc', url: 'models/wrecked_fsc_zuk.glb' },
       { name: 'canister', url: 'models/bombona.glb' },
-      { name: 'bazooka', url: 'models/bazooka.glb' }
+      { name: 'bazooka', url: 'models/bazooka.glb' },
+      { name: 'house_commercial', url: 'models/building.glb' },
+      { name: 'house_residential', url: 'models/soviet_building.glb' },
+      { name: 'house_garage', url: 'models/garage.glb' }
     ];
   }
 

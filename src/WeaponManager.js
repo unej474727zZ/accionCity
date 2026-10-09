@@ -621,6 +621,10 @@ export class WeaponManager {
         }
     }
 
+    get isHolstered() {
+        return !this.currentWeaponType;
+    }
+
     toggleHolster() {
         if (this.currentWeaponType) {
             this.holster();
@@ -700,7 +704,7 @@ export class WeaponManager {
         const targets = [];
         this.scene.traverse(c => {
             if (c.isMesh && !this.isSelf(c) && !this.isVehiclePart(c, vMesh) && c.visible) {
-                if (c.userData.type === 'bullet' || c.userData.type === 'impact_part' || c.userData.isBotVisualMesh) return;
+                if (c.userData.type === 'bullet' || c.userData.type === 'impact_part') return;
                 targets.push(c);
             }
         });
@@ -745,11 +749,29 @@ export class WeaponManager {
         const affectedVehicles = new Set();
 
         // 0. Direct Hit Object
-        if (hitObject && vm) {
-            const targetVeh = vm.findVehicleByMesh(hitObject);
-            if (targetVeh) {
-                vm.damageVehicle(targetVeh, damageAmount, hitObject, true);
-                affectedVehicles.add(targetVeh);
+        if (hitObject) {
+            if (vm) {
+                const targetVeh = vm.findVehicleByMesh(hitObject);
+                if (targetVeh) {
+                    vm.damageVehicle(targetVeh, damageAmount, hitObject, true);
+                    affectedVehicles.add(targetVeh);
+                }
+            }
+
+            // Direct Hit Bot (Instant Kill: 150 HP damage)
+            let directBot = null;
+            let tempB = hitObject;
+            while (tempB) {
+                if (tempB.userData && tempB.userData.isBot) {
+                    directBot = this.characterController.world.botManager?.bots.find(b => b.id === tempB.userData.botId);
+                    break;
+                }
+                tempB = tempB.parent;
+            }
+            if (directBot) {
+                console.log(`💥 Direct explosive hit on Bot ${directBot.id}! Instant elimination.`);
+                this.createImpact(pos, new THREE.Vector3(0, 1, 0), 'blood', 3.0, hitObject);
+                directBot.takeDamage(150, this.characterController.character);
             }
         }
 
@@ -785,13 +807,17 @@ export class WeaponManager {
             }
         }
 
-        // 2.6 Bots (Deathmatch)
+        // 2.6 Bots (Deathmatch - Lethal Explosions)
         const botManager = this.characterController.world.botManager;
         if (botManager) {
             for (const bot of botManager.bots) {
                 if (bot.state !== 'dead' && bot.mesh) {
-                    if (bot.mesh.position.distanceTo(pos) < radius) {
-                        bot.takeDamage(damageAmount * 10, this.characterController.character); // Area damage is small (e.g. 15), multiply for bots (HP 100)
+                    const dist = bot.mesh.position.distanceTo(pos);
+                    if (dist < radius) {
+                        const falloff = 1.0 - (dist / radius);
+                        // Heavy explosive: Center/close is instant kill (150+ dmg), blast edge is at least 60 dmg
+                        const splashDmg = Math.max(60, Math.round(150 * falloff * Math.max(1.0, damageAmount)));
+                        bot.takeDamage(splashDmg, this.characterController.character);
                     }
                 }
             }
@@ -824,38 +850,6 @@ export class WeaponManager {
         // 3. Player
         if (this.character && this.character.position.distanceTo(pos) < radius && !this.characterController.isDead) {
             this.characterController.takeDamage(damageAmount || 1);
-        }
-    }
-
-    createExplosion(position, radius) {
-        // ULTRA-LEAN EXPLOSION: Low intensity, very short life
-        const boomLight = new THREE.PointLight(0xff6600, 2, radius);
-        boomLight.position.copy(position);
-        this.scene.add(boomLight);
-        setTimeout(() => { if (this.scene) this.scene.remove(boomLight); }, 60);
-
-        if (this.soundManager) this.soundManager.playTankShot();
-
-        // Minimal particles (only 2 boxes) - Using SHARED MATERIAL CLONES to allow independent opacity
-        for (let i = 0; i < 2; i++) {
-            const pMat = this._sparkMat.clone();
-            const p = new THREE.Mesh(this._sparkGeom, pMat);
-            p.position.copy(position);
-            const vel = new THREE.Vector3((Math.random() - 0.5) * 8, Math.random() * 8, (Math.random() - 0.5) * 8);
-            this.scene.add(p);
-            const start = Date.now();
-            const anim = () => {
-                if (Date.now() - start > 300) {
-                    this.scene.remove(p);
-                    pMat.dispose();
-                    return;
-                }
-                p.position.add(vel.clone().multiplyScalar(0.016));
-                vel.y -= 0.8;
-                pMat.opacity -= 0.05;
-                requestAnimationFrame(anim);
-            };
-            anim();
         }
     }
 
@@ -1203,17 +1197,35 @@ export class WeaponManager {
 
         if (this.soundManager) this.soundManager.playShoot('rifle', spawnPos);
 
-        const rayTargets = this.raycastTargets || (this.characterController ? this.characterController.allPhysicTargets : []);
-        const hits = ray.intersectObjects(rayTargets, true);
+        const ray = new THREE.Raycaster(this.camera.position, camDir);
+        ray.far = 2000;
+
+        const possibleTargets = this.raycastTargets || (this.characterController ? this.characterController.allPhysicTargets : []);
+        const rayTargets = [...possibleTargets];
+        if (this.characterController && this.characterController.world && this.characterController.world.botManager) {
+            this.characterController.world.botManager.bots.forEach(b => {
+                if (b.mesh && !rayTargets.includes(b.mesh)) rayTargets.push(b.mesh);
+            });
+        }
+        if (this.characterController && this.characterController.world && this.characterController.world.vehicleManager) {
+            this.characterController.world.vehicleManager.vehicles.forEach(veh => {
+                if (veh.mesh && veh.mesh !== v.mesh && !rayTargets.includes(veh.mesh)) rayTargets.push(veh.mesh);
+            });
+        }
+
+        const allHits = ray.intersectObjects(rayTargets, true);
+        const hits = allHits.filter(h => !this.isVehiclePart(h.object, v.mesh) && h.distance > 5);
 
         if (hits.length > 0) {
             const hit = hits[0];
             const worldNormal = hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld) : new THREE.Vector3(0, 1, 0);
-            this.createImpact(hit.point, worldNormal, 'spark', 2.0, hit.object);
 
             const obj = hit.object;
             const targetVeh = this.characterController.world.vehicleManager.findVehicleByMesh(obj);
-            if (targetVeh) this.characterController.world.vehicleManager.damageVehicle(targetVeh, 0.1, obj, true);
+            if (targetVeh) {
+                this.createImpact(hit.point, worldNormal, 'spark', 2.0, hit.object);
+                this.characterController.world.vehicleManager.damageVehicle(targetVeh, 0.1, obj, true);
+            }
 
             // Hit Bot?
             let bot = null;
@@ -1225,7 +1237,12 @@ export class WeaponManager {
                 }
                 tempBot = tempBot.parent;
             }
-            if (bot) bot.takeDamage(10, this.characterController.character);
+            if (bot) {
+                this.createImpact(hit.point, worldNormal, 'blood', 2.0, hit.object);
+                bot.takeDamage(45, this.characterController.character);
+            } else if (!targetVeh) {
+                this.createImpact(hit.point, worldNormal, 'spark', 2.0, hit.object);
+            }
         }
     }
 
@@ -1297,26 +1314,8 @@ export class WeaponManager {
             this.createExplosion(pos, 8.0);
             this.createImpact(pos, norm, 'spark', 5.0, obj); // Very large scale
 
-            // AREA DAMAGE (SPLASH DAMAGE)
-            const splashRadius = 20.0; // Slightly larger for missiles
-            const vehManager = this.characterController.world.vehicleManager;
-            if (vehManager) {
-                const affectedVehicles = new Set();
-                const worldPos = new THREE.Vector3();
-
-                this.scene.traverse(c => {
-                    if (c.isMesh) {
-                        c.getWorldPosition(worldPos);
-                        if (worldPos.distanceTo(pos) < splashRadius) {
-                            const targetVeh = vehManager.findVehicleByMesh(c);
-                            if (targetVeh && !affectedVehicles.has(targetVeh) && targetVeh.mesh !== v.mesh) {
-                                vehManager.damageVehicle(targetVeh, 1.0, c, true);
-                                affectedVehicles.add(targetVeh);
-                            }
-                        }
-                    }
-                });
-            }
+            // AREA DAMAGE (SPLASH DAMAGE - Vehicles, Cars, Bots and Pedestrians)
+            this.applyAreaDamage(pos, 20.0, 3.0, obj);
         });
 
         if (lockedVehicle) {
@@ -1473,87 +1472,39 @@ export class WeaponManager {
     }
 
     createExplosion(point, scale = 1.0) {
-        // 1. Core Flash (Optimized segments: 4x2)
-        const flashGeom = new THREE.SphereGeometry(1.5 * scale, 4, 2);
-        const flashMat = new THREE.MeshBasicMaterial({ color: 0xffcc00, transparent: true, opacity: 1.0 });
-        const flash = new THREE.Mesh(flashGeom, flashMat);
+        // ULTRA-LEAN ARCADE EXPLOSION (Zero dynamic PointLights, zero per-frame lag)
+        if (!this._flashMat) {
+            this._flashMat = new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0.9 });
+        }
+        const flash = new THREE.Mesh(this._flashGeom, this._flashMat.clone());
         flash.position.copy(point);
+        const s = Math.min(3.5, (scale || 1.0) * 1.5);
+        flash.scale.set(s, s, s);
         this.scene.add(flash);
 
-        // 2. Light Pulse (Reduced intensity/range)
-        const light = new THREE.PointLight(0xffaa00, 15 * scale, 12 * scale);
-        light.position.copy(point);
-        this.scene.add(light);
-
-        // Animate Flash and Light
-        let time = 0;
-        const anim = () => {
-            time += 0.05;
-            flash.scale.multiplyScalar(1.1);
-            flash.material.opacity -= 0.1;
-            light.intensity -= 2.0;
-
-            if (flash.material.opacity > 0) requestAnimationFrame(anim);
-            else {
+        // Instant quick flash out (120ms total lifetime)
+        setTimeout(() => {
+            if (flash.parent) {
                 this.scene.remove(flash);
-                this.scene.remove(light);
-                flashGeom.dispose();
-                flashMat.dispose();
+                flash.material.dispose();
             }
-        };
-        anim();
+        }, 120);
 
-        // 3. Debris/Sparks (Optimized scale)
-        this.createImpact(point, new THREE.Vector3(0, 1, 0), 'spark', scale * 1.2);
+        // Sound effect
+        if (this.soundManager) this.soundManager.playTankShot();
 
-        // 4. PERMANENT SCORCH MARK (Removed for performance)
-        /*
-        const ray = new THREE.Raycaster(point.clone().add(new THREE.Vector3(0, 1, 0)), new THREE.Vector3(0, -1, 0));
-        const hits = ray.intersectObjects(this.scene.children, true);
-        const groundHit = hits.find(h => h.object.name === "AsphaltFloor" || h.object.name.toLowerCase().includes('city'));
-        if (groundHit) {
-            this.createImpact(groundHit.point, groundHit.face ? groundHit.face.normal.clone().transformDirection(groundHit.object.matrixWorld) : new THREE.Vector3(0, 1, 0), 'scorch', scale * 2.0, groundHit.object);
-        }
-        */
-
-        // 5. SHOCKWAVE (Push nearby objects)
-        const radius = 15.0 * scale;
-        const force = 40.0 * scale;
+        // Push nearby driven vehicles if very close (< 10m)
         const world = this.scene.userData.world;
-        if (world && world.vehicleManager) {
-            // Push Managed Vehicles
-            world.vehicleManager.vehicles.forEach(v => {
-                const dist = v.mesh.position.distanceTo(point);
-                if (dist < radius && dist > 0.1) {
+        if (world && world.vehicleManager && world.vehicleManager.vehicles) {
+            const vList = world.vehicleManager.vehicles;
+            for (let i = 0; i < vList.length; i++) {
+                const v = vList[i];
+                if (!v.mesh) continue;
+                const d = v.mesh.position.distanceTo(point);
+                if (d < 10.0 && d > 0.2) {
                     const dir = v.mesh.position.clone().sub(point).normalize();
-                    const intensity = (1.0 - dist / radius) * force;
-                    world.vehicleManager.pushVehicle(v, dir, intensity);
+                    world.vehicleManager.pushVehicle(v, dir, (1.0 - d / 10.0) * 20.0);
                 }
-            });
-
-            // Push NPC Cars
-            if (world.npcManager && world.npcManager.cars) {
-                world.npcManager.cars.forEach(car => {
-                    const dist = car.position.distanceTo(point);
-                    if (dist < radius && dist > 0.1) {
-                        const dir = car.position.clone().sub(point).normalize();
-                        const intensity = (1.0 - dist / radius) * force;
-                        world.vehicleManager.pushVehicleNPC(car, dir, intensity);
-                    }
-                });
-            }
-
-            // Push Clutter (Trash Cans, Canisters)
-            if (world.clutterObjects) {
-                world.clutterObjects.forEach(obj => {
-                    const dist = obj.position.distanceTo(point);
-                    if (dist < radius && dist > 0.1) {
-                        const dir = obj.position.clone().sub(point).normalize();
-                        const intensity = (1.0 - dist / radius) * force * 0.5; // Slightly less for clutter
-                        if (!obj.userData.pushVelocity) obj.userData.pushVelocity = new THREE.Vector3();
-                        obj.userData.pushVelocity.add(dir.multiplyScalar(intensity));
-                    }
-                });
             }
         }
     }
@@ -1636,21 +1587,6 @@ export class WeaponManager {
                                 direction: bullet.direction,
                                 speed: bullet.speed || 350,
                                 isHomingOnMe: bullet.isHomingOnMe
-                            });
-                        }
-                    }
-                }
-
-                // 2. Bomber plane bombs
-                const world = this.characterController.world;
-                if (world && world.bomber && world.bomber.bombs) {
-                    for (const bomb of world.bomber.bombs) {
-                        if (bomb.alive && bomb.mesh) {
-                            threats.push({
-                                position: bomb.mesh.position,
-                                direction: bomb.velocity.clone().normalize(),
-                                speed: bomb.velocity.length(),
-                                isHomingOnMe: false
                             });
                         }
                     }
@@ -1771,7 +1707,7 @@ export class WeaponManager {
 
             // Check if we are in First Person or Aiming (ADS)
             const inFirstPerson = (this.characterController && this.characterController.cameraDistance < 0.8);
-            const isAiming = (this.characterController && this.characterController.keys && this.characterController.keys.ads);
+            const isAiming = (this.characterController && this.characterController.keys && (this.characterController.keys.ads || this.characterController.keys.adsToggle));
 
             if (inFirstPerson || isAiming) {
                 // ADS Mode (Tricks the brain)

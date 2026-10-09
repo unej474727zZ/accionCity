@@ -38,12 +38,27 @@ export class CharacterController {
         };
         this.gamepadJumpHeld = false;
 
+        // Mobile Combat & Strafe Lock State
+        this.isStrafeLocked = false;
+        this.combatTouchId = null;
+        this.combatTouchStartX = 0;
+        this.combatTouchStartY = 0;
+        this.combatTouchLastX = 0;
+        this.combatTouchLastY = 0;
+        this.combatTouchMoved = 0;
+        this.combatTouchStartTime = 0;
+        this.touchHoldTimer = null;
+        this.tapSequenceCount = 0;
+        this.lastTapEndTime = 0;
+        this.isDraggingCamera = false;
+
         this.walkSpeed = 3.0;
         this.runSpeed = 8.0;
         this.rotationSpeed = 2; // radians per second
 
         // Camera settings
         this.cameraDistance = 3.0; // Dynamic zoom distance (0.1 = First Person, >1 = Third Person) 
+        this.savedCameraDistance = 3.0;
 
         // Physics Constants
         this.gravity = 30.0;
@@ -59,6 +74,10 @@ export class CharacterController {
             lookX: 0,   // yaw rotation speed
             lookY: 0    // pitch rotation speed
         };
+
+        // Frame-Synced Mouse Accumulators (Eliminates high-polling-rate stutter)
+        this.mouseDeltaX = 0;
+        this.mouseDeltaY = 0;
 
         // Collision & Ground Detection
         this.raycaster = new THREE.Raycaster(); // For walls
@@ -178,11 +197,24 @@ export class CharacterController {
             // Global Mouse Listeners for Fire/ADS
             window.addEventListener('mousedown', (e) => {
                 if (e.button === 0) this.keys.fire = true;
-                if (e.button === 2) this.keys.ads = true;
+                if (e.button === 2) {
+                    this.keys.ads = true;
+                    if (!this.keys.adsToggle) {
+                        if (this.cameraDistance >= 0.8) this.savedCameraDistance = this.cameraDistance;
+                        this.cameraDistance = 0.1;
+                        this.desiredFOV = 30;
+                    }
+                }
             });
             window.addEventListener('mouseup', (e) => {
                 if (e.button === 0) this.keys.fire = false;
-                if (e.button === 2) this.keys.ads = false;
+                if (e.button === 2) {
+                    this.keys.ads = false;
+                    if (!this.keys.adsToggle) {
+                        this.cameraDistance = (this.savedCameraDistance && this.savedCameraDistance >= 0.8) ? this.savedCameraDistance : 3.0;
+                        this.desiredFOV = 75;
+                    }
+                }
             });
             window.addEventListener('contextmenu', (e) => e.preventDefault());
 
@@ -280,101 +312,219 @@ export class CharacterController {
     initJoysticks() {
         // --- PSP CONTROLS SETUP ---
 
-        // --- LEFT JOYSTICK (NippleJS) ---
-        const zoneJoystick = document.getElementById('zone_joystick');
-        if (zoneJoystick && ('ontouchstart' in window || navigator.maxTouchPoints > 0)) {
-            const manager = nipplejs.create({
-                zone: zoneJoystick,
-                mode: 'static',
-                position: { left: '50%', top: '50%' },
-                color: 'white',
-                size: 100
-            });
+        let nippleManager = null;
+        window.initMobileJoystick = () => {
+            if (nippleManager) return;
+            const zoneJoystick = document.getElementById('zone_joystick');
+            if (zoneJoystick) {
+                nippleManager = nipplejs.create({
+                    zone: zoneJoystick,
+                    mode: 'static',
+                    position: { left: '50%', top: '50%' },
+                    color: 'white',
+                    size: 100
+                });
+                console.log("🕹️ NippleJS joystick creado con éxito!");
 
-            manager.on('move', (evt, data) => {
-                if (!data || !data.vector) return;
-                const threshold = 0.2; // Deadzone
-                // NippleJS vector: UP is positive Y, RIGHT is positive X
-                const vx = isFinite(data.vector.x) ? data.vector.x : 0;
-                const vy = isFinite(data.vector.y) ? data.vector.y : 0;
+                nippleManager.on('move', (evt, data) => {
+                    if (!data || !data.vector) return;
+                    const threshold = 0.2; // Deadzone
+                    const vx = isFinite(data.vector.x) ? data.vector.x : 0;
+                    const vy = isFinite(data.vector.y) ? data.vector.y : 0;
 
-                this.keys.forward = vy > threshold;
-                this.keys.backward = vy < -threshold;
-                // Changed from Right/Left strafing to Turn Right/Left
-                this.keys.turnRight = vx > threshold;
-                this.keys.turnLeft = vx < -threshold;
-                // Keep strafe false for joystick
-                this.keys.right = false;
-                this.keys.left = false;
-            });
+                    if (this.isStrafeLocked) {
+                        // STRAFE MODE: Left thumb glides in 360° while camera/body remain locked on target!
+                        this.inputVector.x = vx;
+                        this.inputVector.y = vy;
+                        this.keys.forward = vy > threshold;
+                        this.keys.backward = vy < -threshold;
+                        this.keys.turnRight = false;
+                        this.keys.turnLeft = false;
+                    } else {
+                        this.inputVector.x = 0;
+                        this.inputVector.y = vy;
+                        this.keys.forward = vy > threshold;
+                        this.keys.backward = vy < -threshold;
+                        this.keys.turnRight = vx > threshold;
+                        this.keys.turnLeft = vx < -threshold;
+                    }
+                    this.keys.right = false;
+                    this.keys.left = false;
+                });
 
-            manager.on('end', () => {
-                this.keys.forward = false;
-                this.keys.backward = false;
-                this.keys.turnLeft = false;
-                this.keys.turnRight = false;
-            });
+                nippleManager.on('end', () => {
+                    this.inputVector.x = 0;
+                    this.inputVector.y = 0;
+                    this.keys.forward = false;
+                    this.keys.backward = false;
+                    this.keys.turnLeft = false;
+                    this.keys.turnRight = false;
+                });
+            }
+        };
+
+        const controlsEl = document.getElementById('mobile-controls');
+        if (controlsEl && controlsEl.style.display !== 'none') {
+            window.initMobileJoystick();
         }
 
-        // Right Zone (Camera Look) - Touch Drag (Background)
-        const zoneRight = document.getElementById('zone_right');
-        if (zoneRight) {
-            let lookTouchId = null;
-            let lastX, lastY;
+        // --- MOBILE TOUCH COMBAT SYSTEM ---
+        // 1 tap = Disparo individual (solo con arma activa)
+        // 2do toque dejando el dedo pegado (Tap + Hold) = Anclaje de cámara/avatar + Fuego continuo + Strafe con joystick
+        // Arrastrar el dedo normalmente = Rotar la cámara libremente en 360° (NUNCA ancla ni dispara)
+        const isInteractiveElement = (elem) => {
+            if (!elem) return false;
+            return !!(
+                elem.closest('.psp-btn') ||
+                elem.closest('#zone_joystick') ||
+                elem.closest('#start-game-btn') ||
+                elem.closest('#respawn-btn') ||
+                elem.closest('#chat-container') ||
+                elem.closest('#btn-copy-log') ||
+                elem.closest('#eruda-node') ||
+                elem.closest('button') ||
+                elem.closest('input')
+            );
+        };
 
-            const handleStart = (e) => {
-                // e.preventDefault(); // Don't prevent default here? Might block other things? 
-                // Actually, for a look zone, we usually WANT to prevent scrolling.
+        const onTouchStart = (e) => {
+            if (!window.gameStarted || this.isDead) return;
 
-                // Find the touch that started on this element
-                const touch = e.changedTouches[0];
-                if (touch) {
-                    lookTouchId = touch.identifier;
-                    lastX = touch.clientX;
-                    lastY = touch.clientY;
-                }
-            };
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                const touch = e.changedTouches[i];
+                const target = document.elementFromPoint(touch.clientX, touch.clientY);
 
-            const handleMove = (e) => {
-                if (lookTouchId === null) return;
+                if (isInteractiveElement(target)) continue;
 
-                // Find our tracked touch
-                for (let i = 0; i < e.changedTouches.length; i++) {
-                    const touch = e.changedTouches[i];
-                    if (touch.identifier === lookTouchId) {
-                        const cx = touch.clientX;
-                        const cy = touch.clientY;
-                        const dx = cx - lastX;
-                        const dy = cy - lastY;
+                // Ignore if in the joystick corner (bottom-left 160px)
+                if (touch.clientX < 160 && touch.clientY > window.innerHeight - 200) continue;
 
-                        const sens = 0.005;
-                        this.yaw -= dx * sens;
-                        this.pitch -= dy * sens;
-                        // Restrict Pitch to prevent looking too far up/down and clipping the model
-                        this.pitch = Math.max(-Math.PI / 4, Math.min(Math.PI / 4, this.pitch));
+                if (this.combatTouchId === null) {
+                    this.combatTouchId = touch.identifier;
+                    this.combatTouchStartX = touch.clientX;
+                    this.combatTouchStartY = touch.clientY;
+                    this.combatTouchLastX = touch.clientX;
+                    this.combatTouchLastY = touch.clientY;
+                    this.combatTouchMoved = 0;
+                    this.combatTouchStartTime = performance.now();
+                    this.isDraggingCamera = false;
 
-                        lastX = cx;
-                        lastY = cy;
-                        break;
+                    const now = performance.now();
+                    if (now - this.lastTapEndTime > 450) {
+                        this.tapSequenceCount = 0;
                     }
-                }
-            };
 
-            const handleEnd = (e) => {
-                if (lookTouchId === null) return;
-                for (let i = 0; i < e.changedTouches.length; i++) {
-                    if (e.changedTouches[i].identifier === lookTouchId) {
-                        lookTouchId = null;
-                        break;
+                    // Si ya se hizo 1 toque previo rápido, este es el 2do toque!
+                    // Si se deja el dedo pegado (>= 160ms) en este 2do toque -> ACTIVAR STRAFE LOCK!
+                    if (this.touchHoldTimer) {
+                        clearTimeout(this.touchHoldTimer);
+                        this.touchHoldTimer = null;
                     }
-                }
-            };
 
-            zoneRight.addEventListener('touchstart', handleStart, { passive: false });
-            zoneRight.addEventListener('touchmove', handleMove, { passive: false });
-            zoneRight.addEventListener('touchend', handleEnd, { passive: false });
-            zoneRight.addEventListener('touchcancel', handleEnd, { passive: false });
-        }
+                    if (this.tapSequenceCount >= 1 && this.isArmedAndReady()) {
+                        this.touchHoldTimer = setTimeout(() => {
+                            if (this.combatTouchId === touch.identifier && !this.isDraggingCamera && this.isArmedAndReady()) {
+                                this.isStrafeLocked = true;
+                                this.triggerContinuousFire();
+                                console.log("🎯 Mobile: [2º TOQUE + HOLD] MIRA ANCLADA Y FUEGO CONTINUO ACTIVADO!");
+                            }
+                        }, 160);
+                    }
+                    break;
+                }
+            }
+        };
+
+        const onTouchMove = (e) => {
+            if (this.combatTouchId === null) return;
+
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                const touch = e.changedTouches[i];
+                if (touch.identifier === this.combatTouchId) {
+                    const cx = touch.clientX;
+                    const cy = touch.clientY;
+                    const dx = cx - this.combatTouchLastX;
+                    const dy = cy - this.combatTouchLastY;
+                    const stepDist = Math.hypot(dx, dy);
+                    this.combatTouchMoved += stepDist;
+
+                    // Si se movió más de 12px, es arrastre de cámara (NO es toque estático)
+                    if (this.combatTouchMoved > 12) {
+                        this.isDraggingCamera = true;
+                        // Si no estaba ya anclado, cancela el timer del hold para no bloquear la cámara
+                        if (!this.isStrafeLocked && this.touchHoldTimer) {
+                            clearTimeout(this.touchHoldTimer);
+                            this.touchHoldTimer = null;
+                        }
+                    }
+
+                    const sens = 0.005;
+                    this.yaw -= dx * sens;
+                    this.pitch -= dy * sens;
+                    this.pitch = Math.max(-Math.PI / 4, Math.min(Math.PI / 4, this.pitch));
+                    this.aimYaw = this.yaw;
+                    this.aimPitch = this.pitch;
+
+                    this.combatTouchLastX = cx;
+                    this.combatTouchLastY = cy;
+                    break;
+                }
+            }
+        };
+
+        const onTouchEnd = (e) => {
+            if (this.combatTouchId === null) return;
+
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                const touch = e.changedTouches[i];
+                if (touch.identifier === this.combatTouchId) {
+                    if (this.touchHoldTimer) {
+                        clearTimeout(this.touchHoldTimer);
+                        this.touchHoldTimer = null;
+                    }
+
+                    const duration = performance.now() - this.combatTouchStartTime;
+
+                    if (this.isStrafeLocked) {
+                        // Se soltó el dedo del anclaje -> Desactivar inmediatamente
+                        this.isStrafeLocked = false;
+                        this.stopContinuousFire();
+                        this.tapSequenceCount = 0;
+                        console.log("🎯 Mobile: MIRA ANCLADA LIBERADA");
+                    } else if (!this.isDraggingCamera && this.combatTouchMoved < 15 && duration < 260) {
+                        // Fue un TAP rápido y limpio (sin arrastrar cámara)
+                        const now = performance.now();
+                        if (now - this.lastTapEndTime > 450) {
+                            this.tapSequenceCount = 0;
+                        }
+                        this.tapSequenceCount++;
+                        this.lastTapEndTime = now;
+
+                        // Solo dispara si tiene un arma activa desenfundada o está en vehículo
+                        if (this.isArmedAndReady()) {
+                            this.triggerSingleShot();
+                            if (this.tapSequenceCount >= 2) {
+                                this.tapSequenceCount = 0;
+                            }
+                        }
+                    } else {
+                        // Fue un arrastre de cámara normal: resetear la secuencia de toques si se movió
+                        if (this.combatTouchMoved > 20) {
+                            this.tapSequenceCount = 0;
+                        }
+                    }
+
+                    this.combatTouchId = null;
+                    this.isDraggingCamera = false;
+                    break;
+                }
+            }
+        };
+
+        window.addEventListener('touchstart', onTouchStart, { passive: false });
+        window.addEventListener('touchmove', onTouchMove, { passive: false });
+        window.addEventListener('touchend', onTouchEnd, { passive: false });
+        window.addEventListener('touchcancel', onTouchEnd, { passive: false });
 
         // 3. Action Buttons Binding helper
         const bindBtn = (id, onStart, onEnd) => {
@@ -453,13 +603,33 @@ export class CharacterController {
             if (this.weaponManager) this.weaponManager.toggleLaser();
         }, null);
 
-        // "Triangle" (Y equivalent) -> CHANGE WEAPON
+        // "Triangle" (Y equivalent) -> CHANGE WEAPON OR ELEVATE HELI
         bindBtn('btn-tri', () => {
-            if (this.weaponManager) this.weaponManager.cycleWeapon();
-        }, null);
+            if (this.isDriving && this.world?.vehicleManager?.currentVehicle?.type === 'helicopter') {
+                this.keys.elevate = true;
+            } else if (this.weaponManager) {
+                this.weaponManager.cycleWeapon();
+            }
+        }, () => {
+            this.keys.elevate = false;
+        });
 
-        // "Square" (B equivalent) -> SPRINT
-        bindBtn('btn-sq', () => this.keys.run = true, () => this.keys.run = false);
+        // "Square" (B equivalent) -> SPRINT OR DESCEND HELI
+        bindBtn('btn-sq', () => {
+            if (this.isDriving && this.world?.vehicleManager?.currentVehicle?.type === 'helicopter') {
+                this.keys.descend = true;
+            } else {
+                this.keys.run = true;
+            }
+        }, () => {
+            this.keys.descend = false;
+            this.keys.run = false;
+        });
+
+        // "Z" -> ZOOM TOGGLE (First Person ADS / 3rd Person Reset)
+        bindBtn('btn-z', () => {
+            this.toggleZoom();
+        }, null);
 
 
         // --- RIGHT D-PAD (ZOOM CONTROL) ---
@@ -527,9 +697,8 @@ export class CharacterController {
 
         // MASTER CONTROLS TOGGLE
         bindBtn('btn-master-toggle', () => {
-            const controls = document.getElementById('mobile-controls');
-            if (controls) {
-                controls.style.display = (controls.style.display === 'none') ? 'block' : 'none';
+            if (typeof window.toggleMasterControls === 'function') {
+                window.toggleMasterControls();
             }
         }, null);
 
@@ -560,6 +729,64 @@ export class CharacterController {
         bindCamBtn('btn-cam-right', 'lookRight');
     }
 
+    triggerSingleShot() {
+        if (this.isDead) return;
+        if (this.isDriving && this.vehicle) {
+            if (this.vehicle.type === 'tank' && this.weaponManager) {
+                this.weaponManager.fireTankCannon();
+            } else if (this.vehicle.type === 'helicopter' && this.weaponManager) {
+                this.weaponManager.fireHeliGuns();
+            }
+        } else {
+            if (this.weaponManager) {
+                if (this.weaponManager.isHolstered) {
+                    this.weaponManager.toggleHolster();
+                }
+                this.keys.fire = true;
+                this.weaponManager.shoot();
+                setTimeout(() => { if (!this.isStrafeLocked) this.keys.fire = false; }, 80);
+            }
+        }
+    }
+
+    triggerContinuousFire() {
+        if (this.isDead) return;
+        this.keys.fire = true;
+        if (this.isDriving && this.vehicle) {
+            if (this.vehicle.type === 'tank' && this.weaponManager) {
+                this.weaponManager.fireTankCannon();
+            } else if (this.vehicle.type === 'helicopter' && this.weaponManager) {
+                this.weaponManager.fireHeliGuns();
+            }
+        } else {
+            if (this.weaponManager) {
+                if (this.weaponManager.isHolstered) {
+                    this.weaponManager.toggleHolster();
+                }
+                this.weaponManager.isFiring = true;
+                this.weaponManager.shoot();
+            }
+        }
+    }
+
+    stopContinuousFire() {
+        this.keys.fire = false;
+        if (this.weaponManager) {
+            this.weaponManager.isFiring = false;
+            this.weaponManager.stopFiring();
+        }
+    }
+
+    isArmedAndReady() {
+        if (this.isDead) return false;
+        if (this.isDriving && this.vehicle) {
+            return (this.vehicle.type === 'tank' || this.vehicle.type === 'helicopter');
+        }
+        if (this.weaponManager) {
+            return !!this.weaponManager.currentWeaponType;
+        }
+        return false;
+    }
 
     getClip(gltf, fallbackName) {
         if (gltf && gltf.animations && gltf.animations.length > 0) {
@@ -689,6 +916,39 @@ export class CharacterController {
         this.shakeTimer = duration;
     }
 
+    toggleZoom() {
+        this.keys.adsToggle = !this.keys.adsToggle;
+
+        // Visual feedback on mobile Z button if available
+        const btnZ = document.getElementById('btn-z');
+        if (btnZ) {
+            if (this.keys.adsToggle) {
+                btnZ.style.background = 'rgba(255, 255, 0, 0.4)';
+                btnZ.style.boxShadow = '0 0 12px #ffff00';
+            } else {
+                btnZ.style.background = 'transparent';
+                btnZ.style.boxShadow = 'none';
+            }
+        }
+
+        if (this.keys.adsToggle) {
+            // Enter First Person Zoom (Aiming)
+            if (this.cameraDistance >= 0.8) {
+                this.savedCameraDistance = this.cameraDistance;
+            } else {
+                this.savedCameraDistance = 3.0;
+            }
+            this.cameraDistance = 0.1;
+            this.desiredFOV = 30;
+        } else {
+            // Exit First Person Zoom -> Restore normal Third Person
+            this.cameraDistance = (this.savedCameraDistance && this.savedCameraDistance >= 0.8) ? this.savedCameraDistance : 3.0;
+            this.desiredFOV = 75;
+        }
+
+        console.log(`[ZOOM TOGGLE] adsToggle: ${this.keys.adsToggle}, cameraDistance: ${this.cameraDistance}, desiredFOV: ${this.desiredFOV}`);
+    }
+
     onKeyDown(e) {
         if (this.isDead) {
             if (e.code === 'Enter') {
@@ -767,7 +1027,17 @@ export class CharacterController {
             case 'KeyJ': this.keys.descend = true; break;
 
             case 'KeyF': this.keys.fire = true; break;
-            case 'KeyV': this.keys.ads = true; break;
+            case 'KeyV':
+                this.keys.ads = true;
+                if (!this.keys.adsToggle) {
+                    if (this.cameraDistance >= 0.8) this.savedCameraDistance = this.cameraDistance;
+                    this.cameraDistance = 0.1;
+                    this.desiredFOV = 30;
+                }
+                break;
+            case 'KeyZ':
+                if (!e.repeat) this.toggleZoom();
+                break;
 
             // ACTION TOGGLES (PC Keyboard) - Trigger instantly to catch fast taps
             case 'KeyL':
@@ -838,7 +1108,13 @@ export class CharacterController {
                 break;
 
             case 'KeyF': this.keys.fire = false; break;
-            case 'KeyV': this.keys.ads = false; break;
+            case 'KeyV':
+                this.keys.ads = false;
+                if (!this.keys.adsToggle) {
+                    this.cameraDistance = (this.savedCameraDistance && this.savedCameraDistance >= 0.8) ? this.savedCameraDistance : 3.0;
+                    this.desiredFOV = 75;
+                }
+                break;
 
             case 'KeyL':
             case 'KeyT':
@@ -853,19 +1129,9 @@ export class CharacterController {
 
     onMouseMove(e) {
         if (document.pointerLockElement === document.body) {
-            const sens = 0.002;
-            const dx = e.movementX * sens;
-            const dy = e.movementY * sens;
-
-            this.yaw -= dx; // Decreasing yaw turns right
-            this.pitch -= dy;
-
-            // Mouse also updates Aim for vehicles
-            this.aimYaw -= dx;
-            this.aimPitch -= dy;
-
-            this.pitch = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, this.pitch));
-            this.aimPitch = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, this.aimPitch));
+            // Accumulate deltas to be processed once per animation frame in update(dt)
+            this.mouseDeltaX += e.movementX;
+            this.mouseDeltaY += e.movementY;
         }
     }
 
@@ -918,6 +1184,20 @@ export class CharacterController {
         // 1. CLEAR PREVIOUS INPUT STATE
         this.inputVector = { x: 0, y: 0 };
         this.isRunning = this.keys.run || this.keys.isShiftPressed;
+
+        // 0. FRAME-SYNCED MOUSE LOOK (Eliminates high-polling-rate micro-stutter)
+        if (this.mouseDeltaX !== 0 || this.mouseDeltaY !== 0) {
+            const sens = 0.002;
+            const dx = this.mouseDeltaX * sens;
+            const dy = this.mouseDeltaY * sens;
+            this.mouseDeltaX = 0;
+            this.mouseDeltaY = 0;
+
+            this.yaw -= dx;
+            this.pitch -= dy;
+            this.aimYaw -= dx;
+            this.aimPitch -= dy;
+        }
 
         const joyLookSpeed = 0.75;
         this.yaw -= this.joystickValues.lookX * joyLookSpeed * dt;
@@ -980,17 +1260,7 @@ export class CharacterController {
             }
 
             // --- EMPIRICAL PHYSICAL MAPPINGS FOR USER'S CONTROLLER ---
-            if (gamepad) {
-                const activeButtons = [];
-                for (let i = 0; i < gamepad.buttons.length; i++) {
-                    if (gamepad.buttons[i] && (gamepad.buttons[i].pressed || gamepad.buttons[i].value > 0.1)) {
-                        activeButtons.push(`${i} (val:${gamepad.buttons[i].value.toFixed(2)})`);
-                    }
-                }
-                if (activeButtons.length > 0) {
-                    console.log("[Gamepad Debug] Pressed Buttons:", activeButtons.join(", "));
-                }
-            }
+            // High-frequency gamepad debug logging removed to avoid GC & render thread lag spikes
 
             // RUN (Button B = 1)
             if (gamepad && gamepad.buttons[1] && gamepad.buttons[1].pressed) {
@@ -1192,7 +1462,7 @@ export class CharacterController {
             const isHeli = this.isDriving && this.vehicle && this.vehicle.type === 'helicopter';
 
             // Firing logic: R2 (button 4)
-            const shootInput = this.keys.fire || (gamepad && (
+            let shootInput = this.keys.fire || (gamepad && (
                 (gamepad.buttons[4] && gamepad.buttons[4].pressed) // R2
             ));
             this.weaponManager.isFiring = shootInput;
@@ -1226,9 +1496,9 @@ export class CharacterController {
                 if (heliFireMissiles) this.weaponManager.fireHeliMissiles();
 
                 // Camera Zoom logic for Heli
-                this.desiredFOV = (this.cameraDistance < 1.0 || zoomTriggered) ? 30 : 75;
+                this.desiredFOV = (this.cameraDistance < 1.0 || zoomTriggered || this.keys.adsToggle || this.keys.ads) ? 30 : 75;
             } else {
-                this.desiredFOV = (this.keys.ads || zoomTriggered) ? 30 : 75;
+                this.desiredFOV = (this.keys.ads || zoomTriggered || this.keys.adsToggle || this.cameraDistance < 1.0) ? 30 : 75;
 
                 // TANK FIRE HOOK: If driving a tank and firing, trigger the cannon!
                 if (this.isDriving && this.vehicle && this.vehicle.type === 'tank' && shootInput) {
@@ -1285,6 +1555,14 @@ export class CharacterController {
             }
 
             // Pause Game (Start button = 9) is now handled globally in World.js
+
+            // Mobile Strafe Lock: Keep firing and keep aim locked to camera
+            if (this.isStrafeLocked) {
+                shootInput = true;
+                this.keys.fire = true;
+                this.aimYaw = this.yaw;
+                this.aimPitch = this.pitch;
+            }
 
             this.weaponManager.isFiring = shootInput;
         }
@@ -1474,52 +1752,44 @@ export class CharacterController {
 
                 // Calculate Shoulder Offsets (Left/Right perpendicular to moveDir)
                 const rightAx = moveDir.clone().cross(new THREE.Vector3(0, 1, 0)).normalize();
-                const leftAx = rightAx.clone().negate();
-                const shoulderWidth = 0.4; // 40cm offset
+                const shoulderWidth = 0.35; // 35cm offset
 
-                // Multiple Rays: Chest, Knee, Feet, Shoulders
+                // 3 Optimized Rays at hip/waist height (0.6m) - Center, Right shoulder, Left shoulder
+                const pPos = this.mesh.position;
                 const rayOrigins = [
-                    // Chest Height
-                    this.mesh.position.clone().add(new THREE.Vector3(0, 1.0, 0)),
-                    this.mesh.position.clone().add(new THREE.Vector3(0, 1.0, 0)).add(rightAx.clone().multiplyScalar(shoulderWidth)),
-                    this.mesh.position.clone().add(new THREE.Vector3(0, 1.0, 0)).add(leftAx.clone().multiplyScalar(shoulderWidth)),
-                    // Knee/Hip Height
-                    this.mesh.position.clone().add(new THREE.Vector3(0, 0.4, 0)),
-                    this.mesh.position.clone().add(new THREE.Vector3(0, 0.4, 0)).add(rightAx.clone().multiplyScalar(shoulderWidth)),
-                    this.mesh.position.clone().add(new THREE.Vector3(0, 0.4, 0)).add(leftAx.clone().multiplyScalar(shoulderWidth)),
-                    // Extra Foot Height to catch curbs
-                    this.mesh.position.clone().add(new THREE.Vector3(0, 0.1, 0))
+                    new THREE.Vector3(pPos.x, pPos.y + 0.6, pPos.z),
+                    new THREE.Vector3(pPos.x + rightAx.x * shoulderWidth, pPos.y + 0.6, pPos.z + rightAx.z * shoulderWidth),
+                    new THREE.Vector3(pPos.x - rightAx.x * shoulderWidth, pPos.y + 0.6, pPos.z - rightAx.z * shoulderWidth)
                 ];
 
                 const moveDist = moveVector.length();
                 const dynFar = moveDist + 1.2;
                 let closestDist = 999;
 
+                // Precompute wall targets ONCE per frame instead of inside the ray loop (Massive CPU & GC optimization)
+                let wallTargets = [];
+                if (this.physicsBoxes && this.physicsBoxes.length > 0) {
+                    const boxedObjects = new Set();
+                    for (const pb of this.physicsBoxes) {
+                        boxedObjects.add(pb.object);
+                        if (this.raycaster.ray.intersectsBox(pb.box)) {
+                            wallTargets.push(pb.object);
+                        }
+                    }
+                    for (const col of this.colliders) {
+                        if (!boxedObjects.has(col)) {
+                            wallTargets.push(col);
+                        }
+                    }
+                } else {
+                    wallTargets = this.allPhysicTargets && this.allPhysicTargets.length > 0 ? this.allPhysicTargets : this.colliders;
+                }
+
                 for (const origin of rayOrigins) {
                     // Offset origin BACKWARDS to catch objects we might be slightly overlapping
                     const safeOrigin = origin.clone().sub(moveDir.clone().multiplyScalar(0.5));
                     this.raycaster.set(safeOrigin, moveDir);
                     this.raycaster.far = dynFar;
-
-                    // FAST SPATIAL CULLING WALL COLLISION
-                    let wallTargets = [];
-                    if (this.physicsBoxes && this.physicsBoxes.length > 0) {
-                        const boxedObjects = new Set();
-                        for (const pb of this.physicsBoxes) {
-                            boxedObjects.add(pb.object);
-                            if (this.raycaster.ray.intersectsBox(pb.box)) {
-                                wallTargets.push(pb.object);
-                            }
-                        }
-                        // Add any colliders that were explicitly excluded from physicsBoxes (like the city group)
-                        for (const col of this.colliders) {
-                            if (!boxedObjects.has(col)) {
-                                wallTargets.push(col);
-                            }
-                        }
-                    } else {
-                        wallTargets = this.allPhysicTargets && this.allPhysicTargets.length > 0 ? this.allPhysicTargets : this.colliders;
-                    }
 
                     let wallHits = [];
                     if (wallTargets.length > 0) {
@@ -1962,6 +2232,10 @@ PTR LOCK: ${plStatus}
         this.hp = 3;
         this.state = 'idle';
 
+        if (this.keys.adsToggle) {
+            this.toggleZoom();
+        }
+
         // Make mesh visible
         if (this.mesh) this.mesh.visible = true;
 
@@ -2196,7 +2470,7 @@ PTR LOCK: ${plStatus}
             this.weaponManager.currentWeaponMesh.visible = (inFirstPerson || this.weaponManager.isHolstered) ? false : true;
         }
 
-        if (camHits.length > 0) {
+        if (!inFirstPerson && camHits.length > 0) {
             // Camera hit a wall.
             // If the wall forces the camera inside the player (closer than 1.0m), ignore the wall collision
             // and let the camera clip through the wall so the avatar ALWAYS remains visible.

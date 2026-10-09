@@ -19,7 +19,13 @@ export default defineConfig({
       '/socket.io': {
         target: 'http://127.0.0.1:3000',
         ws: true,
-        changeOrigin: true
+        changeOrigin: true,
+        configure: (proxy) => {
+          proxy.on('error', (err) => {
+            if (err && err.code === 'ECONNRESET') return; // Normal client disconnect on mobile
+            console.warn('[proxy]', err.message || err);
+          });
+        }
       },
       '/api': {
         target: 'http://127.0.0.1:3000',

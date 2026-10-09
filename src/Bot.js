@@ -119,11 +119,11 @@ export class Bot {
 
             this.playAnimation('run');
 
-            // Find Hand Bone
-            this.findHandBone();
+            // Find Bones
+            this.findBones();
 
-            // Tint squad color
-            this.tintMesh(this.mesh, this.playerColor);
+            // SKELETON MODE: Hide heavy skinned body mesh to save massive RAM & GPU VRAM
+            this.setupCyberSkeleton();
 
             // Hitbox
             this.hitBox = new THREE.Mesh(sharedHitGeom, sharedHitMat);
@@ -139,67 +139,73 @@ export class Bot {
             // Equip Weapon
             this.setWeapon(this.weaponType);
 
-            // Permanent HUD Tag
-            this.createNameTag(`Hunter-${this.botIndex + 1}`);
+            // Permanent HUD Tag removed to save RAM
+            // this.createNameTag(`Hunter-${this.botIndex + 1}`);
         }
     }
 
-    findHandBone() {
+    findBones() {
         if (!this.mesh) return;
-        let bestBone = null;
         this.mesh.traverse((child) => {
             if (child.isBone) {
                 const name = child.name.toLowerCase();
-                if (name.includes('righthand') && !name.includes('thumb') && !name.includes('index') && !name.includes('middle') && !name.includes('ring') && !name.includes('pinky')) {
-                    bestBone = child;
+                if (!this.rightHandBone && (name.includes('righthand') || name.includes('hand.r') || name.includes('hand_r')) &&
+                    !name.includes('thumb') && !name.includes('index') && !name.includes('middle') && !name.includes('ring') && !name.includes('pinky')) {
+                    this.rightHandBone = child;
                 }
-                else if (!bestBone && (name.includes('hand.r') || name.includes('hand_r'))) {
-                    bestBone = child;
+                if (!this.headBone && (name.includes('head') || name.includes('neck')) && !name.includes('top')) {
+                    this.headBone = child;
+                }
+                if (!this.spineBone && (name.includes('spine2') || name.includes('spine1') || name.includes('spine'))) {
+                    this.spineBone = child;
                 }
             }
         });
-        if (bestBone) {
-            this.rightHandBone = bestBone;
+    }
+
+    setupCyberSkeleton() {
+        // 1. Hide dense textured skinned meshes to eliminate VRAM & drawcall overhead
+        this.mesh.traverse((child) => {
+            if (child.isSkinnedMesh || (child.isMesh && child !== this.hitBox && !child.userData.isCyberPart)) {
+                child.visible = false;
+                child.castShadow = false;
+                child.receiveShadow = false;
+            }
+        });
+
+        // 2. Create high-performance Three.js SkeletonHelper (Draws pure glowing skeletal bone structure)
+        this.skeletonHelper = new THREE.SkeletonHelper(this.mesh);
+        this.skeletonHelper.material.linewidth = 2;
+        this.skeletonHelper.material.color.setHex(this.playerColor);
+        this.skeletonHelper.material.depthTest = true;
+        this.skeletonHelper.material.transparent = true;
+        this.skeletonHelper.material.opacity = 0.95;
+        this.scene.add(this.skeletonHelper);
+
+        // 3. Cybernetic Augmentations (Optic Visor & Core Reactor)
+        if (this.headBone) {
+            // Glowing Cyber Optic Visor
+            const visorGeom = new THREE.BoxGeometry(0.18, 0.05, 0.08);
+            const visorMat = new THREE.MeshBasicMaterial({ color: this.playerColor });
+            const visor = new THREE.Mesh(visorGeom, visorMat);
+            visor.position.set(0, 0.08, 0.12);
+            visor.userData.isCyberPart = true;
+            this.headBone.add(visor);
+        }
+
+        if (this.spineBone) {
+            // Glowing Octahedron Core Reactor in chest
+            const coreGeom = new THREE.OctahedronGeometry(0.1);
+            const coreMat = new THREE.MeshBasicMaterial({ color: this.playerColor, wireframe: true });
+            const core = new THREE.Mesh(coreGeom, coreMat);
+            core.position.set(0, 0.15, 0);
+            core.userData.isCyberPart = true;
+            this.spineBone.add(core);
         }
     }
 
-    tintMesh(mesh, colorHex) {
-        mesh.traverse((child) => {
-            child.visible = true;
-            if (child.isMesh) {
-                child.frustumCulled = false;
-                if (child.material) {
-                    child.material = child.material.clone();
-                    child.material.transparent = false;
-                    child.material.opacity = 1.0;
-                    child.material.color.setHex(colorHex);
-                    
-                    // Make them radioactive / fluorescent
-                    if (child.material.emissive !== undefined) {
-                        child.material.emissive.setHex(colorHex);
-                        child.material.emissiveIntensity = 2.0;
-                    }
-                    
-                    child.material.needsUpdate = true;
-                }
-            }
-        });
-    }
-
     createNameTag(name) {
-        this.nameTag = document.createElement('div');
-        this.nameTag.style.position = 'absolute';
-        this.nameTag.style.color = '#ff3333';
-        this.nameTag.style.background = 'rgba(0,0,0,0.65)';
-        this.nameTag.style.border = '1px solid #ff3333';
-        this.nameTag.style.padding = '1px 5px';
-        this.nameTag.style.borderRadius = '3px';
-        this.nameTag.style.fontSize = '11px';
-        this.nameTag.style.fontWeight = 'bold';
-        this.nameTag.style.pointerEvents = 'none';
-        this.nameTag.style.userSelect = 'none';
-        this.nameTag.innerText = name;
-        document.body.appendChild(this.nameTag);
+        // Disabled to save RAM
     }
 
     setWeapon(type) {
@@ -364,9 +370,16 @@ export class Bot {
     }
 
     update(dt) {
-        if (!this.mesh || this.state === 'dead') return;
+        if (!this.mesh) return;
+        if (this.state === 'dead') {
+            if (this.skeletonHelper) this.skeletonHelper.visible = false;
+            return;
+        }
 
         if (this.mixer) this.mixer.update(dt);
+        if (this.skeletonHelper) {
+            this.skeletonHelper.visible = true;
+        }
 
         this.mesh.rotation.y = this.yaw;
         this.setFiring(this.firing);
@@ -426,20 +439,7 @@ export class Bot {
             }
         }
 
-        // Screen Name Tag
-        if (this.nameTag && this.world.camera) {
-            _vScreen.copy(this.mesh.position);
-            _vScreen.y += 2.2;
-            _vScreen.project(this.world.camera);
-            if (_vScreen.z < 1.0) {
-                this.nameTag.style.display = 'block';
-                this.nameTag.style.left = `${(_vScreen.x * 0.5 + 0.5) * window.innerWidth}px`;
-                this.nameTag.style.top = `${(-_vScreen.y * 0.5 + 0.5) * window.innerHeight}px`;
-                this.nameTag.style.transform = 'translate(-50%, -100%)';
-            } else {
-                this.nameTag.style.display = 'none';
-            }
-        }
+        // Screen Name Tag disabled
     }
 
     takeDamage(amount, attacker) {
@@ -453,9 +453,10 @@ export class Bot {
     die() {
         this.state = 'dead';
         this.mesh.visible = false;
+        if (this.skeletonHelper) this.skeletonHelper.visible = false;
         if (this.weaponMesh) this.weaponMesh.visible = false;
         if (this.laserMesh) this.laserMesh.visible = false;
-        if (this.nameTag) this.nameTag.style.display = 'none';
+        // if (this.nameTag) this.nameTag.style.display = 'none';
 
         if (this.botManager) {
             this.botManager.onBotKilled(this);
@@ -472,14 +473,16 @@ export class Bot {
         this.targetPoint.copy(spawnPos);
 
         this.mesh.visible = true;
+        if (this.skeletonHelper) this.skeletonHelper.visible = true;
         if (this.weaponMesh) this.weaponMesh.visible = true;
-        if (this.nameTag) this.nameTag.style.display = 'block';
+        // if (this.nameTag) this.nameTag.style.display = 'block';
 
         this.playAnimation('run');
     }
 
     dispose() {
-        if (this.nameTag) this.nameTag.remove();
+        // if (this.nameTag) this.nameTag.remove();
+        if (this.skeletonHelper) this.scene.remove(this.skeletonHelper);
         if (this.mesh) this.scene.remove(this.mesh);
         if (this.laserMesh) this.scene.remove(this.laserMesh);
         if (this.weaponMesh && this.weaponMesh.parent) {

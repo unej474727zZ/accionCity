@@ -1,4 +1,4 @@
-console.log('World.js loaded');
+console.log('World.js loaded: VERSION 3.0 (ZERO BOMBER)');
 import * as THREE from 'three';
 import { VehicleManager } from './VehicleManager.js';
 import { AssetLoader } from './AssetLoader.js';
@@ -13,9 +13,10 @@ import { RemotePlayer } from './RemotePlayer.js';
 import { WeaponManager } from './WeaponManager.js';
 import { Minimap } from './Minimap.js';
 import { SoundManager } from './SoundManager.js';
-import { Bomber } from './Bomber.js';
 import { SniperManager } from './SniperManager.js';
 import { AutoPilot } from './AutoPilot.js';
+import { ModularCity } from './ModularCity.js';
+import { SnowEffect } from './SnowEffect.js';
 
 // --- CRITICAL AUDIO PATCH (Anti-Crash) ---
 // Prevents browser thread lock when Three.js sends non-finite numbers to Web Audio
@@ -76,10 +77,18 @@ export class World {
             return;
         }
 
+        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth <= 800;
+
+        // 720p HD Cap: Maximum vertical rendering resolution of 720px on mobile
+        const targetMaxHeight = isMobile ? 720 : 1080;
+        const dpr = window.devicePixelRatio || 1;
+        const scale = Math.min(1.0, targetMaxHeight / (window.innerHeight * dpr));
+        const finalPixelRatio = Math.max(0.65, Math.min(1.0, dpr * scale));
+
         this.renderer.setSize(window.innerWidth, window.innerHeight);
-        this.renderer.setPixelRatio(0.85); // Lowered from 1.0 for better performance
-        this.renderer.shadowMap.enabled = true;
-        this.renderer.shadowMap.type = THREE.PCFShadowMap; // Optimized shadows
+        this.renderer.setPixelRatio(finalPixelRatio);
+        this.renderer.shadowMap.enabled = !isMobile;
+        this.renderer.shadowMap.type = THREE.BasicShadowMap;
         this.renderer.xr.enabled = true; // Enable WebXR
         container.appendChild(this.renderer.domElement);
 
@@ -103,23 +112,20 @@ export class World {
 
         window.addEventListener('resize', () => this.onWindowResize(), false);
 
-        // Environment: Sky & Fog
-        const skyColor = 0x87CEEB; // Sky Blue
-        const groundColor = 0x555555; // Grayish
+        // Environment: Atmospheric Winter / Dense Snow Fog & Night
+        const skyColor = 0x141a24; // Cold dark blue atmosphere
+        const groundColor = 0x222a34;
         this.scene.background = new THREE.Color(skyColor);
 
-        // FOG: Hides the edge of the world (Depth)
-        // Denser fog for "heavy atmosphere" as requested
-        // near: 20 (starts close), far: 150 (obscures distant buildings)
-        this.scene.fog = new THREE.Fog(skyColor, 15, 120); // Fog starts closer and ends sooner
+        // Dense fog - navigation by minimap required!
+        this.scene.fog = new THREE.Fog(skyColor, 8, 70);
 
         // Lighting
-        // Hemisphere: Sky Color + Ground Bounce
-        const hemiLight = new THREE.HemisphereLight(skyColor, groundColor, 0.6);
+        const hemiLight = new THREE.HemisphereLight(skyColor, groundColor, 0.7);
         this.scene.add(hemiLight);
 
-        // Directional (Sun/Moon)
-        const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+        // Directional (Moon / Ambient Cold Light)
+        const dirLight = new THREE.DirectionalLight(0xaad4f5, 1.0);
         dirLight.position.set(50, 100, 50); // High sun
         dirLight.castShadow = true; 
         dirLight.shadow.mapSize.width = 1024; // Balanced quality and performance
@@ -197,47 +203,28 @@ export class World {
         try {
             const assets = await this.assetLoader.loadAll();
 
-            // Setup City
-            const cityParams = assets['city'];
-            let city = null;
+            // Procedural Seed for City (From URL ?seed=... or default 1337)
+            const urlParams = new URLSearchParams(window.location.search);
+            const seedParam = urlParams.get('seed');
+            this.citySeed = seedParam ? parseInt(seedParam) : 1337;
+            window.setCitySeed = (newSeed) => {
+                const url = new URL(window.location);
+                url.searchParams.set('seed', newSeed);
+                window.location.href = url.href;
+            };
 
-            if (cityParams) {
-                city = cityParams.scene;
+            // BUILD MODULAR CITY (Sector Cero: 3 house types x 3 clones each + billboards + floor graffiti + air access fortress)
+            this.modularCity = new ModularCity(this.scene, {
+                seed: this.citySeed,
+                assets: assets,
+                center: new THREE.Vector3(0, 0, 240) // 240m away through the thick snow & fog
+            });
+            const cityData = this.modularCity.build();
+            this.cityBlocks = cityData.cityBlocks;
+            this.cityHelipadPos = cityData.helipadPos;
 
-                // --- CRITICAL FIX: CENTER CITY MODEL ---
-                const box = new THREE.Box3().setFromObject(city);
-                const center = box.getCenter(new THREE.Vector3());
-                city.position.sub(center);
-                city.position.y = 0; // Stick to ground
-
-                // SCALE FIX: Increased to 40.0 per user request
-                city.scale.set(40, 40, 40);
-
-                // TEXTURE & SHADOW FIX: Prevent stretching and enable shadow casting/receiving
-                city.traverse((child) => {
-                    if (child.isMesh) {
-                        child.castShadow = true;
-                        child.receiveShadow = true;
-                        if (child.material) {
-                            // Handle single material or array of materials
-                            const materials = Array.isArray(child.material) ? child.material : [child.material];
-
-                            materials.forEach(mat => {
-                                if (mat.map) {
-                                    mat.map.wrapS = THREE.RepeatWrapping;
-                                    mat.map.wrapT = THREE.RepeatWrapping;
-                                    mat.map.repeat.set(1.5, 1.5); // "A little bigger" (1.5x larger details than 2.5)
-                                    mat.needsUpdate = true;
-                                }
-                            });
-                        }
-                    }
-                });
-
-                this.scene.add(city);
-            } else {
-                console.warn("City asset missing. Only floor will be visible.");
-            }
+            // Snow particle effect (Atmospheric snow swirling through cold air)
+            this.snowEffect = new SnowEffect(this.scene, this.camera, 450);
 
             // ASPHALT FLOOR GENERATION
             const canvas = document.createElement('canvas');
@@ -311,28 +298,10 @@ export class World {
                 });
             });
 
-            // ADD CITY TO COLLISIONS! (Optimized)
-            this.cityBlocks = [];
-            if (city) {
-                this._cityMeshCount = 0;
-                city.traverse((child) => {
-                    if (child.isMesh) {
-                        if (this._cityMeshCount < 800) {
-                            this.character.colliders.push(child);
-                            this._cityMeshCount++;
-                        }
-
-                        // Extract bounds for minimap
-                        if (!child.geometry.boundingBox) child.geometry.computeBoundingBox();
-                        child.updateMatrixWorld(true);
-                        const bbox = new THREE.Box3().setFromObject(child);
-                        this.cityBlocks.push({
-                            minX: bbox.min.x, maxX: bbox.max.x,
-                            minZ: bbox.min.z, maxZ: bbox.max.z
-                        });
-                    }
-                });
-                console.log(`Registered ${this._cityMeshCount} city colliders (Optimized).`);
+            // REGISTER MODULAR CITY COLLIDERS (Sector Cero)
+            if (cityData && cityData.colliders) {
+                cityData.colliders.forEach(c => this.character.colliders.push(c));
+                console.log(`Registered ${cityData.colliders.length} ModularCity colliders. Blocks: ${this.cityBlocks.length}.`);
             }
 
             // LOAD CHARACTER POSITION
@@ -385,15 +354,14 @@ export class World {
             // LINK CONTROLLER TO WEAPON MANAGER
             this.character.weaponManager = this.weaponManager;
 
-            // MINIMAP
+            // MINIMAP & RADAR WAYPOINT
             this.minimap = new Minimap(this.cityBlocks, this.camera);
-
-            // BOMBER (Procedural Air Support)
-            this.bomber = new Bomber(this);
+            if (this.cityHelipadPos) {
+                this.minimap.targetWaypoint = this.cityHelipadPos;
+            }
 
             // SNIPERS (Hidden NPCs)
             this.sniperManager = new SniperManager(this);
-
 
             // MINIMAP 3D CAMERA
             this.minimapSpan = 80; // Default span
@@ -407,7 +375,7 @@ export class World {
 
             // SCENERY GROUP FOR SPAWN CHECKS
             this.spawnTargets = [];
-            if (city) this.spawnTargets.push(city);
+            if (this.modularCity) this.spawnTargets.push(this.modularCity.group);
             if (floor) this.spawnTargets.push(floor);
 
             // DEBUG SPAWN
@@ -445,6 +413,14 @@ export class World {
                 mesh.rotation.copy(rot);
                 mesh.scale.set(scale, scale, scale);
 
+                // Disable expensive dynamic shadow passes for small clutter props to save mobile GPU
+                mesh.traverse(child => {
+                    if (child.isMesh) {
+                        child.castShadow = false;
+                        child.receiveShadow = false;
+                    }
+                });
+
                 this.scene.add(mesh);
                 this.character.colliders.push(mesh);
                 this.spawnTargets.push(mesh);
@@ -479,7 +455,7 @@ export class World {
 
             // FAST SPAWN HELPER (AABB Math instead of Raycasting)
             const getSafeStreetPos = (range = 800) => {
-                for (let i = 0; i < 20; i++) {
+                for (let i = 0; i < 25; i++) {
                     const x = (seededRandom() - 0.5) * range;
                     const z = (seededRandom() - 0.5) * range;
 
@@ -500,90 +476,108 @@ export class World {
                 return null;
             };
 
-            // 1. Trash Cans (Optimized: 15 instances)
-            for (let i = 0; i < 15; i++) {
-                const pos = getSafeStreetPos();
-                if (pos) {
-                    const mesh = addScenery('trash_can', pos, new THREE.Euler(0, seededRandom() * Math.PI, 0), 0.6, false);
-                    if (mesh) {
-                        mesh.userData.isTrashCan = true;
-                        mesh.userData.hp = 5;
-                        mesh.userData.pushVelocity = new THREE.Vector3(0, 0, 0);
-                        this.clutterObjects.push(mesh);
+            // 1. DUMPSTERS SNAPPED TO LOW BUILDINGS (ROOFTOP ACCESS!)
+            // Sort blocks by height/roof level ascending to pick the lowest structures in the city
+            const sortedBlocks = [...this.cityBlocks]
+                .filter(b => (b.maxX - b.minX) > 2 && (b.maxZ - b.minZ) > 2 && b.maxY > 1.0)
+                .sort((a, b) => a.maxY - b.maxY);
+
+            console.log(`🧗 City building roof heights range from ${sortedBlocks[0]?.maxY.toFixed(1)}m to ${sortedBlocks[sortedBlocks.length - 1]?.maxY.toFixed(1)}m. Selected lowest ${Math.min(24, sortedBlocks.length)}.`);
+
+            let dumpstersPlaced = 0;
+            // Place dumpsters along perimeter walls of low buildings
+            for (let i = 0; i < sortedBlocks.length && dumpstersPlaced < 24; i++) {
+                const b = sortedBlocks[i];
+                const side = i % 4; // Distribute across south, north, east, west walls
+                let posX = b.centerX;
+                let posZ = b.centerZ;
+                let rot = 0;
+
+                if (side === 0) { // South wall
+                    posZ = b.maxZ + 1.2;
+                    rot = Math.PI;
+                } else if (side === 1) { // North wall
+                    posZ = b.minZ - 1.2;
+                    rot = 0;
+                } else if (side === 2) { // East wall
+                    posX = b.maxX + 1.2;
+                    rot = -Math.PI / 2;
+                } else { // West wall
+                    posX = b.minX - 1.2;
+                    rot = Math.PI / 2;
+                }
+
+                const dPos = new THREE.Vector3(posX, 0.05, posZ);
+                const dMesh = addScenery('dumpster1', dPos, new THREE.Euler(0, rot, 0), 0.8);
+                if (dMesh) {
+                    dMesh.userData.isTrashCan = true;
+                    dMesh.userData.hp = 25;
+                    dMesh.userData.pushVelocity = new THREE.Vector3(0, 0, 0);
+                    this.clutterObjects.push(dMesh);
+                    dumpstersPlaced++;
+
+                    // A) Place a red explosive canister right next to this dumpster!
+                    const canOffset = (side === 0 || side === 1) 
+                        ? new THREE.Vector3(2.0, 0.4, 0) 
+                        : new THREE.Vector3(0, 0.4, 2.0);
+                    const canPos = dPos.clone().add(canOffset);
+                    const canMesh = addScenery('canister', canPos, new THREE.Euler(0, 0, 0), 0.6, true);
+                    if (canMesh) {
+                        canMesh.userData.pushVelocity = new THREE.Vector3(0, 0, 0);
+                        this.clutterObjects.push(canMesh);
+                    }
+
+                    // B) Place a trash can on the opposite side of the dumpster!
+                    const tcOffset = (side === 0 || side === 1) 
+                        ? new THREE.Vector3(-2.0, 0, 0) 
+                        : new THREE.Vector3(0, 0, -2.0);
+                    const tcPos = dPos.clone().add(tcOffset);
+                    const tcMesh = addScenery('trash_can', tcPos, new THREE.Euler(0, seededRandom() * Math.PI, 0), 0.6, false);
+                    if (tcMesh) {
+                        tcMesh.userData.isTrashCan = true;
+                        tcMesh.userData.hp = 5;
+                        tcMesh.userData.pushVelocity = new THREE.Vector3(0, 0, 0);
+                        this.clutterObjects.push(tcMesh);
                     }
                 }
             }
 
-            // 2. Dumpsters Snapped to Walls (Optimized: 10 instances)
-            let dumpstersPlaced = 0;
-            for (let x = -6; x <= 6 && dumpstersPlaced < 10; x += 2) {
-                for (let z = -6; z <= 6 && dumpstersPlaced < 10; z += 2) {
-                    if (seededRandom() > 0.6) {
-                        const side = seededRandom() > 0.5 ? 1 : -1;
-                        const axis = seededRandom() > 0.5 ? 'x' : 'z';
-                        const pos = new THREE.Vector3(x * 40, 0, z * 40);
-                        let rot = 0;
-                        if (axis === 'x') { pos.x += 19.95 * side; rot = (side > 0) ? 1.57 : -1.57; }
-                        else { pos.z += 19.95 * side; rot = (side > 0) ? 0 : 3.14; }
-
-                        const mesh = addScenery('dumpster1', pos, new THREE.Euler(0, rot, 0), 0.8);
-                        if (mesh) {
-                            mesh.userData.isTrashCan = true;
-                            mesh.userData.hp = 20;
-                            mesh.userData.pushVelocity = new THREE.Vector3(0, 0, 0);
-                            this.clutterObjects.push(mesh);
-                            dumpstersPlaced++;
+            // 2. STREET EXPLOSIVE CACHES (Bombonas rojas en esquinas y callejones activos)
+            let canistersSpawned = dumpstersPlaced; // Already placed 1 per dumpster!
+            let attempts = 0;
+            // Spawn 30 more canisters in active combat radius (350m) in clusters of 2
+            while (canistersSpawned < 55 && attempts < 100) {
+                attempts++;
+                const streetPos = getSafeStreetPos(350);
+                if (streetPos) {
+                    // Spawn pair of canisters (fuel cache)
+                    for (let k = 0; k < 2 && canistersSpawned < 55; k++) {
+                        const offset = new THREE.Vector3((k === 0 ? -0.8 : 0.8), 0.4, (seededRandom() - 0.5) * 0.6);
+                        const cPos = streetPos.clone().add(offset);
+                        const cMesh = addScenery('canister', cPos, new THREE.Euler(0, seededRandom() * Math.PI, 0), 0.6, true);
+                        if (cMesh) {
+                            cMesh.userData.pushVelocity = new THREE.Vector3(0, 0, 0);
+                            this.clutterObjects.push(cMesh);
+                            canistersSpawned++;
                         }
                     }
                 }
             }
+            console.log(`🧨 Total Spawned: ${canistersSpawned} Explosive Canisters & ${dumpstersPlaced} Dumpsters snapped to low roofs!`);
 
-            // 3. Wrecks (Optimized: 10 instances)
+            // 3. Wrecks (10 instances in streets)
             for (let i = 0; i < 10; i++) {
-                const pos = getSafeStreetPos();
+                const pos = getSafeStreetPos(400);
                 if (pos) {
                     const type = seededRandom();
                     let mesh = null;
-                    let isHeavy = false;
-
-                    if (type < 0.3) {
+                    if (type < 0.4) {
                         mesh = addScenery('tank_wreck', pos, new THREE.Euler(0, seededRandom() * Math.PI, 0), 0.05);
-                        isHeavy = true;
-                    } else if (type < 0.6) {
-                        mesh = addScenery('car_wreck_fsc', pos, new THREE.Euler(0, seededRandom() * Math.PI, 0), 0.1);
-                        isHeavy = true;
                     } else {
-                        mesh = addScenery('dumpster1', pos, new THREE.Euler(0, seededRandom() * Math.PI, 0), 0.6);
-                    }
-
-                    if (mesh && !isHeavy) {
-                        mesh.userData.isTrashCan = true;
-                        mesh.userData.pushVelocity = new THREE.Vector3(0, 0, 0);
-                        this.clutterObjects.push(mesh);
+                        mesh = addScenery('car_wreck_fsc', pos, new THREE.Euler(0, seededRandom() * Math.PI, 0), 0.1);
                     }
                 }
             }
-
-            // 4. Explosive Canisters (Bombonas Rojas - Optimized: 20 instances)
-            let canistersSpawned = 0;
-            let canisterAttempts = 0;
-            const loadUI = document.getElementById('loading');
-            if (loadUI) loadUI.innerText = 'Generando Ciudad...';
-
-            while (canistersSpawned < 20 && canisterAttempts < 200) {
-                canisterAttempts++;
-                const pos = getSafeStreetPos(400);
-                if (pos) {
-                    pos.y = 0.4;
-                    const mesh = addScenery('canister', pos, new THREE.Euler(0, 0, 0), 0.6, true);
-                    if (mesh) {
-                        mesh.userData.pushVelocity = new THREE.Vector3(0, 0, 0);
-                        this.clutterObjects.push(mesh);
-                        canistersSpawned++;
-                    }
-                }
-            }
-            console.log(`🧨 Spawned ${canistersSpawned} explosive canisters (Shared Material).`);
 
             // 5. Procedural Bazooka Ammo Pickups (Optimized: 15 instances, shared geoms/mats)
             const ammoGeom = new THREE.CylinderGeometry(0.1, 0.1, 0.8, 8);
@@ -962,10 +956,13 @@ export class World {
             }, { passive: true });
 
             // --- FINAL SPAWN ---
-            // Spawn vehicles in their designated positions with unique central IDs
-            this.vehicleManager.spawnVehicle('motorcycle', new THREE.Vector3(-300, 0.5, -40), null, 'vehicle_motorcycle');
-            this.vehicleManager.spawnVehicle('tank', new THREE.Vector3(-300, 0.5, 0), null, 'vehicle_tank');
-            this.vehicleManager.spawnVehicle('helicopter', new THREE.Vector3(-300, 0.5, -20), null, 'vehicle_helicopter');
+            // Spawn vehicles in designated departure positions
+            this.vehicleManager.spawnVehicle('helicopter', new THREE.Vector3(12, 0.5, 12), null, 'vehicle_helicopter');
+            this.vehicleManager.spawnVehicle('motorcycle', new THREE.Vector3(-10, 0.5, 12), null, 'vehicle_motorcycle');
+            this.vehicleManager.spawnVehicle('tank', new THREE.Vector3(-22, 0.5, 22), null, 'vehicle_tank');
+
+            // Departure Helipad at (12, 0.05, 12)
+            this.createDepartureHeliBase();
 
             // Set camera to player using the real character spawn position
             const charSpawn = this.character.mesh.position;
@@ -1044,9 +1041,6 @@ export class World {
                 obj.updateMatrixWorld(true);
                 const bbox = new THREE.Box3().setFromObject(obj);
                 
-                // AÑADE ESTA LÍNEA AQUÍ ABAJO PARA VER QUÉ SE ESTÁ CREANDO:
-                console.log("👉 Caja estática creada para el objeto:", obj.name, "en posición:", obj.position);
-
                 // Add some safety padding to the box
                 bbox.expandByScalar(0.02); 
                 
@@ -1210,36 +1204,17 @@ export class World {
                 dirLight.castShadow = isDay && !this.isNightVision; // Only shadow during day and when NV is off
             }
 
-            let skyHex = 0x87CEEB;
-            let groundHex = 0x555555;
-            let fogDist = 800; // Increased from 250 for better visibility
-            let fogColor = null;
+            let skyHex = 0x141a24; // Atmospheric cold night
+            let groundHex = 0x222a34;
+            let fogDist = 70; // Thick snow & fog: requires minimap radar navigation!
+            let fogColor = new THREE.Color(0x141a24);
 
             if (this.isNightVision) {
                 const isHeli = this.character && this.character.isDriving && this.character.vehicle && this.character.vehicle.type === 'helicopter';
                 skyHex = 0x002200;
                 groundHex = 0x004400;
-                fogDist = isHeli ? 1200 : 200;
+                fogDist = isHeli ? 180 : 120;
                 fogColor = new THREE.Color(0x00FF00);
-            } else {
-                if (!isDay) {
-                    skyHex = 0x020208; // Midnight blue
-                    groundHex = 0x111111;
-                } else {
-                    const sunHeight = Math.sin(sunAngle);
-                    if (sunHeight < 0.25) {
-                        // Sunrise / Sunset: Warm orange/red sky transition!
-                        const factor = sunHeight / 0.25;
-                        const orange = new THREE.Color(0xff5511);
-                        const blue = new THREE.Color(0x87CEEB);
-                        const mixed = orange.clone().lerp(blue, factor);
-                        skyHex = mixed.getHex();
-                        groundHex = 0x332222;
-                    } else {
-                        skyHex = 0x87CEEB;
-                        groundHex = 0x555555;
-                    }
-                }
             }
 
             if (this.minimap && this.minimap.isFullMap && this.character) {
@@ -1368,6 +1343,8 @@ export class World {
 
             if (this.npcManager && !this.isPaused) this.npcManager.update(dt);
             if (this.botManager && !this.isPaused) this.botManager.update(dt);
+            if (this.modularCity && !this.isPaused) this.modularCity.update(dt);
+            if (this.snowEffect && !this.isPaused) this.snowEffect.update(dt);
             
             if (this.weaponManager && !this.isPaused) {
                 this.weaponManager.remotePlayers = Object.values(this.remotePlayers);
@@ -1377,15 +1354,17 @@ export class World {
             if (this.vehicleManager && this.character && !this.isPaused) {
                 const input = this.character.inputVector || { x: 0, y: 0 };
                 this.vehicleManager.update(dt, input);
-                const moto = this.vehicleManager.vehicles.find(v => v.type === 'motorcycle');
-                if (moto && moto.mesh) {
-                    localStorage.setItem('motorcyclePosition', JSON.stringify({ x: moto.mesh.position.x, y: moto.mesh.position.y, z: moto.mesh.position.z }));
+                if (!this._motoSaveTimer) this._motoSaveTimer = 0;
+                this._motoSaveTimer += dt;
+                if (this._motoSaveTimer > 2.0) {
+                    this._motoSaveTimer = 0;
+                    const moto = this.vehicleManager.vehicles.find(v => v.type === 'motorcycle');
+                    if (moto && moto.mesh) {
+                        localStorage.setItem('motorcyclePosition', JSON.stringify({ x: moto.mesh.position.x, y: moto.mesh.position.y, z: moto.mesh.position.z }));
+                    }
                 }
             }
 
-            if (this.bomber && !this.isPaused) {
-                this.bomber.update(dt);
-            }
 
             if (this.sniperManager && !this.isPaused) {
                 this.sniperManager.update(dt);
@@ -1664,5 +1643,80 @@ export class World {
                 if (flash.parentNode) document.body.removeChild(flash);
             }, 200);
         }, 100);
+    }
+
+    createDepartureHeliBase() {
+        const c = document.createElement('canvas');
+        c.width = 256; c.height = 256;
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = '#1c222a';
+        ctx.fillRect(0, 0, 256, 256);
+        ctx.strokeStyle = '#00f0ff';
+        ctx.lineWidth = 14;
+        ctx.beginPath();
+        ctx.arc(128, 128, 105, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.font = '900 120px "Arial Black", sans-serif';
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('H', 128, 128);
+
+        const tex = new THREE.CanvasTexture(c);
+        const pad = new THREE.Mesh(new THREE.PlaneGeometry(16, 16), new THREE.MeshBasicMaterial({ map: tex, transparent: true }));
+        pad.rotation.x = -Math.PI / 2;
+        pad.position.set(12, 0.05, 12);
+        this.scene.add(pad);
+
+        // 4 Green Corner Lights for Takeoff Pad
+        const offsets = [-7, 7];
+        offsets.forEach(dx => {
+            offsets.forEach(dz => {
+                const lightCore = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8), new THREE.MeshBasicMaterial({ color: 0x00ff88 }));
+                lightCore.position.set(12 + dx, 0.4, 12 + dz);
+                this.scene.add(lightCore);
+            });
+        });
+
+        // Show brief mission banner on start
+        const existingBanner = document.getElementById('air-mission-banner');
+        if (existingBanner) existingBanner.remove();
+
+        const banner = document.createElement('div');
+        banner.id = 'air-mission-banner';
+        banner.style.cssText = `
+            position: fixed; top: 60px; left: 50%; transform: translateX(-50%);
+            background: rgba(12, 20, 30, 0.92); border: 2px solid #00ffaa;
+            border-radius: 8px; padding: 12px 22px; color: #ffffff;
+            font-family: monospace; font-size: 13px; font-weight: bold;
+            box-shadow: 0 0 25px rgba(0, 255, 170, 0.45); text-align: center;
+            z-index: 100000; pointer-events: none; transition: opacity 1.2s ease;
+        `;
+        banner.innerHTML = `🚁 ALERTA: SECTOR CERO OCULTO EN LA NIEVE Y NIEBLA<br><span style="color:#00ffaa; font-size:11px;">ACCESO SOLO POR EL AIRE // SIGUE LA BALIZA VERDE EN EL MAPA</span>`;
+        document.body.appendChild(banner);
+        setTimeout(() => {
+            banner.style.opacity = '0';
+            setTimeout(() => banner.remove(), 1200);
+        }, 8500);
+    }
+
+    onWindowResize() {
+        if (!this.camera || !this.renderer) return;
+        this.camera.aspect = window.innerWidth / window.innerHeight;
+        this.camera.updateProjectionMatrix();
+
+        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth <= 800;
+        const targetMaxHeight = isMobile ? 720 : 1080;
+        const dpr = window.devicePixelRatio || 1;
+        const scale = Math.min(1.0, targetMaxHeight / (window.innerHeight * dpr));
+        const finalPixelRatio = Math.max(0.65, Math.min(1.0, dpr * scale));
+
+        this.renderer.setSize(window.innerWidth, window.innerHeight);
+        this.renderer.setPixelRatio(finalPixelRatio);
+
+        if (this.vrMode && this.stereoEffect) {
+            this.stereoEffect.setSize(window.innerWidth, window.innerHeight);
+        }
     }
 }

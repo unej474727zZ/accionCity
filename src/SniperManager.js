@@ -45,15 +45,6 @@ export class SniperManager {
         let spawnPos = new THREE.Vector3();
 
         if (buildings.length === 0) {
-            console.warn(`⚠️ Sniper: No buildings found near ${playerPos.x.toFixed(1)}, ${playerPos.z.toFixed(1)}! Forcing Phantom Sniper.`);
-            // DEBUG: Show first 5 blocks to see where they are
-            if (this.world.cityBlocks.length > 0) {
-                console.log("Current City Blocks (First 5):");
-                this.world.cityBlocks.slice(0, 5).forEach((b, i) => {
-                    console.log(`Block ${i}: X(${b.minX.toFixed(1)} to ${b.maxX.toFixed(1)}), Z(${b.minZ.toFixed(1)} to ${b.maxZ.toFixed(1)})`);
-                });
-            }
-
             // Force a spawn point in the air nearby (simulating a window in an unregistered building)
             const angle = Math.random() * Math.PI * 2;
             const dist = 50 + Math.random() * 50;

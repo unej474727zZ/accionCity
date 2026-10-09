@@ -11,7 +11,7 @@ export class BotManager {
         this.assets = assets;
         this.world = world;
         this.bots = [];
-        this.maxBots = 3; // EXACTLY 3 pursuers at all times
+        this.maxBots = 2; // EXACTLY 2 pursuers at all times (reduced from 3 for mobile performance)
         this.minSpawnRadius = 35;
         this.maxSpawnRadius = 50;
         this.despawnRadius = 140; // Max distance before teleporting closer to protagonist
@@ -35,10 +35,11 @@ export class BotManager {
     getRandomSpawnPos(outVec) {
         let attempts = 0;
         let valid = false;
+        const centerZ = (this.world && this.world.modularCity && this.world.modularCity.center) ? this.world.modularCity.center.z : 240;
         while (!valid && attempts < 100) {
             attempts++;
-            const rx = (Math.random() - 0.5) * 800;
-            const rz = (Math.random() - 0.5) * 800;
+            const rx = (Math.random() - 0.5) * 110;
+            const rz = centerZ + (Math.random() - 0.5) * 110;
             
             // Check distance to other bots
             valid = true;
@@ -46,7 +47,7 @@ export class BotManager {
                 if (!bot.mesh) continue;
                 const dx = bot.mesh.position.x - rx;
                 const dz = bot.mesh.position.z - rz;
-                if (Math.sqrt(dx*dx + dz*dz) < 100) {
+                if (Math.sqrt(dx*dx + dz*dz) < 20) {
                     valid = false;
                     break;
                 }
@@ -55,12 +56,9 @@ export class BotManager {
             // Check if inside building
             if (valid && this.world && this.world.cityBlocks) {
                 for (const block of this.world.cityBlocks) {
-                    // Ignore truly massive meshes (like the entire ground), but include scaled up buildings.
-                    // Increased max limit to 1000 to catch the scaled city buildings.
                     if ((block.maxX - block.minX) > 1000 || (block.maxZ - block.minZ) > 1000) continue;
                     
-                    // Increased safety margin from 2 to 6 meters to avoid spawning inside walls
-                    if (rx > block.minX - 6 && rx < block.maxX + 6 && rz > block.minZ - 6 && rz < block.maxZ + 6) {
+                    if (rx > block.minX - 4 && rx < block.maxX + 4 && rz > block.minZ - 4 && rz < block.maxZ + 4) {
                         valid = false;
                         break;
                     }
@@ -72,8 +70,8 @@ export class BotManager {
                 return;
             }
         }
-        // Fallback
-        outVec.set((Math.random() - 0.5) * 800, 0.5, (Math.random() - 0.5) * 800);
+        // Fallback inside Sector Cero
+        outVec.set(0, 0.5, centerZ + 20);
     }
 
     initBots() {
@@ -87,7 +85,7 @@ export class BotManager {
         }
 
         this.initialized = true;
-        console.log(`BotManager: Initialized 3-NPC random spawn squad.`);
+        console.log(`BotManager: Initialized 2-NPC random spawn squad.`);
     }
 
     update(dt) {

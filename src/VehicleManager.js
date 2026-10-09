@@ -367,10 +367,36 @@ export class VehicleManager {
 
         // Notify Character Controller
         this.characterController.setDriving(true, vehicle);
+
+        // Show flight controls guide when entering helicopter
+        if (vehicle.type === 'helicopter') {
+            const oldHud = document.getElementById('heli-controls-hud');
+            if (oldHud) oldHud.remove();
+
+            const hud = document.createElement('div');
+            hud.id = 'heli-controls-hud';
+            hud.style.cssText = `
+                position: fixed; bottom: 18%; left: 50%; transform: translateX(-50%);
+                background: rgba(8, 16, 26, 0.92); border: 2px solid #00f0ff;
+                border-radius: 8px; padding: 10px 20px; color: #ffffff;
+                font-family: monospace; font-size: 13px; font-weight: bold;
+                box-shadow: 0 0 25px rgba(0, 240, 255, 0.45); text-align: center;
+                z-index: 100000; pointer-events: none; transition: opacity 0.5s ease;
+            `;
+            hud.innerHTML = `🚁 <b>SISTEMA DE VUELO CONECTADO</b><br><span style="color:#00ffaa;">[H / ▲] Subir | [J / ■] Bajar | [W,A,S,D / Joystick] Volar | [Espacio / ✕] Aterrizar y Salir</span>`;
+            document.body.appendChild(hud);
+            setTimeout(() => {
+                hud.style.opacity = '0';
+                setTimeout(() => hud.remove(), 500);
+            }, 7000);
+        }
     }
 
     exitVehicle() {
         if (!this.currentVehicle) return;
+
+        const oldHud = document.getElementById('heli-controls-hud');
+        if (oldHud) oldHud.remove();
 
         const v = this.currentVehicle;
         const isTank = v.type === 'tank';
@@ -573,7 +599,7 @@ export class VehicleManager {
                     return;
                 }
 
-                // Heavy weapons (Tank Shells, Bomber Bombs, Heli Missiles) destroy NPC cars/buses
+                // Heavy weapons (Tank Shells, Heli Missiles) destroy NPC cars/buses
                 if (isHeli) {
                     if (amount >= 0.9) v.stayRed = true;
                     if (amount === 0.1) {
@@ -711,6 +737,7 @@ export class VehicleManager {
             const myPos = v.mesh.position;
             const hitRadius = v.type === 'tank' ? 4.0 : 2.5; // Tanks have larger hit radius
             
+            // 1. Remote Players
             if (this.characterController.world && this.characterController.world.remotePlayers) {
                 for (let id in this.characterController.world.remotePlayers) {
                     const rp = this.characterController.world.remotePlayers[id];
@@ -732,6 +759,26 @@ export class VehicleManager {
                                         }
                                     }, i * 50); // Stagger network packets
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 2. AI Hunter Bots
+            const botManager = this.characterController.world?.botManager;
+            if (botManager && botManager.bots) {
+                for (const bot of botManager.bots) {
+                    if (bot.state !== 'dead' && bot.mesh) {
+                        if (bot.mesh.position.distanceTo(myPos) < hitRadius) {
+                            if (!bot.lastRunOverTime || (Date.now() - bot.lastRunOverTime) > 800) {
+                                bot.lastRunOverTime = Date.now();
+                                const dmg = (v.type === 'tank') ? 100 : 60; // Tanks crush instantly (100 HP = dead!)
+                                console.log(`🚗💥 ¡Atropellaste a Bot ${bot.id} con ${v.type}! Daño: ${dmg}`);
+                                if (this.characterController.weaponManager) {
+                                    this.characterController.weaponManager.createImpact(bot.mesh.position, new THREE.Vector3(0, 1, 0), 'blood', 3.0);
+                                }
+                                bot.takeDamage(dmg, this.characterController.character);
                             }
                         }
                     }
@@ -773,9 +820,10 @@ export class VehicleManager {
 
 
             // Check collisions if moving
-            if (Math.abs(v.velocity) > 1.0 && !v.isCrushed) {
+            if (Math.abs(v.velocity) > 0.5 && !v.isCrushed) {
                 checkVehicleAgainstCanisters(v.mesh, () => this.crushVehicle(v));
-                if (Math.abs(v.velocity) > 5.0) {
+                const minManslaughterSpeed = (v.type === 'tank') ? 0.8 : 3.0;
+                if (Math.abs(v.velocity) >= minManslaughterSpeed) {
                     this.checkVehicleManslaughter(v);
                 }
             }

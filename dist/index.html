@@ -6,8 +6,166 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
   <title>Accion City v1.2</title>
   
-  <script type="module" crossorigin src="/accionCity/assets/index-db06bcf5.js"></script>
-  <link rel="stylesheet" href="/accionCity/assets/index-b6bc2a7a.css">
+  <style>
+    #eruda-node { z-index: 99999999 !important; }
+
+    
+    /* Direct Mobile Control Overrides (Cache-Proof) */
+    #shapes-container {
+      display: block !important;
+      position: absolute !important;
+      bottom: 15px !important;
+      right: 15px !important;
+      width: 130px !important;
+      height: 130px !important;
+      pointer-events: auto !important;
+      z-index: 50 !important;
+    }
+    .shape-btn {
+      position: absolute !important;
+      width: 38px !important;
+      height: 38px !important;
+      font-size: 20px !important;
+      border: 2px solid currentColor !important;
+      background: transparent !important;
+      border-radius: 50% !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      pointer-events: auto !important;
+      user-select: none !important;
+      touch-action: none !important;
+    }
+    #btn-tri { top: 0px !important; left: 46px !important; color: #00ffaa !important; }
+    #btn-cir { top: 46px !important; right: 0px !important; color: #ff5555 !important; }
+    #btn-x { bottom: 0px !important; left: 46px !important; color: #5588ff !important; }
+    #btn-sq { top: 46px !important; left: 0px !important; color: #ff55ff !important; }
+    #btn-z { top: 46px !important; left: 46px !important; color: #ffff00 !important; font-weight: bold !important; font-family: monospace !important; font-size: 18px !important; }
+
+    #zone_joystick {
+      display: block !important;
+      position: absolute !important;
+      bottom: 25px !important;
+      left: 25px !important;
+      width: 125px !important;
+      height: 125px !important;
+      border-radius: 50% !important;
+      border: 2px dashed rgba(255, 255, 255, 0.35) !important;
+      background: rgba(0, 0, 0, 0.25) !important;
+      z-index: 50 !important;
+      touch-action: none !important;
+      pointer-events: auto !important;
+    }
+    /* L / R: Just under the minimap (Mobile default <=800px) */
+    .shoulder-btn {
+      position: absolute !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      top: 116px !important;
+      width: 48px !important;
+      height: 26px !important;
+      font-size: 13px !important;
+      font-weight: bold !important;
+      background: transparent !important;
+      border-radius: 5px !important;
+      text-shadow: 0 0 4px rgba(0, 0, 0, 0.9) !important;
+      z-index: 50 !important;
+    }
+    #btn-l {
+      left: auto !important;
+      right: 64px !important;
+      color: #00d4ff !important;
+      border: 2px solid #00d4ff !important;
+    }
+    #btn-r {
+      left: auto !important;
+      right: 10px !important;
+      color: #ffb300 !important;
+      border: 2px solid #ffb300 !important;
+    }
+    @media (min-width: 801px) {
+      .shoulder-btn {
+        top: 166px !important;
+        width: 68px !important;
+        height: 30px !important;
+      }
+      #btn-l {
+        right: 92px !important;
+      }
+      #btn-r {
+        right: 10px !important;
+      }
+    }
+
+    /* Top 3 icons: pequeños, discretos, sin marcos, transparentes */
+    #toggles-container {
+      top: 8px !important;
+      gap: 12px !important;
+    }
+    #btn-chat-toggle, #btn-copy-log, #btn-master-toggle {
+      border: none !important;
+      background: transparent !important;
+      background-color: transparent !important;
+      box-shadow: none !important;
+      outline: none !important;
+      opacity: 0.55 !important;
+      width: 30px !important;
+      height: 30px !important;
+      font-size: 17px !important;
+      padding: 0 !important;
+      margin: 0 !important;
+    }
+    #btn-chat-toggle:active, #btn-copy-log:active, #btn-master-toggle:active {
+      background: transparent !important;
+      box-shadow: none !important;
+      opacity: 0.9 !important;
+      transform: scale(0.9);
+    }
+  </style>
+  <script src="//cdn.jsdelivr.net/npm/eruda"></script>
+  <script>
+    eruda.init();
+    // Intercept logs for custom copy button
+    window.__customLogs = [];
+    const _oldLog = console.log;
+    const _oldWarn = console.warn;
+    const _oldError = console.error;
+    console.log = function() { _oldLog.apply(console, arguments); window.__customLogs.push("[LOG] " + Array.from(arguments).join(" ")); };
+    console.warn = function() { _oldWarn.apply(console, arguments); window.__customLogs.push("[WARN] " + Array.from(arguments).join(" ")); };
+    console.error = function() { _oldError.apply(console, arguments); window.__customLogs.push("[ERR] " + Array.from(arguments).join(" ")); };
+    window.copyCustomLogs = function() {
+      const text = window.__customLogs.join("\n");
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      alert("Logs copiados (" + window.__customLogs.length + " lineas). Puedes pegarlos en WhatsApp.");
+    };
+    window.toggleMasterControls = function() {
+      const controls = document.getElementById('mobile-controls');
+      const btn = document.getElementById('btn-master-toggle');
+      if (controls) {
+        const isHidden = (controls.style.display === 'none' || controls.style.display === '');
+        controls.style.display = isHidden ? 'block' : 'none';
+        if (btn) {
+          btn.style.background = 'transparent';
+          btn.style.borderColor = 'transparent';
+          btn.style.border = 'none';
+          btn.style.boxShadow = 'none';
+          btn.style.opacity = isHidden ? '0.9' : '0.4';
+        }
+        if (isHidden && typeof window.initMobileJoystick === 'function') {
+          window.initMobileJoystick();
+        }
+        console.log("🎮 Controles móviles: " + (isHidden ? "ACTIVADOS" : "DESACTIVADOS"));
+      }
+    };
+  </script>
+  <script type="module" crossorigin src="/accionCity/assets/index-271c12a3.js"></script>
+  <link rel="stylesheet" href="/accionCity/assets/index-1fc12b0c.css">
 </head>
 
 <body>
@@ -15,7 +173,7 @@
   <div id="loading">
     <div style="background: rgba(0,0,0,0.7); padding: 30px; border-radius: 15px; text-align: center; box-shadow: 0 0 20px rgba(0,0,0,0.8);">
       <h1 style="color: #ffaa00; margin-bottom: 20px; font-family: 'Arial Black', sans-serif; text-transform: uppercase;">AccionCity</h1>
-      <button id="start-game-btn" onclick="console.log('Button clicked!'); if(typeof window.startGame === 'function') window.startGame(); else alert('El juego aún se está inicializando, por favor espera un segundo y vuelve a intentar.');" style="padding: 15px 30px; font-size: 20px; font-weight: bold; background: #00ffaa; color: #000; border: none; cursor: pointer; border-radius: 5px; box-shadow: 0 0 15px #00ffaa;">ENTRAR A LA ZONA DE GUERRA</button>
+      <button id="start-game-btn" onclick="console.log('Button clicked!'); if(document.documentElement.requestFullscreen) { document.documentElement.requestFullscreen(); } if(typeof window.startGame === 'function') window.startGame(); else alert('El juego aún se está inicializando, por favor espera un segundo y vuelve a intentar.');" style="padding: 15px 30px; font-size: 20px; font-weight: bold; background: #00ffaa; color: #000; border: none; cursor: pointer; border-radius: 5px; box-shadow: 0 0 15px #00ffaa;">ENTRAR A LA ZONA DE GUERRA</button>
       <p id="loading-text" style="margin-top: 15px; color: white; display: none; font-family: monospace;">Cargando Zona de Guerra...</p>
     </div>
   </div>
@@ -82,7 +240,7 @@
     </div>
   </div>
 
-  <div id="mobile-controls">
+  <div id="mobile-controls" style="display: none;">
     <div id="zone_joystick"></div>
     <div id="psp-controls">
       <div id="btn-l" class="psp-btn shoulder-btn">L</div>
@@ -99,6 +257,7 @@
         <div id="btn-cir" class="psp-btn shape-btn">○</div>
         <div id="btn-x" class="psp-btn shape-btn">✕</div>
         <div id="btn-sq" class="psp-btn shape-btn">□</div>
+        <div id="btn-z" class="psp-btn shape-btn" style="font-size: 22px !important;">Z</div>
       </div>
       <div id="camera-cross-container">
         <div id="btn-cam-up" class="psp-btn dpad-btn">▲</div>
@@ -111,13 +270,18 @@
         <div id="btn-select" class="psp-btn center-btn">SELECT</div>
         <div id="btn-start" class="psp-btn center-btn">START</div>
       </div>
-      <div id="toggles-container">
-        <div id="btn-chat-toggle" class="psp-btn toggle-btn">💬</div>
-        <div id="btn-map-toggle" class="psp-btn toggle-btn">🗺️</div>
-      </div>
     </div>
     <div id="zone_right" class="zone"></div>
-    <div id="chat-container" style="display: none;">
+  </div>
+
+  <!-- Top-center button row: free area on every screen (player card on the left, minimap on the right) -->
+  <div id="toggles-container" style="position: absolute; top: 8px; left: 50%; right: auto; transform: translateX(-50%); display: flex; flex-direction: row; align-items: center; justify-content: center; gap: 12px; z-index: 25; pointer-events: none;">
+    <div id="btn-chat-toggle" class="psp-btn toggle-btn" style="position: relative; top: auto; left: auto; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; font-size: 17px; cursor: pointer; pointer-events: auto; border: none; background: transparent; opacity: 0.55;">💬</div>
+    <button id="btn-copy-log" onclick="window.copyCustomLogs()" style="width: 30px; height: 30px; padding: 0; background: transparent; border: none; color: #00ffaa; font-family: monospace; font-weight: bold; font-size: 17px; display: flex; align-items: center; justify-content: center; cursor: pointer; pointer-events: auto; box-shadow: none; opacity: 0.55;">📋</button>
+    <div id="btn-master-toggle" onclick="window.toggleMasterControls()" class="psp-btn toggle-btn" style="position: relative; top: auto; left: auto; right: auto; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; font-size: 17px; cursor: pointer; pointer-events: auto; border: none; background: transparent; transition: all 0.2s; opacity: 0.55;">🎮</div>
+  </div>
+  
+  <div id="chat-container" style="display: none;">
       <div id="chat-messages"></div>
       <input type="text" id="chat-input" placeholder="Type..." autocomplete="off">
     </div>
@@ -151,6 +315,8 @@
       text-shadow: none !important;
     }
   </style>
+
+
 
   
 </body>

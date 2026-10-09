@@ -1,4 +1,5 @@
 window.gameStarted = false;
+console.log("🚫 BOMBER VERIFIED EXTINCT - VERSION 3.0");
 import { World } from './src/World.js';
 
 const app = document.getElementById('app');

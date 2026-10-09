@@ -9,7 +9,7 @@ export class Minimap {
         const existing = document.getElementById('minimap-canvas');
         if (existing) existing.remove();
 
-        this.originalSize = window.innerWidth <= 800 ? 120 : 200;
+        this.originalSize = window.innerWidth <= 800 ? 100 : 150;
         this.canvas = document.createElement('canvas');
         this.canvas.id = 'minimap-canvas';
         this.canvas.width = this.originalSize;
@@ -17,11 +17,12 @@ export class Minimap {
         this.canvas.style.position = 'absolute';
         this.canvas.style.top = '10px';
         this.canvas.style.right = '10px';
-        this.canvas.style.border = '2px solid rgba(0, 255, 255, 0.8)'; 
+        this.canvas.style.border = 'none'; 
         this.canvas.style.borderRadius = '10px';
         this.canvas.style.backgroundColor = 'rgba(0, 0, 0, 0.4)'; 
         this.canvas.style.zIndex = '100000'; 
         this.canvas.style.pointerEvents = 'none'; 
+        this.canvas.style.opacity = '0.7';
         document.body.appendChild(this.canvas);
 
         this.ctx = this.canvas.getContext('2d');
@@ -29,6 +30,7 @@ export class Minimap {
         this.isFullMap = false; 
         this._tempVec = new THREE.Vector3();
         this._worldPos = new THREE.Vector3();
+        this.targetWaypoint = null;
     }
 
     toggleUI() {
@@ -48,7 +50,7 @@ export class Minimap {
             this.canvas.style.top = '10px';
             this.canvas.style.right = '10px';
             this.canvas.style.left = 'auto';
-            this.canvas.style.border = '2px solid rgba(0, 255, 255, 0.8)';
+            this.canvas.style.border = 'none';
             this.canvas.style.borderRadius = '10px';
             this.canvas.style.pointerEvents = 'none';
         }
@@ -100,14 +102,14 @@ export class Minimap {
                     if (pos.z < 1.0 && pos.x >= 0 && pos.x <= width && pos.y >= 0 && pos.y <= height) {
                         ctx.fillStyle = '#ff0033';
                         ctx.beginPath();
-                        ctx.arc(pos.x, pos.y, 4, 0, Math.PI * 2);
+                        ctx.arc(pos.x, pos.y, 2, 0, Math.PI * 2);
                         ctx.fill();
 
                         // Threat pulsing ring
                         ctx.strokeStyle = '#ff0033';
-                        ctx.lineWidth = 1.5;
+                        ctx.lineWidth = 1.0;
                         ctx.beginPath();
-                        ctx.arc(pos.x, pos.y, 6.5, 0, Math.PI * 2);
+                        ctx.arc(pos.x, pos.y, 4, 0, Math.PI * 2);
                         ctx.stroke();
                     }
                 }
@@ -223,6 +225,77 @@ export class Minimap {
                 ctx.fill();
             }
             ctx.restore();
+        }
+
+        // 6. RADAR NAVIGATION BEACON (Sector Cero Air Access Waypoint)
+        if (this.targetWaypoint) {
+            const charPos = (character.isDriving && character.vehicle) ? character.vehicle.mesh.position : this._worldPos;
+            const dist = Math.round(charPos.distanceTo(this.targetWaypoint));
+
+            const wpScreen = this.projectToCanvas(this.targetWaypoint, activeCamera);
+            const isVisibleOnRadar = (wpScreen.z < 1.0 && wpScreen.x >= 12 && wpScreen.x <= width - 12 && wpScreen.y >= 12 && wpScreen.y <= height - 12);
+
+            const time = performance.now() * 0.005;
+            const pulse = (Math.sin(time) + 1.0) * 0.5;
+
+            if (isVisibleOnRadar) {
+                // Pulsing Green Helipad Radar Target
+                ctx.strokeStyle = '#00ffaa';
+                ctx.lineWidth = 2.0;
+                ctx.beginPath();
+                ctx.arc(wpScreen.x, wpScreen.y, 6 + pulse * 5, 0, Math.PI * 2);
+                ctx.stroke();
+
+                ctx.fillStyle = '#00ffaa';
+                ctx.beginPath();
+                ctx.arc(wpScreen.x, wpScreen.y, 3, 0, Math.PI * 2);
+                ctx.fill();
+
+                // 'H' icon
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 8px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('H', wpScreen.x, wpScreen.y - 10);
+            } else {
+                // Directional Pointer clamped to radar border
+                const dx = this.targetWaypoint.x - charPos.x;
+                const dz = this.targetWaypoint.z - charPos.z;
+                const worldAngle = Math.atan2(dx, dz);
+                const charAngle = (character.isDriving && character.vehicle) ? character.vehicle.mesh.rotation.y : character.yaw;
+                const relAngle = worldAngle - charAngle;
+
+                const cx = width / 2;
+                const cy = height / 2;
+                const radius = Math.min(width, height) * 0.42;
+                const px = cx + Math.sin(relAngle) * radius;
+                const py = cy - Math.cos(relAngle) * radius;
+
+                ctx.save();
+                ctx.translate(px, py);
+                ctx.rotate(relAngle);
+                ctx.fillStyle = '#00ffaa';
+                ctx.beginPath();
+                ctx.moveTo(0, -7);
+                ctx.lineTo(5, 5);
+                ctx.lineTo(-5, 5);
+                ctx.closePath();
+                ctx.fill();
+                ctx.restore();
+            }
+
+            // Bottom distance HUD readout
+            ctx.fillStyle = 'rgba(10, 20, 25, 0.85)';
+            ctx.fillRect(4, height - 16, width - 8, 14);
+            ctx.strokeStyle = 'rgba(0, 255, 170, 0.4)';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(4, height - 16, width - 8, 14);
+
+            ctx.fillStyle = '#00ffaa';
+            ctx.font = 'bold 9px monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(`🚁 SECTOR 0: ${dist}m`, width / 2, height - 9);
         }
     }
 }
