@@ -164,7 +164,7 @@
       }
     };
   </script>
-  <script type="module" crossorigin src="/accionCity/assets/index-271c12a3.js"></script>
+  <script type="module" crossorigin src="/accionCity/assets/index-212c3ff6.js"></script>
   <link rel="stylesheet" href="/accionCity/assets/index-1fc12b0c.css">
 </head>
 
@@ -276,6 +276,7 @@
 
   <!-- Top-center button row: free area on every screen (player card on the left, minimap on the right) -->
   <div id="toggles-container" style="position: absolute; top: 8px; left: 50%; right: auto; transform: translateX(-50%); display: flex; flex-direction: row; align-items: center; justify-content: center; gap: 12px; z-index: 25; pointer-events: none;">
+    <button id="btn-tp-sector0" onclick="window.teleportToSectorZero && window.teleportToSectorZero()" ontouchstart="window.teleportToSectorZero && window.teleportToSectorZero()" style="height: 30px; padding: 0 10px; background: rgba(0, 240, 255, 0.2); border: 1.5px solid #00f0ff; color: #00f0ff; border-radius: 6px; font-family: monospace; font-weight: 900; font-size: 12px; letter-spacing: 1px; cursor: pointer; pointer-events: auto; box-shadow: 0 0 12px rgba(0, 240, 255, 0.45); text-shadow: 0 0 5px #00f0ff; display: flex; align-items: center; gap: 4px; transition: all 0.2s;" title="Teletransportarse al centro de Sector Cero (Tecla P)">⚡ SECTOR 0</button>
     <div id="btn-chat-toggle" class="psp-btn toggle-btn" style="position: relative; top: auto; left: auto; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; font-size: 17px; cursor: pointer; pointer-events: auto; border: none; background: transparent; opacity: 0.55;">💬</div>
     <button id="btn-copy-log" onclick="window.copyCustomLogs()" style="width: 30px; height: 30px; padding: 0; background: transparent; border: none; color: #00ffaa; font-family: monospace; font-weight: bold; font-size: 17px; display: flex; align-items: center; justify-content: center; cursor: pointer; pointer-events: auto; box-shadow: none; opacity: 0.55;">📋</button>
     <div id="btn-master-toggle" onclick="window.toggleMasterControls()" class="psp-btn toggle-btn" style="position: relative; top: auto; left: auto; right: auto; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; font-size: 17px; cursor: pointer; pointer-events: auto; border: none; background: transparent; transition: all 0.2s; opacity: 0.55;">🎮</div>

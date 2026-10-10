@@ -5,8 +5,10 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 5173,
-    strictPort: true,
     allowedHosts: ['ysioakxlt4.localto.net'],
+    headers: {
+      'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0'
+    },
 
      /* hmr: {
       host: 'ysioakxlt4.localto.net',

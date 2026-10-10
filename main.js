@@ -1,9 +1,15 @@
 window.gameStarted = false;
-console.log("🚫 BOMBER VERIFIED EXTINCT - VERSION 3.0");
-import { World } from './src/World.js';
+console.log("🏙️ ACCION CITY LOADED - VERSION 6.0 (MAIN SPAWN & SECTOR CERO READY)");
+import { World } from './src/World.js?v=6.0';
 
 const app = document.getElementById('app');
 const world = new World(app);
+
+window.teleportToSectorZero = () => {
+    if (world && world.teleportToSectorZero) {
+        world.teleportToSectorZero();
+    }
+};
 
 window.startGame = () => {
     window.gameStarted = true;

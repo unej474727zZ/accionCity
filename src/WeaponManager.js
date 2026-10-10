@@ -354,7 +354,6 @@ export class WeaponManager {
         window.addEventListener('keydown', (e) => {
             // Weapon Switching (Only with 1)
             if (e.key === '1' && !e.repeat) this.cycleWeapon();
-            if (e.code === 'KeyT' && !e.repeat) this.holster();
 
             // Toggle HUD test simulation with K key (K is completely free!)
             if (e.code === 'KeyK' && !e.repeat) {

@@ -77,7 +77,13 @@ export class ModularCity {
             map: wallTex
         });
 
-        // 7. Dark Trim / Roof Gravel / Metal
+        // 7. Heavy Concrete Barricade (Dead ends & alleyway blockades)
+        const barricadeTex = this.createBarricadeTexture();
+        this.materials.barricade = new THREE.MeshLambertMaterial({
+            map: barricadeTex
+        });
+
+        // 8. Dark Trim / Roof Gravel / Metal
         this.materials.roof = new THREE.MeshLambertMaterial({ color: 0x22262c });
         this.materials.metal = new THREE.MeshLambertMaterial({ color: 0x3a404a });
         this.materials.neonTrim = new THREE.MeshBasicMaterial({ color: 0x00ffff });
@@ -346,6 +352,47 @@ export class ModularCity {
         return tex;
     }
 
+    createBarricadeTexture() {
+        const c = document.createElement('canvas');
+        c.width = 512;
+        c.height = 256;
+        const ctx = c.getContext('2d');
+
+        // Weathered concrete base
+        ctx.fillStyle = '#32373e';
+        ctx.fillRect(0, 0, 512, 256);
+
+        // Yellow and black diagonal hazard warning stripes on top half
+        const stripeW = 40;
+        ctx.fillStyle = '#ffae00';
+        for (let x = -256; x < 768; x += stripeW * 2) {
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x + stripeW, 0);
+            ctx.lineTo(x + stripeW - 110, 110);
+            ctx.lineTo(x - 110, 110);
+            ctx.fill();
+        }
+
+        // Bottom dark metal plate
+        ctx.fillStyle = '#1c2024';
+        ctx.fillRect(0, 110, 512, 146);
+
+        // Bold warning stencil in center
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = '900 36px "Arial Black", monospace';
+        ctx.fillStyle = '#ffffff';
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
+        ctx.shadowBlur = 8;
+        ctx.fillText('⛔ ROAD CLOSED // DEAD END ⛔', 256, 185);
+
+        const tex = new THREE.CanvasTexture(c);
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        return tex;
+    }
+
     /* -------------------------------------------------------------
      * BILLBOARD & NEON POSTER TEXTURES
      * ------------------------------------------------------------- */
@@ -516,16 +563,18 @@ export class ModularCity {
      * ------------------------------------------------------------- */
     createHouseA(billboardIndex) {
         const root = new THREE.Group();
-        let width = 16, height = 25, depth = 13;
+        let width = 16, height = 24, depth = 13;
 
         if (this.assets && this.assets['house_commercial'] && this.assets['house_commercial'].scene) {
             const model = SkeletonUtils.clone(this.assets['house_commercial'].scene);
+            const scaleVal = 1.55; // Scaled to authentic 38m high commercial tower
+            model.scale.set(scaleVal, scaleVal, scaleVal);
             const bbox = new THREE.Box3().setFromObject(model);
             const center = bbox.getCenter(new THREE.Vector3());
 
             model.position.x -= center.x;
-            model.position.y -= bbox.min.y;
             model.position.z -= center.z;
+            model.position.y -= bbox.min.y; // Sits flush on the ground
 
             width = bbox.max.x - bbox.min.x;
             height = bbox.max.y - bbox.min.y;
@@ -533,6 +582,7 @@ export class ModularCity {
 
             model.traverse(child => {
                 if (child.isMesh) {
+                    child.visible = true;
                     child.castShadow = true;
                     child.receiveShadow = true;
                 }
@@ -560,7 +610,7 @@ export class ModularCity {
         const beacon = this.createBeaconLight(new THREE.Vector3(0, height + 6.2, 0), 0x00f0ff);
         root.add(beacon);
 
-        root.userData = { width, depth, height, style: 'Commercial' };
+        root.userData = { width: 16, depth: 14, height: 24, style: 'Commercial' };
         return root;
     }
 
@@ -569,30 +619,42 @@ export class ModularCity {
      * ------------------------------------------------------------- */
     createHouseB(billboardIndex) {
         const root = new THREE.Group();
-        let width = 38, height = 24, depth = 22;
+        let width = 38, height = 22, depth = 26;
 
         if (this.assets && this.assets['house_residential'] && this.assets['house_residential'].scene) {
             const model = SkeletonUtils.clone(this.assets['house_residential'].scene);
             const scaleVal = 38.0; // Scaled to authentic 8-story brutalist panel block
             model.scale.set(scaleVal, scaleVal, scaleVal);
 
-            const bbox = new THREE.Box3().setFromObject(model);
-            const center = bbox.getCenter(new THREE.Vector3());
-
-            model.position.x -= center.x;
-            model.position.y -= bbox.min.y;
-            model.position.z -= center.z;
-
-            width = bbox.max.x - bbox.min.x;
-            height = bbox.max.y - bbox.min.y;
-            depth = bbox.max.z - bbox.min.z;
-
+            // Keep all building structures, porches, and fences, but hide the countryside terrain base (grass/snow)
             model.traverse(child => {
                 if (child.isMesh) {
+                    const matName = child.material ? (child.material.name || '') : '';
+                    if (matName.includes('Grass') || matName.includes('Snow') || matName.includes('Forest')) {
+                        child.visible = false;
+                        return;
+                    }
+                    child.visible = true;
                     child.castShadow = true;
                     child.receiveShadow = true;
                 }
             });
+
+            const bbox = new THREE.Box3();
+            model.traverse(child => {
+                if (child.isMesh && child.visible) {
+                    bbox.expandByObject(child);
+                }
+            });
+            const center = bbox.getCenter(new THREE.Vector3());
+
+            model.position.x -= center.x;
+            model.position.z -= center.z;
+            model.position.y -= bbox.min.y; // Level building base cleanly to ground
+
+            width = bbox.max.x - bbox.min.x;
+            height = bbox.max.y - bbox.min.y;
+            depth = bbox.max.z - bbox.min.z;
 
             root.add(model);
         } else {
@@ -616,7 +678,7 @@ export class ModularCity {
         const beacon = this.createBeaconLight(new THREE.Vector3(0, height + 1.5, 0), 0xff2222);
         root.add(beacon);
 
-        root.userData = { width, depth, height, style: 'Soviet' };
+        root.userData = { width: 38, depth: 26, height: 22, style: 'Soviet' };
         return root;
     }
 
@@ -625,75 +687,115 @@ export class ModularCity {
      * ------------------------------------------------------------- */
     createHouseC(billboardIndex) {
         const root = new THREE.Group();
-        let width = 18, height = 9.5, depth = 16;
+        let width = 32, height = 10.5, depth = 11;
 
         if (this.assets && this.assets['house_garage'] && this.assets['house_garage'].scene) {
             const model = SkeletonUtils.clone(this.assets['house_garage'].scene);
-            const scaleVal = 11.5; // Scaled to authentic industrial workshop proportions
+            const scaleVal = 3.2; // Realistic full-scale industrial garage / chop shop
             model.scale.set(scaleVal, scaleVal, scaleVal);
+
+            // Ensure all meshes and open workshop entrances are 100% visible
+            model.traverse(child => {
+                if (child.isMesh) {
+                    child.visible = true;
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+
+                    // Apply warm color enhancement
+                    if (child.material) {
+                        const mats = Array.isArray(child.material) ? child.material : [child.material];
+                        mats.forEach(mat => {
+                            const m = mat.clone();
+                            child.material = m;
+                            if (m.color) m.color.setRGB(0.96, 0.84, 0.72);
+                            if (m.emissive) m.emissive.setHex(0x181008);
+                            m.needsUpdate = true;
+                        });
+                    }
+                }
+            });
 
             const bbox = new THREE.Box3().setFromObject(model);
             const center = bbox.getCenter(new THREE.Vector3());
 
             model.position.x -= center.x;
-            model.position.y -= bbox.min.y;
             model.position.z -= center.z;
+            model.position.y -= bbox.min.y; // Level garage floor flush to street ground
 
             width = bbox.max.x - bbox.min.x;
             height = bbox.max.y - bbox.min.y;
             depth = bbox.max.z - bbox.min.z;
 
-            // --- APPLIED COLOR ENHANCEMENT (Per User Request) ---
-            // "ponle alguito d color a an_abandoned_garage.glb algoq vaya con su nombre no hay q exagerar es para q no c vea palido"
-            model.traverse(child => {
-                if (child.isMesh && child.material) {
-                    child.castShadow = true;
-                    child.receiveShadow = true;
-                    const mats = Array.isArray(child.material) ? child.material : [child.material];
-                    mats.forEach(mat => {
-                        const m = mat.clone();
-                        child.material = m;
-
-                        if (m.color) {
-                            // Warm weathered terracotta & rust tone: removes pale washed-out look
-                            m.color.setRGB(0.96, 0.84, 0.72);
-                        }
-                        if (m.emissive) {
-                            m.emissive.setHex(0x181008); // Subtle warm rustic undertone
-                        }
-                        if (m.roughness !== undefined) {
-                            m.roughness = Math.max(0.65, m.roughness);
-                        }
-                        if (m.metalness !== undefined) {
-                            m.metalness = Math.min(0.35, m.metalness);
-                        }
-                        m.needsUpdate = true;
-                    });
-                }
-            });
-
             root.add(model);
         } else {
             // Procedural fallback
-            const bodyGeom = new THREE.BoxGeometry(24, 8.5, 16);
+            const bodyGeom = new THREE.BoxGeometry(28, 9.5, 16);
             const body = new THREE.Mesh(bodyGeom, this.materials.facadeC);
-            body.position.y = 4.25;
+            body.position.y = 4.75;
             root.add(body);
-            width = 24; height = 8.5; depth = 16;
+            width = 28; height = 9.5; depth = 16;
         }
 
         // Over-gate Chop Shop Horizontal Billboard
         const bbTex = this.createBillboardTexture(billboardIndex);
-        const bb = new THREE.Mesh(new THREE.PlaneGeometry(12, 3.2), new THREE.MeshBasicMaterial({ map: bbTex }));
-        bb.position.set(0, height - 1.2, depth / 2 + 0.2);
+        const bb = new THREE.Mesh(new THREE.PlaneGeometry(10, 2.8), new THREE.MeshBasicMaterial({ map: bbTex }));
+        bb.position.set(0, height * 0.72, depth / 2 + 0.15);
         root.add(bb);
 
         // Blinking Amber Antenna Tip Light (Pierces through snow)
-        const beacon = this.createBeaconLight(new THREE.Vector3(width / 2 - 2, height + 2.5, depth / 2 - 2), 0xffaa00);
+        const beacon = this.createBeaconLight(new THREE.Vector3(width / 2 - 2, height + 1.8, depth / 2 - 2), 0xffaa00);
         root.add(beacon);
 
-        root.userData = { width, depth, height, style: 'Garage' };
+        root.userData = { width: width, depth: depth, height: height, style: 'Garage' };
         return root;
+    }
+
+    /* -------------------------------------------------------------
+     * DEAD END ROAD BARRICADE (Calles Cerradas y Callejones)
+     * ------------------------------------------------------------- */
+    createBarricade(x, z, width = 10, depth = 2.4, height = 3.0, rotY = 0) {
+        const group = new THREE.Group();
+        group.position.set(x, 0, z);
+        group.rotation.y = rotY;
+
+        // Heavy concrete barrier block
+        const barrierGeom = new THREE.BoxGeometry(width, height, depth);
+        const barrier = new THREE.Mesh(barrierGeom, this.materials.barricade);
+        barrier.position.y = height / 2;
+        barrier.castShadow = true;
+        barrier.receiveShadow = true;
+        group.add(barrier);
+
+        // Flashing red hazard beacon on top
+        const beacon = this.createBeaconLight(new THREE.Vector3(0, height + 0.8, 0), 0xff2200);
+        group.add(beacon);
+
+        this.group.add(group);
+
+        // Perfect physical collider matching barricade dimensions exactly in TRUE world space
+        group.updateMatrixWorld(true);
+        const bbox = new THREE.Box3().setFromObject(group);
+        const size = new THREE.Vector3();
+        bbox.getSize(size);
+        const centerPt = new THREE.Vector3();
+        bbox.getCenter(centerPt);
+
+        const colGeom = new THREE.BoxGeometry(size.x, size.y, size.z);
+        const colMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
+        const colMesh = new THREE.Mesh(colGeom, colMat);
+        colMesh.position.copy(centerPt);
+        colMesh.name = 'ModularCity_Barricade_Col';
+        this.scene.add(colMesh);
+        this.colliders.push(colMesh);
+
+        this.cityBlocks.push({
+            minX: bbox.min.x, maxX: bbox.max.x,
+            minY: bbox.min.y, maxY: bbox.max.y,
+            minZ: bbox.min.z, maxZ: bbox.max.z,
+            height: size.y,
+            centerX: centerPt.x,
+            centerZ: centerPt.z
+        });
     }
 
     /* -------------------------------------------------------------
@@ -814,17 +916,18 @@ export class ModularCity {
             wall.castShadow = true;
             wall.receiveShadow = true;
             this.group.add(wall);
+            wall.updateMatrixWorld(true);
             this.colliders.push(wall);
 
-            // Register wall in cityBlocks
+            // Register wall in cityBlocks in true world coordinates
             const bbox = new THREE.Box3().setFromObject(wall);
             this.cityBlocks.push({
                 minX: bbox.min.x, maxX: bbox.max.x,
                 minY: bbox.min.y, maxY: bbox.max.y,
                 minZ: bbox.min.z, maxZ: bbox.max.z,
                 height: wallH,
-                centerX: cfg.pos[0] + this.center.x,
-                centerZ: cfg.pos[2] + this.center.z
+                centerX: bbox.getCenter(new THREE.Vector3()).x,
+                centerZ: bbox.getCenter(new THREE.Vector3()).z
             });
         });
 
@@ -852,8 +955,10 @@ export class ModularCity {
     build() {
         console.log(`[ModularCity] Generating Sector Zero with Procedural Seed: ${this.seed}`);
 
-        // Set group center position
+        // Set group center position and attach to scene immediately for true world transforms
         this.group.position.copy(this.center);
+        this.scene.add(this.group);
+        this.group.updateMatrixWorld(true);
 
         // 1. Asphalt Ground Plane
         const groundGeom = new THREE.PlaneGeometry(this.citySize, this.citySize);
@@ -866,74 +971,82 @@ export class ModularCity {
         // 2. Build Inaccessible Perimeter Walls (Air access only!)
         this.buildPerimeterWall();
 
-        // 3. Grid Setup: 3x3 layout (9 blocks)
-        // Spacing: cell offsets [-45, 0, 45]
-        const cellOffsets = [-45, 0, 45];
-        const gridPositions = [];
-        cellOffsets.forEach(x => {
-            cellOffsets.forEach(z => {
-                gridPositions.push({ x, z });
+        // 3. Dense Urban Layout: 4 Districts, tight alleyways (4m) and dead ends
+        const urbanLayout = [
+            // NORTHWEST DISTRICT: Soviet Block + Commercial + Garage
+            { type: 'B', x: -44, z: -44, rot: 0, billboardIndex: 3 }, // Metro Apartments
+            { type: 'A', x: -16, z: -48, rot: 0, billboardIndex: 1 }, // Cyber Diner -> 4m alleyway to Soviet!
+            { type: 'C', x: -44, z: -16, rot: Math.PI / 2, billboardIndex: 2 }, // Turbo Chop Shop
+
+            // NORTHEAST DISTRICT: Commercial + Soviet Block + Garage
+            { type: 'A', x: 16, z: -48, rot: 0, billboardIndex: 0 },  // Accion City Commercial
+            { type: 'B', x: 44, z: -44, rot: 0, billboardIndex: 5 },  // Wanted: Cyber Bots -> 4m alleyway!
+            { type: 'C', x: 44, z: -16, rot: -Math.PI / 2, billboardIndex: 2 }, // Turbo Chop Shop
+
+            // SOUTHWEST DISTRICT: Garage + Soviet Block + Commercial
+            { type: 'C', x: -44, z: 16, rot: Math.PI / 2, billboardIndex: 2 },  // Turbo Chop Shop
+            { type: 'B', x: -44, z: 44, rot: Math.PI, billboardIndex: 3 },      // Metro Apartments
+            { type: 'A', x: -16, z: 48, rot: Math.PI, billboardIndex: 4 },      // Quantum Energy -> 4m alleyway!
+
+            // SOUTHEAST DISTRICT: Commercial + Soviet Block + Garage
+            { type: 'A', x: 16, z: 48, rot: Math.PI, billboardIndex: 1 },       // Cyber Diner
+            { type: 'B', x: 44, z: 44, rot: Math.PI, billboardIndex: 5 },       // Wanted: Cyber Bots -> 4m alleyway!
+            { type: 'C', x: 44, z: 16, rot: -Math.PI / 2, billboardIndex: 2 }   // Turbo Chop Shop
+        ];
+
+        // 4. Instantiate the Buildings & compute 100% EXACT AABB Colliders in TRUE World Space
+        urbanLayout.forEach((cfg) => {
+            let houseMesh = null;
+            if (cfg.type === 'A') {
+                houseMesh = this.createHouseA(cfg.billboardIndex);
+            } else if (cfg.type === 'B') {
+                houseMesh = this.createHouseB(cfg.billboardIndex);
+            } else {
+                houseMesh = this.createHouseC(cfg.billboardIndex);
+            }
+
+            houseMesh.rotation.y = cfg.rot;
+            houseMesh.position.set(cfg.x, 0, cfg.z);
+            this.group.add(houseMesh);
+            houseMesh.updateMatrixWorld(true);
+
+            // COMPUTE EXACT TRANSFORMED BOUNDING BOX IN TRUE WORLD SPACE
+            const bbox = new THREE.Box3().setFromObject(houseMesh);
+            const size = new THREE.Vector3();
+            bbox.getSize(size);
+            const centerPt = new THREE.Vector3();
+            bbox.getCenter(centerPt);
+
+            // Solid physical collider placed directly at centerPt in TRUE WORLD COORDINATES
+            const colGeom = new THREE.BoxGeometry(size.x, size.y, size.z);
+            const colMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
+            const colMesh = new THREE.Mesh(colGeom, colMat);
+            colMesh.position.copy(centerPt);
+            colMesh.name = `ModularCity_Col_${cfg.type}`;
+            this.scene.add(colMesh);
+            this.colliders.push(colMesh);
+
+            // Register in cityBlocks for minimap and raycasting
+            this.cityBlocks.push({
+                minX: bbox.min.x, maxX: bbox.max.x,
+                minY: bbox.min.y, maxY: bbox.max.y,
+                minZ: bbox.min.z, maxZ: bbox.max.z,
+                height: size.y,
+                centerX: centerPt.x,
+                centerZ: centerPt.z
             });
         });
 
-        // 4. House types list: EXACTLY 3 House A, 3 House B, 3 House C
-        const houseTypes = ['A', 'A', 'A', 'B', 'B', 'B', 'C', 'C', 'C'];
+        // 5. Place Dead-End Barricades (Calles Cerradas con luces de aviso)
+        const deadEnds = [
+            { x: -68, z: -44, width: 12, depth: 2.5, rotY: Math.PI / 2 }, // Calle cerrada oeste-norte
+            { x: 68, z: -44, width: 12, depth: 2.5, rotY: Math.PI / 2 },  // Calle cerrada este-norte
+            { x: -44, z: 68, width: 14, depth: 2.5, rotY: 0 },            // Callejón cerrado sur-oeste
+            { x: 44, z: 68, width: 14, depth: 2.5, rotY: 0 }              // Callejón cerrado sur-este
+        ];
 
-        // Shuffle with seeded PRNG (Fisher-Yates)
-        for (let i = houseTypes.length - 1; i > 0; i--) {
-            const j = Math.floor(this.rand() * (i + 1));
-            const temp = houseTypes[i];
-            houseTypes[i] = houseTypes[j];
-            houseTypes[j] = temp;
-        }
-
-        // 5. Instantiate the 9 houses
-        houseTypes.forEach((type, idx) => {
-            const cell = gridPositions[idx];
-            let houseMesh = null;
-            const billboardIndex = idx; // Distinct billboard per house
-
-            if (type === 'A') {
-                houseMesh = this.createHouseA(billboardIndex);
-            } else if (type === 'B') {
-                houseMesh = this.createHouseB(billboardIndex);
-            } else {
-                houseMesh = this.createHouseC(billboardIndex);
-            }
-
-            // Procedural Rotation (multiples of 90 degrees)
-            const rotQuads = [0, Math.PI / 2, Math.PI, Math.PI * 1.5];
-            const rot = rotQuads[Math.floor(this.rand() * rotQuads.length)];
-            houseMesh.rotation.y = rot;
-
-            // Slight position jitter (+/- 2m) for natural street alignment
-            const jitterX = (this.rand() - 0.5) * 3;
-            const jitterZ = (this.rand() - 0.5) * 3;
-            houseMesh.position.set(cell.x + jitterX, 0, cell.z + jitterZ);
-
-            this.group.add(houseMesh);
-
-            // Solid physics Box Collider for Character, Bots and Vehicles
-            const hW = houseMesh.userData.width || 20;
-            const hH = houseMesh.userData.height || 15;
-            const hD = houseMesh.userData.depth || 20;
-            const colGeom = new THREE.BoxGeometry(hW, hH, hD);
-            const colMesh = new THREE.Mesh(colGeom, new THREE.MeshBasicMaterial({ visible: false }));
-            colMesh.position.set(cell.x + jitterX, hH / 2, cell.z + jitterZ);
-            this.group.add(colMesh);
-            this.colliders.push(colMesh);
-
-            const bbox = new THREE.Box3().setFromObject(houseMesh);
-            const wX = cell.x + jitterX + this.center.x;
-            const wZ = cell.z + jitterZ + this.center.z;
-            this.cityBlocks.push({
-                minX: bbox.min.x + this.center.x, maxX: bbox.max.x + this.center.x,
-                minY: bbox.min.y, maxY: bbox.max.y,
-                minZ: bbox.min.z + this.center.z, maxZ: bbox.max.z + this.center.z,
-                height: houseMesh.userData.height || 10,
-                centerX: wX,
-                centerZ: wZ
-            });
+        deadEnds.forEach(d => {
+            this.createBarricade(d.x, d.z, d.width, d.depth, 3.0, d.rotY);
         });
 
         // 6. Floor Graffitis on the Asphalt
@@ -966,9 +1079,6 @@ export class ModularCity {
 
         // 7. Place Central Rooftop / Square Helipad
         this.createHelipad(0, 0, 0);
-
-        // Add everything to scene
-        this.scene.add(this.group);
 
         return {
             group: this.group,

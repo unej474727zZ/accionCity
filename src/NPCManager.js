@@ -5,8 +5,8 @@ export class NPCManager {
         this.scene = scene;
         this.assets = assets;
         this.cars = [];
-        // Sector Cero City bounds
-        this.bounds = { minX: -55, maxX: 55, minZ: 185, maxZ: 295 };
+        // Main City Bounds for civilian parked cars
+        this.bounds = { minX: -120, maxX: 120, minZ: -120, maxZ: 120 };
     }
 
     initParkedCars(count = 8) {

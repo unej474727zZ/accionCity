@@ -35,11 +35,17 @@ export class BotManager {
     getRandomSpawnPos(outVec) {
         let attempts = 0;
         let valid = false;
-        const centerZ = (this.world && this.world.modularCity && this.world.modularCity.center) ? this.world.modularCity.center.z : 240;
+        let centerX = 0;
+        let centerZ = 0;
+        if (this.getPlayerPos(_playerPos)) {
+            centerX = _playerPos.x;
+            centerZ = _playerPos.z;
+        }
+
         while (!valid && attempts < 100) {
             attempts++;
-            const rx = (Math.random() - 0.5) * 110;
-            const rz = centerZ + (Math.random() - 0.5) * 110;
+            const rx = centerX + (Math.random() - 0.5) * 120;
+            const rz = centerZ + (Math.random() - 0.5) * 120;
             
             // Check distance to other bots
             valid = true;

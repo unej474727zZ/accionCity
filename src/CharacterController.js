@@ -229,13 +229,13 @@ export class CharacterController {
             // No animations (mixer stays null)
         }
 
-        // Teleport to a safe location (middle of the map) and drop from the sky!
+        // Spawn at street level next to vehicles
         const spawnX = 0;
-        const spawnZ = 0;
+        const spawnZ = 12;
         
-        this.mesh.position.set(spawnX, 100, spawnZ); // Drop from sky
+        this.mesh.position.set(spawnX, 1.2, spawnZ); // Safe street level!
         this.yaw = 0;
-        console.log("Spawned at Safe Location:", this.mesh.position);
+        console.log("Spawned at Street Ground Level:", this.mesh.position);
 
         /* DISABLED PERSISTENCE FOR NOW
         const savedPos = JSON.parse(localStorage.getItem('playerPos'));
@@ -981,6 +981,20 @@ export class CharacterController {
         if (isLeft) { e.preventDefault(); this.keys.lookLeft = true; return; }
         if (isRight) { e.preventDefault(); this.keys.lookRight = true; return; }
 
+        const keyLower = e.key ? e.key.toLowerCase() : '';
+        if ((e.code === 'KeyP' || keyLower === 'p') && !e.repeat) {
+            if (this.world && this.world.teleportToSectorZero) {
+                this.world.teleportToSectorZero();
+            } else if (window.teleportToSectorZero) {
+                window.teleportToSectorZero();
+            }
+            return;
+        }
+        if ((e.code === 'KeyT' || keyLower === 't') && !e.repeat) {
+            if (this.weaponManager) this.weaponManager.toggleHolster();
+            return;
+        }
+
         switch (e.code) {
             case 'Space':
                 // Keyboard auto-repeats, so we guard against rapid fire
@@ -1025,6 +1039,13 @@ export class CharacterController {
                 break;
             case 'KeyH': this.keys.elevate = true; break;
             case 'KeyJ': this.keys.descend = true; break;
+            case 'KeyP':
+                if (this.world && this.world.teleportToSectorZero) {
+                    this.world.teleportToSectorZero();
+                } else if (window.teleportToSectorZero) {
+                    window.teleportToSectorZero();
+                }
+                break;
 
             case 'KeyF': this.keys.fire = true; break;
             case 'KeyV':
@@ -1053,9 +1074,6 @@ export class CharacterController {
                 break;
             case 'KeyR':
                 if (!e.repeat && this.weaponManager) this.weaponManager.reload();
-                break;
-            case 'KeyT':
-                if (!e.repeat && this.weaponManager) this.weaponManager.toggleHolster();
                 break;
             case 'KeyF':
                 if (this.weaponManager && this.weaponManager.currentWeaponType) {
@@ -1765,40 +1783,38 @@ export class CharacterController {
                 const moveDist = moveVector.length();
                 const dynFar = moveDist + 1.2;
                 let closestDist = 999;
-
-                // Precompute wall targets ONCE per frame instead of inside the ray loop (Massive CPU & GC optimization)
-                let wallTargets = [];
-                if (this.physicsBoxes && this.physicsBoxes.length > 0) {
-                    const boxedObjects = new Set();
-                    for (const pb of this.physicsBoxes) {
-                        boxedObjects.add(pb.object);
-                        if (this.raycaster.ray.intersectsBox(pb.box)) {
-                            wallTargets.push(pb.object);
-                        }
-                    }
-                    for (const col of this.colliders) {
-                        if (!boxedObjects.has(col)) {
-                            wallTargets.push(col);
-                        }
-                    }
-                } else {
-                    wallTargets = this.allPhysicTargets && this.allPhysicTargets.length > 0 ? this.allPhysicTargets : this.colliders;
-                }
+                const dynamicTargets = (this.allPhysicTargets && this.allPhysicTargets.length > 0) ? this.allPhysicTargets : this.colliders;
 
                 for (const origin of rayOrigins) {
-                    // Offset origin BACKWARDS to catch objects we might be slightly overlapping
-                    const safeOrigin = origin.clone().sub(moveDir.clone().multiplyScalar(0.5));
+                    // Offset origin slightly backwards (0.15m) to catch shallow penetrations without creating phantom walls
+                    const safeOrigin = origin.clone().sub(moveDir.clone().multiplyScalar(0.15));
                     this.raycaster.set(safeOrigin, moveDir);
                     this.raycaster.far = dynFar;
 
+                    // 1. DIRECT FAST AABB BOX CHECKS (Instant detection for city buildings, houses & fortress walls)
+                    if (this.physicsBoxes && this.physicsBoxes.length > 0) {
+                        const hitBoxPt = new THREE.Vector3();
+                        for (const pb of this.physicsBoxes) {
+                            if (!pb.box) continue;
+                            if (this.raycaster.ray.intersectBox(pb.box, hitBoxPt)) {
+                                const realDist = hitBoxPt.distanceTo(safeOrigin) - 0.15;
+                                if (realDist <= moveDist + 0.2 && realDist >= -0.15) {
+                                    blocked = true;
+                                    if (realDist < closestDist) closestDist = realDist;
+                                }
+                            }
+                        }
+                    }
+
+                    // 2. MESH INTERSECTIONS (Dynamic entities, pushable objects like trash cans and canisters)
                     let wallHits = [];
-                    if (wallTargets.length > 0) {
-                        wallHits = this.raycaster.intersectObjects(wallTargets, true);
+                    if (dynamicTargets && dynamicTargets.length > 0) {
+                        wallHits = this.raycaster.intersectObjects(dynamicTargets, true);
                     }
 
                     if (wallHits.length > 0) {
                         const hit = wallHits[0];
-                        const realDist = hit.distance - 0.5; // Correct for offset
+                        const realDist = hit.distance - 0.15; // Correct for offset
 
                         // --- PUSHING LOGIC ---
                         let pushObj = null;
@@ -1842,18 +1858,44 @@ export class CharacterController {
                                 if (realDist < closestDist) closestDist = realDist;
                             }
                         } else {
-                            blocked = true;
-                            if (realDist < closestDist) closestDist = realDist;
+                            if (realDist <= moveDist + 0.2 && realDist >= -0.15) {
+                                blocked = true;
+                                if (realDist < closestDist) closestDist = realDist;
+                            }
                         }
                     }
                 }
 
                 if (blocked) {
                     moveVector.set(0, 0, 0);
-                    const playerBumper = 0.5;
+                    const playerBumper = 0.35;
                     if (closestDist < playerBumper) {
                         const overlap = playerBumper - closestDist;
                         this.mesh.position.add(moveDir.clone().multiplyScalar(-overlap));
+                    }
+                }
+
+                // CONTINUOUS AABB PENETRATION RESOLVER (Prevents clipping through any building even at high speed)
+                if (this.physicsBoxes && this.physicsBoxes.length > 0) {
+                    const charPos = this.mesh.position;
+                    const pRadius = 0.32;
+                    for (const pb of this.physicsBoxes) {
+                        if (!pb.box) continue;
+                        if (charPos.y + 1.6 > pb.box.min.y && charPos.y + 0.1 < pb.box.max.y) {
+                            if (charPos.x + pRadius > pb.box.min.x && charPos.x - pRadius < pb.box.max.x &&
+                                charPos.z + pRadius > pb.box.min.z && charPos.z - pRadius < pb.box.max.z) {
+                                const penLeft = (charPos.x + pRadius) - pb.box.min.x;
+                                const penRight = pb.box.max.x - (charPos.x - pRadius);
+                                const penFront = (charPos.z + pRadius) - pb.box.min.z;
+                                const penBack = pb.box.max.z - (charPos.z - pRadius);
+                                const minPen = Math.min(penLeft, penRight, penFront, penBack);
+
+                                if (minPen === penLeft) charPos.x = pb.box.min.x - pRadius;
+                                else if (minPen === penRight) charPos.x = pb.box.max.x + pRadius;
+                                else if (minPen === penFront) charPos.z = pb.box.min.z - pRadius;
+                                else if (minPen === penBack) charPos.z = pb.box.max.z + pRadius;
+                            }
+                        }
                     }
                 }
 
@@ -2253,12 +2295,12 @@ PTR LOCK: ${plStatus}
             deathOverlay.style.display = 'none';
         }
 
-        // Teleport to a random location across the map and drop from the sky!
-        const spawnX = (Math.random() - 0.5) * 800; // -400 to 400
-        const spawnZ = (Math.random() - 0.5) * 800; // -400 to 400
+        // Safe street respawn near vehicle staging area
+        const spawnX = (Math.random() - 0.5) * 20;
+        const spawnZ = 12 + (Math.random() - 0.5) * 15;
         
         if (this.mesh) {
-            this.mesh.position.set(spawnX, 100, spawnZ); // Drop from sky
+            this.mesh.position.set(spawnX, 1.2, spawnZ); // Street level!
         }
         this.yaw = 0;
         this.pitch = 0;

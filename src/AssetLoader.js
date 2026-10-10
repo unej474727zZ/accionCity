@@ -10,6 +10,7 @@ export class AssetLoader {
     
     this.assets = {};
     this.modelsToLoad = [
+      { name: 'city', url: 'models/city_pack_3.glb' },
       { name: 'idle', url: 'models/Idle.glb' },
       { name: 'walk', url: 'models/Walking.glb' },
       { name: 'run', url: 'models/Running.glb' },
@@ -45,10 +46,10 @@ export class AssetLoader {
     let loadedCount = 0;
     const total = this.modelsToLoad.length;
 
-    const loadWithRetry = (item, retries = 2) => {
+    const loadWithRetry = (item, retries = 3) => {
       return new Promise((resolve) => {
         // Añadimos un cache-buster si es un reintento para forzar una conexión nueva
-        const url = retries < 2 ? `${item.url}?retry=${Date.now()}` : item.url;
+        const url = retries < 3 ? `${item.url}?retry=${Date.now()}` : item.url;
         
         this.loader.load(url, (gltf) => {
           this.assets[item.name] = gltf;
@@ -61,7 +62,7 @@ export class AssetLoader {
             // Reintentar tras un breve delay
             setTimeout(() => {
               loadWithRetry(item, retries - 1).then(resolve);
-            }, 500);
+            }, 600);
           } else {
             console.error(`Error definitivo cargando ${item.name}:`, err);
             resolve(); // Resolvemos de todos modos para no bloquear el juego
@@ -70,9 +71,19 @@ export class AssetLoader {
       });
     };
 
-    const loadPromises = this.modelsToLoad.map(item => loadWithRetry(item, 2));
+    // Pool de descarga concurrente (máximo 3 descargas simultáneas) para evitar desbordar el túnel HTTP/2
+    const queue = [...this.modelsToLoad];
+    const concurrency = 3;
+    const workers = Array.from({ length: concurrency }, async () => {
+      while (queue.length > 0) {
+        const item = queue.shift();
+        if (item) {
+          await loadWithRetry(item, 3);
+        }
+      }
+    });
 
-    await Promise.all(loadPromises);
+    await Promise.all(workers);
     if (loadingEl) loadingEl.innerText = "Generando Ciudad...";
     return this.assets;
   }

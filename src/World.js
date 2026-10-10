@@ -1,4 +1,4 @@
-console.log('World.js loaded: VERSION 3.0 (ZERO BOMBER)');
+console.log('World.js loaded: VERSION 6.0 (ACCION CITY MAIN SPAWN RESTORED)');
 import * as THREE from 'three';
 import { VehicleManager } from './VehicleManager.js';
 import { AssetLoader } from './AssetLoader.js';
@@ -112,20 +112,20 @@ export class World {
 
         window.addEventListener('resize', () => this.onWindowResize(), false);
 
-        // Environment: Atmospheric Winter / Dense Snow Fog & Night
-        const skyColor = 0x141a24; // Cold dark blue atmosphere
-        const groundColor = 0x222a34;
+        // Environment: Clear Sky & Daylight (Accion City Base)
+        const skyColor = 0x87CEEB; // Sky Blue
+        const groundColor = 0x555555; // Grayish
         this.scene.background = new THREE.Color(skyColor);
 
-        // Dense fog - navigation by minimap required!
-        this.scene.fog = new THREE.Fog(skyColor, 8, 70);
+        // Natural depth fog for clear visibility
+        this.scene.fog = new THREE.Fog(skyColor, 25, 400);
 
-        // Lighting
+        // Lighting: Sky Color + Ground Bounce
         const hemiLight = new THREE.HemisphereLight(skyColor, groundColor, 0.7);
         this.scene.add(hemiLight);
 
-        // Directional (Moon / Ambient Cold Light)
-        const dirLight = new THREE.DirectionalLight(0xaad4f5, 1.0);
+        // Directional Sun (Daylight)
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
         dirLight.position.set(50, 100, 50); // High sun
         dirLight.castShadow = true; 
         dirLight.shadow.mapSize.width = 1024; // Balanced quality and performance
@@ -212,19 +212,64 @@ export class World {
                 url.searchParams.set('seed', newSeed);
                 window.location.href = url.href;
             };
+            window.teleportToSectorZero = () => this.teleportToSectorZero();
 
-            // BUILD MODULAR CITY (Sector Cero: 3 house types x 3 clones each + billboards + floor graffiti + air access fortress)
+            // 1. SETUP ORIGINAL MAIN CITY (Accion City - Starting Base)
+            const cityParams = assets['city'];
+            let city = null;
+
+            if (cityParams) {
+                city = cityParams.scene;
+
+                // Center City Model
+                const box = new THREE.Box3().setFromObject(city);
+                const center = box.getCenter(new THREE.Vector3());
+                city.position.sub(center);
+                city.position.y = 0; // Stick to ground
+
+                // Scale 40.0 as in the original game
+                city.scale.set(40, 40, 40);
+
+                // Shadows and textures
+                city.traverse((child) => {
+                    if (child.isMesh) {
+                        child.castShadow = true;
+                        child.receiveShadow = true;
+                        if (child.material) {
+                            const materials = Array.isArray(child.material) ? child.material : [child.material];
+                            materials.forEach(mat => {
+                                if (mat.map) {
+                                    mat.map.wrapS = THREE.RepeatWrapping;
+                                    mat.map.wrapT = THREE.RepeatWrapping;
+                                    mat.map.repeat.set(1.5, 1.5);
+                                    mat.needsUpdate = true;
+                                }
+                            });
+                        }
+                    }
+                });
+
+                this.scene.add(city);
+                console.log("🏙️ Accion City Main Base Loaded at (0, 0, 0)");
+            } else {
+                console.warn("City asset missing. Only floor will be visible.");
+            }
+
+            // 2. BUILD MODULAR CITY (Sector Cero: Fortified outpost at Z=420)
             this.modularCity = new ModularCity(this.scene, {
                 seed: this.citySeed,
                 assets: assets,
-                center: new THREE.Vector3(0, 0, 240) // 240m away through the thick snow & fog
+                center: new THREE.Vector3(0, 0, 420) // Separated from starting base!
             });
             const cityData = this.modularCity.build();
-            this.cityBlocks = cityData.cityBlocks;
+            this.cityBlocks = cityData.cityBlocks || [];
             this.cityHelipadPos = cityData.helipadPos;
 
-            // Snow particle effect (Atmospheric snow swirling through cold air)
+            // Snow particle effect (Atmospheric snow in Sector Cero)
             this.snowEffect = new SnowEffect(this.scene, this.camera, 450);
+            if (this.snowEffect && this.snowEffect.points) {
+                this.snowEffect.points.visible = false; // Disabled at spawn / starting city
+            }
 
             // ASPHALT FLOOR GENERATION
             const canvas = document.createElement('canvas');
@@ -253,7 +298,7 @@ export class World {
             );
             floor.name = "AsphaltFloor";
             floor.rotation.x = -Math.PI / 2;
-            floor.position.y = 0.01;
+            floor.position.y = -0.05; // Placed slightly below city street meshes to avoid Z-fighting overlap!
             floor.receiveShadow = true;
             this.scene.add(floor);
 
@@ -298,9 +343,33 @@ export class World {
                 });
             });
 
+            // REGISTER ORIGINAL MAIN CITY COLLIDERS
+            if (city) {
+                let cityMeshCount = 0;
+                city.traverse((child) => {
+                    if (child.isMesh && child.name !== "AsphaltFloor" && !child.name.includes("Sketchfab_Scene")) {
+                        if (cityMeshCount < 800) {
+                            this.character.colliders.push(child);
+                            cityMeshCount++;
+                        }
+                        if (!child.geometry.boundingBox) child.geometry.computeBoundingBox();
+                        child.updateMatrixWorld(true);
+                        const bbox = new THREE.Box3().setFromObject(child);
+                        if ((bbox.max.x - bbox.min.x) < 150 && (bbox.max.z - bbox.min.z) < 150) {
+                            this.cityBlocks.push({
+                                minX: bbox.min.x, maxX: bbox.max.x,
+                                minZ: bbox.min.z, maxZ: bbox.max.z
+                            });
+                        }
+                    }
+                });
+                console.log(`Registered ${cityMeshCount} original city colliders.`);
+            }
+
             // REGISTER MODULAR CITY COLLIDERS (Sector Cero)
             if (cityData && cityData.colliders) {
                 cityData.colliders.forEach(c => this.character.colliders.push(c));
+                this._cachedStaticBoxes = null;
                 console.log(`Registered ${cityData.colliders.length} ModularCity colliders. Blocks: ${this.cityBlocks.length}.`);
             }
 
@@ -608,7 +677,6 @@ export class World {
             }
 
             // PASS COLLIDERS
-            if (city) this.character.colliders.push(city);
             if (floor) this.character.colliders.push(floor);
 
             // --- CRITICAL FIX: CACHE STATIC COLLIDERS AFTER CITY IS ADDED ---
@@ -878,7 +946,12 @@ export class World {
             // UI Toggle State
             this.uiVisible = true;
             window.addEventListener('keydown', (e) => {
-                if (e.code === 'KeyP') this.toggleUI();
+                if (e.code === 'KeyU') this.toggleUI();
+
+                // TELEPORT TO SECTOR ZERO (P)
+                if ((e.code === 'KeyP' || (e.key && e.key.toLowerCase() === 'p')) && !e.repeat) {
+                    this.teleportToSectorZero();
+                }
 
                 // INSPECTION MODE (I)
                 if (e.code === 'KeyI') {
@@ -1033,9 +1106,9 @@ export class World {
                         //obj.name.includes("AsphaltFloor") || 
                         //obj.name.includes("Cube003_")) {
                         //continue; // Ignora el suelo y los grupos gigantes, evitando el muro invisible
-                        if (!obj || obj.name === "Sketchfab_Scene" || obj.name === "AsphaltFloor") {
+                        if (!obj || obj.name === "Sketchfab_Scene" || obj.name === "AsphaltFloor" || (obj.userData && (obj.userData.isTrashCan || obj.userData.isExplosive))) {
                             continue;                     
-                    }
+                        }
                 this._cachedStaticTargets.push(obj);
                 
                 obj.updateMatrixWorld(true);
@@ -1174,23 +1247,20 @@ export class World {
         try {
             requestAnimationFrame(() => this.animate());
             const dt = Math.min(this.clock.getDelta(), 0.1);
-            const time = Date.now() / 1000;
-
-            // Day/Night cycle speed: 1h Day + 30min Night = 90 min total (5400 seconds)
-            const dayDuration = 5400; 
-            // We use a slight offset in the sine calculation to make the day longer than the night
-            // A standard circle is 50/50. To get 66% day (1h) and 33% night (0.5h), we shift the horizon.
-            const sunAngle = (time * (2 * Math.PI / dayDuration)) % (2 * Math.PI);
+            
+            // Day/Night cycle starts at High Noon (1350s = 90 deg = highest sun)
+            this.gameTime = (this.gameTime !== undefined) ? this.gameTime + dt : 1350;
+            const dayDuration = 5400; // 90 min full cycle (1h daylight + 30 min evening/night)
+            const sunAngle = (this.gameTime * (2 * Math.PI / dayDuration)) % (2 * Math.PI);
             const sunRadius = 300;
             
             // X and Y positions of the sun
             const sunX = Math.cos(sunAngle) * sunRadius;
-            // Shift the sun "up" slightly so it stays above Y=0 for 1 hour and below for 30 mins
-            const sunY = (Math.sin(sunAngle) * sunRadius) + 150; 
+            const sunY = (Math.sin(sunAngle) * sunRadius) + 120; // Shifted so daytime is prominent
             const sunZ = 50;
 
             const isDay = sunY > 0;
-            const sunIntensity = isDay ? Math.min(1.5, sunY / 50) : 0.0;
+            const sunIntensity = isDay ? Math.min(1.4, Math.max(0.6, sunY / 150)) : 0.15;
 
             const dirLight = this.scene.children.find(c => c.isDirectionalLight);
             if (dirLight) {
@@ -1204,17 +1274,50 @@ export class World {
                 dirLight.castShadow = isDay && !this.isNightVision; // Only shadow during day and when NV is off
             }
 
-            let skyHex = 0x141a24; // Atmospheric cold night
-            let groundHex = 0x222a34;
-            let fogDist = 70; // Thick snow & fog: requires minimap radar navigation!
-            let fogColor = new THREE.Color(0x141a24);
+            let skyHex = 0x87CEEB;
+            let groundHex = 0x555555;
+            let fogDist = 500;
+            let fogColor = null;
+
+            const charPos = (this.character && this.character.mesh) ? this.character.mesh.position : null;
+            const isInSectorZero = charPos && charPos.z > 300;
 
             if (this.isNightVision) {
                 const isHeli = this.character && this.character.isDriving && this.character.vehicle && this.character.vehicle.type === 'helicopter';
                 skyHex = 0x002200;
                 groundHex = 0x004400;
-                fogDist = isHeli ? 180 : 120;
+                fogDist = isHeli ? 1200 : 200;
                 fogColor = new THREE.Color(0x00FF00);
+            } else if (isInSectorZero) {
+                // Atmospheric cold winter fortress night ONLY when in Sector Cero!
+                skyHex = 0x141a24;
+                groundHex = 0x222a34;
+                fogDist = 90;
+                fogColor = new THREE.Color(0x141a24);
+                if (this.snowEffect && this.snowEffect.points) this.snowEffect.points.visible = true;
+            } else {
+                // Starting Base / Accion City: Clear sky & dynamic sun cycle!
+                if (this.snowEffect && this.snowEffect.points) this.snowEffect.points.visible = false;
+                if (!isDay) {
+                    skyHex = 0x020208; // Midnight blue
+                    groundHex = 0x111111;
+                    fogDist = 350;
+                } else {
+                    const sunHeight = Math.sin(sunAngle);
+                    if (sunHeight < 0.25) {
+                        const factor = Math.max(0, sunHeight / 0.25);
+                        const orange = new THREE.Color(0xff5511);
+                        const blue = new THREE.Color(0x87CEEB);
+                        const mixed = orange.clone().lerp(blue, factor);
+                        skyHex = mixed.getHex();
+                        groundHex = 0x332222;
+                        fogDist = 450;
+                    } else {
+                        skyHex = 0x87CEEB;
+                        groundHex = 0x555555;
+                        fogDist = 600;
+                    }
+                }
             }
 
             if (this.minimap && this.minimap.isFullMap && this.character) {
@@ -1257,7 +1360,7 @@ export class World {
                 } else {
                     hemiLight.color.lerp(new THREE.Color(skyHex), dt * 0.5);
                     hemiLight.groundColor.lerp(new THREE.Color(groundHex), dt * 0.5);
-                    hemiLight.intensity = isDay ? 0.8 : 0.15; // Lower ambient light at night
+                    hemiLight.intensity = isDay ? 0.9 : 0.4; // Never pitch black!
                 }
             }
 
@@ -1679,26 +1782,82 @@ export class World {
             });
         });
 
-        // Show brief mission banner on start
-        const existingBanner = document.getElementById('air-mission-banner');
-        if (existingBanner) existingBanner.remove();
+    }
 
-        const banner = document.createElement('div');
-        banner.id = 'air-mission-banner';
-        banner.style.cssText = `
-            position: fixed; top: 60px; left: 50%; transform: translateX(-50%);
-            background: rgba(12, 20, 30, 0.92); border: 2px solid #00ffaa;
-            border-radius: 8px; padding: 12px 22px; color: #ffffff;
-            font-family: monospace; font-size: 13px; font-weight: bold;
-            box-shadow: 0 0 25px rgba(0, 255, 170, 0.45); text-align: center;
-            z-index: 100000; pointer-events: none; transition: opacity 1.2s ease;
+    teleportToSectorZero() {
+        if (!this.character || !this.character.mesh) {
+            console.warn("⚠️ Player character not ready for teleport.");
+            return;
+        }
+
+        const targetX = 0;
+        const targetZ = (this.modularCity && this.modularCity.center) ? this.modularCity.center.z : 420;
+        const targetY = 1.2;
+
+        if (this.character.isDriving && this.vehicleManager && this.vehicleManager.currentVehicle) {
+            const v = this.vehicleManager.currentVehicle;
+            const vehY = (v.type === 'helicopter') ? 6.0 : 1.5;
+            v.mesh.position.set(targetX, vehY, targetZ);
+            v.velocity = 0;
+            if (v.angularVelocity !== undefined) v.angularVelocity = 0;
+            this.character.mesh.position.copy(v.mesh.position);
+            console.log(`⚡ Vehicle ${v.type} teleported to Sector Cero (${targetX}, ${vehY}, ${targetZ})`);
+        } else {
+            this.character.mesh.position.set(targetX, targetY, targetZ);
+            this.character.velocityY = 0;
+            this.character.isJumping = false;
+            this.character.isGrounded = true;
+            this.character.yaw = 0;
+            this.character.pitch = 0;
+            this.character.aimYaw = 0;
+            this.character.aimPitch = 0;
+            console.log(`⚡ Character teleported to Sector Cero (${targetX}, ${targetY}, ${targetZ})`);
+        }
+
+        // Camera sync
+        this.camera.position.set(targetX, targetY + 3.5, targetZ - 6);
+        this.camera.lookAt(targetX, targetY + 1.5, targetZ);
+        if (this.character.updateCamera) {
+            this.character.updateCamera(0.016);
+        }
+
+        // Audio & Visual FX
+        this.triggerShake(0.35);
+
+        // Cyberpunk Banner Notification
+        const oldNotif = document.getElementById('tp-sector0-notif');
+        if (oldNotif) oldNotif.remove();
+
+        const notif = document.createElement('div');
+        notif.id = 'tp-sector0-notif';
+        notif.style.cssText = `
+            position: fixed; top: 68px; left: 50%; transform: translateX(-50%);
+            background: rgba(8, 18, 30, 0.95); border: 2px solid #00f0ff;
+            border-radius: 8px; padding: 12px 24px; color: #ffffff;
+            font-family: monospace; font-size: 13px; font-weight: 900;
+            letter-spacing: 2px; box-shadow: 0 0 30px rgba(0, 240, 255, 0.6);
+            text-align: center; z-index: 100000; pointer-events: none;
+            transition: opacity 0.5s ease;
         `;
-        banner.innerHTML = `🚁 ALERTA: SECTOR CERO OCULTO EN LA NIEVE Y NIEBLA<br><span style="color:#00ffaa; font-size:11px;">ACCESO SOLO POR EL AIRE // SIGUE LA BALIZA VERDE EN EL MAPA</span>`;
-        document.body.appendChild(banner);
+        notif.innerHTML = `⚡ <b>TELETRANSPORTE COMPLETADO</b><br><span style="color:#00ffaa; font-size:11px;">BIENVENIDO A SECTOR CERO // COORDENADAS (0, 240)</span>`;
+        document.body.appendChild(notif);
         setTimeout(() => {
-            banner.style.opacity = '0';
-            setTimeout(() => banner.remove(), 1200);
-        }, 8500);
+            notif.style.opacity = '0';
+            setTimeout(() => notif.remove(), 500);
+        }, 4500);
+
+        // Multiplayer Sync
+        if (this.networkManager && this.networkManager.sendUpdate) {
+            this.networkManager.sendUpdate(
+                this.character.mesh.position,
+                this.character.yaw,
+                this.character.pitch || 0,
+                this.character.state,
+                this.weaponManager ? this.weaponManager.currentWeaponType : 'pistol',
+                false,
+                this.character.vehicle ? this.character.vehicle.type : null
+            );
+        }
     }
 
     onWindowResize() {

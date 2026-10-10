@@ -30,12 +30,12 @@ export class SoundManager {
         this.loadSounds();
     }
 
-    loadSoundWithRetry(url, successCallback, retries = 2) {
-        const attemptUrl = retries < 2 ? `${url}${url.includes('?') ? '&' : '?'}retry=${Date.now()}` : url;
+    loadSoundWithRetry(url, successCallback, retries = 3) {
+        const attemptUrl = retries < 3 ? `${url}${url.includes('?') ? '&' : '?'}retry=${Date.now()}` : url;
         this.audioLoader.load(attemptUrl, successCallback, undefined, (err) => {
             if (retries > 0) {
                 console.warn(`[REINTENTO AUDIO] Fallo al cargar ${url}. Intentos: ${retries}. Error:`, err);
-                setTimeout(() => this.loadSoundWithRetry(url, successCallback, retries - 1), 500);
+                setTimeout(() => this.loadSoundWithRetry(url, successCallback, retries - 1), 800);
             } else {
                 console.error(`Error definitivo cargando audio ${url}:`, err);
             }
