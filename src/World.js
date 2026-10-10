@@ -221,14 +221,16 @@ export class World {
             if (cityParams) {
                 city = cityParams.scene;
 
-                // Center City Model
+                // Scale first so all coordinates and bounding box are in true world scale
+                city.scale.set(40, 40, 40);
+                city.updateMatrixWorld(true);
+
+                // Center City Model horizontally and place ground flush at Y = 0
                 const box = new THREE.Box3().setFromObject(city);
                 const center = box.getCenter(new THREE.Vector3());
-                city.position.sub(center);
-                city.position.y = 0; // Stick to ground
-
-                // Scale 40.0 as in the original game
-                city.scale.set(40, 40, 40);
+                city.position.x = -center.x;
+                city.position.z = -center.z;
+                city.position.y = -box.min.y; // Lowest ground/street level sits cleanly at ground Y = 0!
 
                 // Shadows and textures
                 city.traverse((child) => {
@@ -255,21 +257,27 @@ export class World {
                 console.warn("City asset missing. Only floor will be visible.");
             }
 
-            // 2. BUILD MODULAR CITY (Sector Cero: Fortified outpost at Z=420)
+            // 2. BUILD MODULAR CITY (Sector Cero: Fortified outpost FAR from the main city)
+            // Measure the REAL extent of the main city and put Sector Cero well beyond its far edge.
+            let sectorZeroZ = 1200;
+            if (city) {
+                city.updateMatrixWorld(true);
+                const cityBox = new THREE.Box3().setFromObject(city);
+                sectorZeroZ = Math.max(cityBox.max.z, 400) + 500;
+                console.log(`🏙️ Main city bounds: X[${cityBox.min.x.toFixed(0)}, ${cityBox.max.x.toFixed(0)}] Z[${cityBox.min.z.toFixed(0)}, ${cityBox.max.z.toFixed(0)}] -> Sector Cero at Z=${sectorZeroZ.toFixed(0)}`);
+            }
             this.modularCity = new ModularCity(this.scene, {
                 seed: this.citySeed,
                 assets: assets,
-                center: new THREE.Vector3(0, 0, 420) // Separated from starting base!
+                center: new THREE.Vector3(0, 0, sectorZeroZ)
             });
             const cityData = this.modularCity.build();
             this.cityBlocks = cityData.cityBlocks || [];
             this.cityHelipadPos = cityData.helipadPos;
 
-            // Snow particle effect (Atmospheric snow in Sector Cero)
+            // Snow particle effect: ONLY inside Sector Cero (hidden at the main base)
             this.snowEffect = new SnowEffect(this.scene, this.camera, 450);
-            if (this.snowEffect && this.snowEffect.points) {
-                this.snowEffect.points.visible = false; // Disabled at spawn / starting city
-            }
+            this.snowEffect.particles.visible = false;
 
             // ASPHALT FLOOR GENERATION
             const canvas = document.createElement('canvas');
@@ -1280,7 +1288,12 @@ export class World {
             let fogColor = null;
 
             const charPos = (this.character && this.character.mesh) ? this.character.mesh.position : null;
-            const isInSectorZero = charPos && charPos.z > 300;
+            let isInSectorZero = false;
+            if (charPos && this.modularCity && this.modularCity.center) {
+                const dx = charPos.x - this.modularCity.center.x;
+                const dz = charPos.z - this.modularCity.center.z;
+                isInSectorZero = Math.sqrt(dx * dx + dz * dz) < 130;
+            }
 
             if (this.isNightVision) {
                 const isHeli = this.character && this.character.isDriving && this.character.vehicle && this.character.vehicle.type === 'helicopter';
@@ -1294,10 +1307,10 @@ export class World {
                 groundHex = 0x222a34;
                 fogDist = 90;
                 fogColor = new THREE.Color(0x141a24);
-                if (this.snowEffect && this.snowEffect.points) this.snowEffect.points.visible = true;
+                if (this.snowEffect) this.snowEffect.particles.visible = true;
             } else {
                 // Starting Base / Accion City: Clear sky & dynamic sun cycle!
-                if (this.snowEffect && this.snowEffect.points) this.snowEffect.points.visible = false;
+                if (this.snowEffect) this.snowEffect.particles.visible = false;
                 if (!isDay) {
                     skyHex = 0x020208; // Midnight blue
                     groundHex = 0x111111;
@@ -1839,7 +1852,7 @@ export class World {
             text-align: center; z-index: 100000; pointer-events: none;
             transition: opacity 0.5s ease;
         `;
-        notif.innerHTML = `⚡ <b>TELETRANSPORTE COMPLETADO</b><br><span style="color:#00ffaa; font-size:11px;">BIENVENIDO A SECTOR CERO // COORDENADAS (0, 240)</span>`;
+        notif.innerHTML = `⚡ <b>TELETRANSPORTE COMPLETADO</b><br><span style="color:#00ffaa; font-size:11px;">BIENVENIDO A SECTOR CERO // COORDENADAS (0, ${Math.round(targetZ)})</span>`;
         document.body.appendChild(notif);
         setTimeout(() => {
             notif.style.opacity = '0';
