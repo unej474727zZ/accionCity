@@ -229,13 +229,14 @@ export class CharacterController {
             // No animations (mixer stays null)
         }
 
-        // Spawn at street level next to vehicles
-        const spawnX = 0;
-        const spawnZ = 12;
-        
-        this.mesh.position.set(spawnX, 1.2, spawnZ); // Safe street level!
+        // User requested: "Spawn near the motorcycle" with 5m circular dispersion to avoid superposition
+        const angle = Math.random() * Math.PI * 2;
+        const radius = Math.random() * 5; // 5m Radius dispersion
+        const spawnX = -298 + Math.cos(angle) * radius;
+        const spawnZ = -40 + Math.sin(angle) * radius;
+        this.mesh.position.set(spawnX, 0.5, spawnZ);
         this.yaw = 0;
-        console.log("Spawned at Street Ground Level:", this.mesh.position);
+        console.log("Spawned at Cluster with offset:", this.mesh.position);
 
         /* DISABLED PERSISTENCE FOR NOW
         const savedPos = JSON.parse(localStorage.getItem('playerPos'));
@@ -982,14 +983,6 @@ export class CharacterController {
         if (isRight) { e.preventDefault(); this.keys.lookRight = true; return; }
 
         const keyLower = e.key ? e.key.toLowerCase() : '';
-        if ((e.code === 'KeyP' || keyLower === 'p') && !e.repeat) {
-            if (this.world && this.world.teleportToSectorZero) {
-                this.world.teleportToSectorZero();
-            } else if (window.teleportToSectorZero) {
-                window.teleportToSectorZero();
-            }
-            return;
-        }
         if ((e.code === 'KeyT' || keyLower === 't') && !e.repeat) {
             if (this.weaponManager) this.weaponManager.toggleHolster();
             return;
@@ -1039,13 +1032,6 @@ export class CharacterController {
                 break;
             case 'KeyH': this.keys.elevate = true; break;
             case 'KeyJ': this.keys.descend = true; break;
-            case 'KeyP':
-                if (this.world && this.world.teleportToSectorZero) {
-                    this.world.teleportToSectorZero();
-                } else if (window.teleportToSectorZero) {
-                    window.teleportToSectorZero();
-                }
-                break;
 
             case 'KeyF': this.keys.fire = true; break;
             case 'KeyV':
@@ -2295,9 +2281,9 @@ PTR LOCK: ${plStatus}
             deathOverlay.style.display = 'none';
         }
 
-        // Safe street respawn near vehicle staging area
-        const spawnX = (Math.random() - 0.5) * 20;
-        const spawnZ = 12 + (Math.random() - 0.5) * 15;
+        // Safe street respawn near vehicle staging area at Accion City
+        const spawnX = -298 + (Math.random() - 0.5) * 8;
+        const spawnZ = -40 + (Math.random() - 0.5) * 8;
         
         if (this.mesh) {
             this.mesh.position.set(spawnX, 1.2, spawnZ); // Street level!

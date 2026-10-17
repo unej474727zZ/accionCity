@@ -6,6 +6,11 @@ export class AutoPilot {
         this.active = false;
         this.targetVehicle = null;
         this.timer = 0;
+        this.vehicleEvadeTimer = 0;
+        this.vehicleEvadeDir = 'right';
+        this.vehicleStuckCount = 0;
+        this.wanderTimer = 0;
+        this.wanderTurn = 0;
         
         // Expose to global scope so you can run it from the console
         window.startAutoPilot = () => {
@@ -15,12 +20,133 @@ export class AutoPilot {
                 // Reset keys when turning off
                 if (this.world.character) {
                     this.world.character.keys.forward = false;
+                    this.world.character.keys.backward = false;
+                    this.world.character.keys.left = false;
+                    this.world.character.keys.right = false;
                     this.world.character.keys.fire = false;
                     this.world.character.keys.run = false;
                     this.world.character.keys.ads = false; // RELEASE AIM
                 }
             }
         };
+    }
+
+    checkVehicleObstacles(char) {
+        if (!char.isDriving || !char.vehicle || !char.vehicle.mesh) {
+            return { blocked: false, steer: null, closeObstacle: false };
+        }
+
+        const vMesh = char.vehicle.mesh;
+        const vPos = vMesh.position;
+        const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(vMesh.quaternion);
+        forward.y = 0;
+        forward.normalize();
+
+        const rightAxis = new THREE.Vector3(0, 1, 0);
+
+        // Ray origins slightly in front and at bumper height
+        const rayStart = vPos.clone().add(new THREE.Vector3(0, 0.8, 0)).add(forward.clone().multiplyScalar(1.2));
+
+        // Center, Left (+22 deg), Right (-22 deg)
+        const leftDir = forward.clone().applyAxisAngle(rightAxis, 0.38).normalize();
+        const rightDir = forward.clone().applyAxisAngle(rightAxis, -0.38).normalize();
+
+        // Collect all colliders (static scene + other vehicles)
+        const colliders = [...(char.colliders || [])];
+        if (this.world.vehicleManager && this.world.vehicleManager.vehicles) {
+            for (const v of this.world.vehicleManager.vehicles) {
+                if (v !== char.vehicle && v.mesh) {
+                    colliders.push(v.mesh);
+                }
+            }
+        }
+        if (this.world.npcManager && this.world.npcManager.cars) {
+            for (const car of this.world.npcManager.cars) {
+                if (car) colliders.push(car);
+            }
+        }
+
+        const checkRay = (origin, dir, maxDist) => {
+            const ray = new THREE.Raycaster(origin, dir, 0.1, maxDist);
+            const hits = ray.intersectObjects(colliders, true);
+            const validHits = hits.filter(h => {
+                let p = h.object;
+                while (p) {
+                    if (p === vMesh || p === char.mesh) return false;
+                    p = p.parent;
+                }
+                return true;
+            });
+            return validHits.length > 0 ? validHits[0].distance : Infinity;
+        };
+
+        const centerDist = checkRay(rayStart, forward, 12.0);
+        const leftDist = checkRay(rayStart, leftDir, 9.0);
+        const rightDist = checkRay(rayStart, rightDir, 9.0);
+
+        const closeObstacle = centerDist < 2.5;
+
+        // Obstacle detected ahead within safety envelope
+        if (centerDist < 9.0 || leftDist < 6.5 || rightDist < 6.5) {
+            // Steer towards the side with more clearance
+            const steer = (leftDist > rightDist) ? 'left' : 'right';
+            return { blocked: true, steer, closeObstacle, centerDist, leftDist, rightDist };
+        }
+
+        return { blocked: false, steer: null, closeObstacle: false };
+    }
+
+    steerVehicleTowardsYaw(char, targetYaw, obstacleInfo) {
+        if (!char.isDriving || !char.vehicle || !char.vehicle.mesh) return;
+
+        const v = char.vehicle;
+        const vMesh = v.mesh;
+
+        // If whisker detected an obstacle, evasion takes priority!
+        if (obstacleInfo && obstacleInfo.blocked) {
+            if (obstacleInfo.steer === 'left') {
+                char.keys.left = true;
+                char.keys.right = false;
+            } else {
+                char.keys.right = true;
+                char.keys.left = false;
+            }
+            if (obstacleInfo.closeObstacle) {
+                char.keys.forward = false;
+                char.keys.backward = true; // Temporary brake/reverse if right in front of obstacle
+            } else {
+                char.keys.forward = true;
+            }
+            return;
+        }
+
+        // Helicopter steering
+        if (v.type === 'helicopter') {
+            char.yaw = targetYaw;
+            char.aimYaw = targetYaw;
+            char.keys.forward = true;
+            return;
+        }
+
+        // Land vehicles (motorcycle, tank)
+        let diffYaw = targetYaw - vMesh.rotation.y;
+        while (diffYaw < -Math.PI) diffYaw += Math.PI * 2;
+        while (diffYaw > Math.PI) diffYaw -= Math.PI * 2;
+
+        if (diffYaw > 0.12) {
+            // Target is to the left -> steer left
+            char.keys.left = true;
+            char.keys.right = false;
+        } else if (diffYaw < -0.12) {
+            // Target is to the right -> steer right
+            char.keys.right = true;
+            char.keys.left = false;
+        } else {
+            char.keys.left = false;
+            char.keys.right = false;
+        }
+
+        char.keys.forward = true;
     }
 
     update(dt) {
@@ -49,11 +175,32 @@ export class AutoPilot {
             this.stuckTimer = 0;
             this.stuckCount = 0;
             this.evadeTimer = 0;
+            this.vehicleStuckCount = 0;
+            this.vehicleEvadeTimer = 0;
         }
         
         this.stuckTimer += dt;
         
-        // If we are currently evading/unstucking, countdown the evade timer
+        // 1. VEHICLE EVASION (Reverse + Turn)
+        if (this.vehicleEvadeTimer > 0) {
+            this.vehicleEvadeTimer -= dt;
+            char.keys.forward = false;
+            char.keys.backward = true; // REVERSE GEAR!
+            char.keys.run = false;
+            char.keys.jump = false;
+            char.keys.fire = false;
+            char.keys.ads = false;
+            if (this.vehicleEvadeDir === 'left') {
+                char.keys.left = true;
+                char.keys.right = false;
+            } else {
+                char.keys.right = true;
+                char.keys.left = false;
+            }
+            return; // Skip rest of logic during vehicle reverse evasion
+        }
+
+        // 2. FOOT EVASION
         if (this.evadeTimer > 0) {
             this.evadeTimer -= dt;
             // Force jump and run while evading
@@ -76,19 +223,39 @@ export class AutoPilot {
 
         if (this.stuckTimer > 0.5) { // Check every 0.5 seconds
             const distMoved = charPos.distanceTo(this.lastPos);
-            // If trying to move forward but barely moved
-            if (char.keys.forward && distMoved < 0.5 && !char.isDriving) {
-                this.stuckCount++;
+            
+            if (char.isDriving) {
+                // If trying to drive but barely moved
+                if ((char.keys.forward || char.keys.backward) && distMoved < 0.4) {
+                    this.vehicleStuckCount = (this.vehicleStuckCount || 0) + 1;
+                } else {
+                    this.vehicleStuckCount = 0;
+                }
             } else {
-                this.stuckCount = 0; 
+                // If trying to move forward on foot but barely moved
+                if (char.keys.forward && distMoved < 0.5) {
+                    this.stuckCount++;
+                } else {
+                    this.stuckCount = 0; 
+                }
             }
+            
             this.lastPos.copy(charPos);
             this.stuckTimer = 0;
         }
 
-        // If stuck 3 times in a row (1.5 seconds stuck), trigger evade!
-        if (this.stuckCount >= 3) {
-            console.log("🤖 AutoPilot: Stuck detected! Evading and releasing aim...");
+        // Trigger Vehicle Evade (after ~1.0s stuck in vehicle)
+        if (char.isDriving && this.vehicleStuckCount >= 2) {
+            console.log("🤖 AutoPilot: Vehicle stuck detected! Reversing and steering away...");
+            this.vehicleStuckCount = 0;
+            this.vehicleEvadeTimer = 1.8; // Reverse for 1.8 seconds
+            this.vehicleEvadeDir = Math.random() > 0.5 ? 'left' : 'right';
+            return;
+        }
+
+        // If stuck 3 times in a row on foot (1.5 seconds stuck), trigger foot evade!
+        if (!char.isDriving && this.stuckCount >= 3) {
+            console.log("🤖 AutoPilot: Foot stuck detected! Evading and releasing aim...");
             this.stuckCount = 0;
             this.evadeTimer = 1.0; // Evade for 1 second
             
@@ -114,7 +281,7 @@ export class AutoPilot {
 
         // 3. FIND VEHICLE TO STEAL (always look for one if on foot)
         if (!char.isDriving && !this.targetVehicle) {
-            // Si hay enemigos, buscar un vehículo muy cercano (30m) para usarlo de tanque. Si no, buscar lejos (300m)
+            // Si hay enemigos, buscar un vehículo muy cercano (40m) para usarlo de tanque. Si no, buscar lejos (300m)
             const searchDist = nearestEnemy ? 40 : 300;
             this.targetVehicle = this.world.vehicleManager.findNearestVehicle(charPos, searchDist);
         }
@@ -144,6 +311,9 @@ export class AutoPilot {
             }
         }
 
+        // Whisker obstacle detection while driving
+        const obstacleInfo = char.isDriving ? this.checkVehicleObstacles(char) : null;
+
         // 4. COMBAT LOGIC
         if (nearestEnemy && minEnemyDist < 500) { // CAZAR Y DISPARAR DESDE LEJOS (500m)
             
@@ -165,7 +335,9 @@ export class AutoPilot {
                 char.aimYaw = targetYaw; // Aim vehicle weapon
                 char.pitch = targetPitch;
                 char.aimPitch = targetPitch;
-                char.keys.forward = true; // KEEP DRIVING!
+
+                // Steer vehicle towards the enemy (or evade obstacles)
+                this.steerVehicleTowardsYaw(char, targetYaw, obstacleInfo);
             } else {
                 // Smooth yaw rotation, but faster so it doesn't get stuck spinning
                 if (!movingToVehicle) {
@@ -186,19 +358,37 @@ export class AutoPilot {
                 }
             }
 
-            // Line of Sight Check
+            // Line of Sight Check (Including other vehicles so we don't shoot through helicopter/props)
             let hasLineOfSight = false;
             const rayOrigin = charPos.clone().add(new THREE.Vector3(0, 1.5, 0));
             const rayDir = targetPos.clone().sub(rayOrigin).normalize();
-            const ray = new THREE.Raycaster(rayOrigin, rayDir);
-            ray.far = minEnemyDist;
+            const ray = new THREE.Raycaster(rayOrigin, rayDir, 0.1, minEnemyDist);
+
+            const blockers = [...(char.colliders || [])];
+            if (this.world.vehicleManager && this.world.vehicleManager.vehicles) {
+                for (const v of this.world.vehicleManager.vehicles) {
+                    if (v !== char.vehicle && v.mesh) {
+                        blockers.push(v.mesh);
+                    }
+                }
+            }
             
-            const hits = ray.intersectObjects(char.colliders, true);
-            if (hits.length === 0) {
+            const hits = ray.intersectObjects(blockers, true);
+            const validHits = hits.filter(h => {
+                let p = h.object;
+                while (p) {
+                    if (char.vehicle && p === char.vehicle.mesh) return false;
+                    if (p === char.mesh) return false;
+                    p = p.parent;
+                }
+                return true;
+            });
+
+            if (validHits.length === 0) {
                 hasLineOfSight = true;
             }
 
-            // MOVEMENT DURING COMBAT
+            // MOVEMENT DURING COMBAT (On foot)
             if (!char.isDriving && !movingToVehicle) {
                 if (hasLineOfSight) {
                     // CAMINAR Y DISPARAR
@@ -256,9 +446,37 @@ export class AutoPilot {
                 char.keys.forward = true;
                 char.keys.run = false;
             } else if (char.isDriving) {
-                // Driving, but no enemies. Just cruise.
-                char.keys.forward = true;
+                // Driving, but no enemies. Cruise and avoid obstacles!
                 char.aimYaw += 0.01; // Spin camera around looking for trouble
+                
+                if (obstacleInfo && obstacleInfo.blocked) {
+                    if (obstacleInfo.steer === 'left') {
+                        char.keys.left = true;
+                        char.keys.right = false;
+                    } else {
+                        char.keys.right = true;
+                        char.keys.left = false;
+                    }
+                    if (obstacleInfo.closeObstacle) {
+                        char.keys.forward = false;
+                        char.keys.backward = true;
+                    } else {
+                        char.keys.forward = true;
+                    }
+                } else {
+                    // Gentle patrol wander
+                    if (!this.wanderTimer || this.wanderTimer <= 0) {
+                        this.wanderTimer = 3.0 + Math.random() * 2.0;
+                        this.wanderTurn = (Math.random() - 0.5) * 0.4; // slight occasional turn
+                    }
+                    this.wanderTimer -= dt;
+                    if (this.wanderTurn > 0.1) {
+                        char.keys.left = true;
+                    } else if (this.wanderTurn < -0.1) {
+                        char.keys.right = true;
+                    }
+                    char.keys.forward = true;
+                }
             }
         }
     }

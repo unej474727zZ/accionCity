@@ -76,8 +76,8 @@ export class BotManager {
                 return;
             }
         }
-        // Fallback inside Sector Cero
-        outVec.set(0, 0.5, centerZ + 20);
+        // Fallback: open street near Accion City staging area
+        outVec.set(-280 + (Math.random() - 0.5) * 30, 0.5, -40 + (Math.random() - 0.5) * 30);
     }
 
     initBots() {

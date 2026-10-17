@@ -15,8 +15,6 @@ import { Minimap } from './Minimap.js';
 import { SoundManager } from './SoundManager.js';
 import { SniperManager } from './SniperManager.js';
 import { AutoPilot } from './AutoPilot.js';
-import { ModularCity } from './ModularCity.js';
-import { SnowEffect } from './SnowEffect.js';
 
 // --- CRITICAL AUDIO PATCH (Anti-Crash) ---
 // Prevents browser thread lock when Three.js sends non-finite numbers to Web Audio
@@ -212,7 +210,6 @@ export class World {
                 url.searchParams.set('seed', newSeed);
                 window.location.href = url.href;
             };
-            window.teleportToSectorZero = () => this.teleportToSectorZero();
 
             // 1. SETUP ORIGINAL MAIN CITY (Accion City - Starting Base)
             const cityParams = assets['city'];
@@ -221,16 +218,14 @@ export class World {
             if (cityParams) {
                 city = cityParams.scene;
 
-                // Scale first so all coordinates and bounding box are in true world scale
-                city.scale.set(40, 40, 40);
-                city.updateMatrixWorld(true);
-
-                // Center City Model horizontally and place ground flush at Y = 0
+                // --- CRITICAL FIX: CENTER CITY MODEL ---
                 const box = new THREE.Box3().setFromObject(city);
                 const center = box.getCenter(new THREE.Vector3());
-                city.position.x = -center.x;
-                city.position.z = -center.z;
-                city.position.y = -box.min.y; // Lowest ground/street level sits cleanly at ground Y = 0!
+                city.position.sub(center);
+                city.position.y = 0; // Stick to ground
+
+                // SCALE FIX: Increased to 40.0 per user request
+                city.scale.set(40, 40, 40);
 
                 // Shadows and textures
                 city.traverse((child) => {
@@ -257,27 +252,7 @@ export class World {
                 console.warn("City asset missing. Only floor will be visible.");
             }
 
-            // 2. BUILD MODULAR CITY (Sector Cero: Fortified outpost FAR from the main city)
-            // Measure the REAL extent of the main city and put Sector Cero well beyond its far edge.
-            let sectorZeroZ = 1200;
-            if (city) {
-                city.updateMatrixWorld(true);
-                const cityBox = new THREE.Box3().setFromObject(city);
-                sectorZeroZ = Math.max(cityBox.max.z, 400) + 500;
-                console.log(`🏙️ Main city bounds: X[${cityBox.min.x.toFixed(0)}, ${cityBox.max.x.toFixed(0)}] Z[${cityBox.min.z.toFixed(0)}, ${cityBox.max.z.toFixed(0)}] -> Sector Cero at Z=${sectorZeroZ.toFixed(0)}`);
-            }
-            this.modularCity = new ModularCity(this.scene, {
-                seed: this.citySeed,
-                assets: assets,
-                center: new THREE.Vector3(0, 0, sectorZeroZ)
-            });
-            const cityData = this.modularCity.build();
-            this.cityBlocks = cityData.cityBlocks || [];
-            this.cityHelipadPos = cityData.helipadPos;
-
-            // Snow particle effect: ONLY inside Sector Cero (hidden at the main base)
-            this.snowEffect = new SnowEffect(this.scene, this.camera, 450);
-            this.snowEffect.particles.visible = false;
+            this.cityBlocks = [];
 
             // ASPHALT FLOOR GENERATION
             const canvas = document.createElement('canvas');
@@ -306,7 +281,7 @@ export class World {
             );
             floor.name = "AsphaltFloor";
             floor.rotation.x = -Math.PI / 2;
-            floor.position.y = -0.05; // Placed slightly below city street meshes to avoid Z-fighting overlap!
+            floor.position.y = 0.01;
             floor.receiveShadow = true;
             this.scene.add(floor);
 
@@ -364,21 +339,22 @@ export class World {
                         child.updateMatrixWorld(true);
                         const bbox = new THREE.Box3().setFromObject(child);
                         if ((bbox.max.x - bbox.min.x) < 150 && (bbox.max.z - bbox.min.z) < 150) {
+                            const size = new THREE.Vector3();
+                            bbox.getSize(size);
+                            const center = new THREE.Vector3();
+                            bbox.getCenter(center);
                             this.cityBlocks.push({
                                 minX: bbox.min.x, maxX: bbox.max.x,
-                                minZ: bbox.min.z, maxZ: bbox.max.z
+                                minY: bbox.min.y, maxY: bbox.max.y,
+                                minZ: bbox.min.z, maxZ: bbox.max.z,
+                                height: size.y,
+                                centerX: center.x,
+                                centerZ: center.z
                             });
                         }
                     }
                 });
                 console.log(`Registered ${cityMeshCount} original city colliders.`);
-            }
-
-            // REGISTER MODULAR CITY COLLIDERS (Sector Cero)
-            if (cityData && cityData.colliders) {
-                cityData.colliders.forEach(c => this.character.colliders.push(c));
-                this._cachedStaticBoxes = null;
-                console.log(`Registered ${cityData.colliders.length} ModularCity colliders. Blocks: ${this.cityBlocks.length}.`);
             }
 
             // LOAD CHARACTER POSITION
@@ -431,11 +407,8 @@ export class World {
             // LINK CONTROLLER TO WEAPON MANAGER
             this.character.weaponManager = this.weaponManager;
 
-            // MINIMAP & RADAR WAYPOINT
+            // MINIMAP
             this.minimap = new Minimap(this.cityBlocks, this.camera);
-            if (this.cityHelipadPos) {
-                this.minimap.targetWaypoint = this.cityHelipadPos;
-            }
 
             // SNIPERS (Hidden NPCs)
             this.sniperManager = new SniperManager(this);
@@ -452,7 +425,6 @@ export class World {
 
             // SCENERY GROUP FOR SPAWN CHECKS
             this.spawnTargets = [];
-            if (this.modularCity) this.spawnTargets.push(this.modularCity.group);
             if (floor) this.spawnTargets.push(floor);
 
             // DEBUG SPAWN
@@ -956,11 +928,6 @@ export class World {
             window.addEventListener('keydown', (e) => {
                 if (e.code === 'KeyU') this.toggleUI();
 
-                // TELEPORT TO SECTOR ZERO (P)
-                if ((e.code === 'KeyP' || (e.key && e.key.toLowerCase() === 'p')) && !e.repeat) {
-                    this.teleportToSectorZero();
-                }
-
                 // INSPECTION MODE (I)
                 if (e.code === 'KeyI') {
                     this.isInspectionMode = !this.isInspectionMode;
@@ -1037,13 +1004,10 @@ export class World {
             }, { passive: true });
 
             // --- FINAL SPAWN ---
-            // Spawn vehicles in designated departure positions
-            this.vehicleManager.spawnVehicle('helicopter', new THREE.Vector3(12, 0.5, 12), null, 'vehicle_helicopter');
-            this.vehicleManager.spawnVehicle('motorcycle', new THREE.Vector3(-10, 0.5, 12), null, 'vehicle_motorcycle');
-            this.vehicleManager.spawnVehicle('tank', new THREE.Vector3(-22, 0.5, 22), null, 'vehicle_tank');
-
-            // Departure Helipad at (12, 0.05, 12)
-            this.createDepartureHeliBase();
+            // Spawn vehicles in designated positions at Accion City
+            this.vehicleManager.spawnVehicle('motorcycle', new THREE.Vector3(-300, 0.5, -40), null, 'vehicle_motorcycle');
+            this.vehicleManager.spawnVehicle('tank', new THREE.Vector3(-300, 0.5, 0), null, 'vehicle_tank');
+            this.vehicleManager.spawnVehicle('helicopter', new THREE.Vector3(-300, 0.5, -20), null, 'vehicle_helicopter');
 
             // Set camera to player using the real character spawn position
             const charSpawn = this.character.mesh.position;
@@ -1108,27 +1072,27 @@ export class World {
             // To fix lag: We pre-calculate ONE merged Box3 per static object,
             // instead of storing 1000s of sub-meshes for raycasting.
             for (const obj of this.character.colliders) {
-                     //if (!obj || 
-                       // obj.name.includes("Sketchfab_Scene") || 
-                        //obj.name.includes("Material") || 
-                        //obj.name.includes("AsphaltFloor") || 
-                        //obj.name.includes("Cube003_")) {
-                        //continue; // Ignora el suelo y los grupos gigantes, evitando el muro invisible
-                        if (!obj || obj.name === "Sketchfab_Scene" || obj.name === "AsphaltFloor" || (obj.userData && (obj.userData.isTrashCan || obj.userData.isExplosive))) {
-                            continue;                     
-                        }
-                this._cachedStaticTargets.push(obj);
-                
+                if (!obj || obj.name === "Sketchfab_Scene" || obj.name === "AsphaltFloor" || (obj.userData && (obj.userData.isTrashCan || obj.userData.isExplosive))) {
+                    continue;                     
+                }
+
                 obj.updateMatrixWorld(true);
                 const bbox = new THREE.Box3().setFromObject(obj);
-                
-                // Add some safety padding to the box
+                const size = new THREE.Vector3();
+                bbox.getSize(size);
+
+                // CRITICAL: ELIMINATE INVISIBLE WALLS IN STREETS & CALLEJONES!
+                // Meshes with size.y < 1.6 (roads, sidewalks, curbs) or size.x > 60 / size.z > 60 (giant merged ground blocks)
+                // must NEVER be wrapped into solid AABB boxes, otherwise whole streets are blocked by invisible cubes!
+                if (size.y < 1.6 || size.x > 60 || size.z > 60) {
+                    continue;
+                }
+
+                this._cachedStaticTargets.push(obj);
                 bbox.expandByScalar(0.02); 
-                
-                // Only push ONE box per entire city chunk/floor
                 this._cachedStaticBoxes.push({ box: bbox, object: obj });
             }
-            console.log("Optimized: Cached " + this._cachedStaticBoxes.length + " merged static physics boxes.");
+            console.log("Optimized: Cached " + this._cachedStaticBoxes.length + " merged static physics boxes (Walls & Buildings only).");
         }
         filteredTargets.push(...this._cachedStaticTargets);
         physicsBoxes.push(...this._cachedStaticBoxes);
@@ -1287,30 +1251,13 @@ export class World {
             let fogDist = 500;
             let fogColor = null;
 
-            const charPos = (this.character && this.character.mesh) ? this.character.mesh.position : null;
-            let isInSectorZero = false;
-            if (charPos && this.modularCity && this.modularCity.center) {
-                const dx = charPos.x - this.modularCity.center.x;
-                const dz = charPos.z - this.modularCity.center.z;
-                isInSectorZero = Math.sqrt(dx * dx + dz * dz) < 130;
-            }
-
             if (this.isNightVision) {
                 const isHeli = this.character && this.character.isDriving && this.character.vehicle && this.character.vehicle.type === 'helicopter';
                 skyHex = 0x002200;
                 groundHex = 0x004400;
                 fogDist = isHeli ? 1200 : 200;
                 fogColor = new THREE.Color(0x00FF00);
-            } else if (isInSectorZero) {
-                // Atmospheric cold winter fortress night ONLY when in Sector Cero!
-                skyHex = 0x141a24;
-                groundHex = 0x222a34;
-                fogDist = 90;
-                fogColor = new THREE.Color(0x141a24);
-                if (this.snowEffect) this.snowEffect.particles.visible = true;
             } else {
-                // Starting Base / Accion City: Clear sky & dynamic sun cycle!
-                if (this.snowEffect) this.snowEffect.particles.visible = false;
                 if (!isDay) {
                     skyHex = 0x020208; // Midnight blue
                     groundHex = 0x111111;
@@ -1459,8 +1406,6 @@ export class World {
 
             if (this.npcManager && !this.isPaused) this.npcManager.update(dt);
             if (this.botManager && !this.isPaused) this.botManager.update(dt);
-            if (this.modularCity && !this.isPaused) this.modularCity.update(dt);
-            if (this.snowEffect && !this.isPaused) this.snowEffect.update(dt);
             
             if (this.weaponManager && !this.isPaused) {
                 this.weaponManager.remotePlayers = Object.values(this.remotePlayers);
@@ -1759,118 +1704,6 @@ export class World {
                 if (flash.parentNode) document.body.removeChild(flash);
             }, 200);
         }, 100);
-    }
-
-    createDepartureHeliBase() {
-        const c = document.createElement('canvas');
-        c.width = 256; c.height = 256;
-        const ctx = c.getContext('2d');
-        ctx.fillStyle = '#1c222a';
-        ctx.fillRect(0, 0, 256, 256);
-        ctx.strokeStyle = '#00f0ff';
-        ctx.lineWidth = 14;
-        ctx.beginPath();
-        ctx.arc(128, 128, 105, 0, Math.PI * 2);
-        ctx.stroke();
-
-        ctx.font = '900 120px "Arial Black", sans-serif';
-        ctx.fillStyle = '#ffffff';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('H', 128, 128);
-
-        const tex = new THREE.CanvasTexture(c);
-        const pad = new THREE.Mesh(new THREE.PlaneGeometry(16, 16), new THREE.MeshBasicMaterial({ map: tex, transparent: true }));
-        pad.rotation.x = -Math.PI / 2;
-        pad.position.set(12, 0.05, 12);
-        this.scene.add(pad);
-
-        // 4 Green Corner Lights for Takeoff Pad
-        const offsets = [-7, 7];
-        offsets.forEach(dx => {
-            offsets.forEach(dz => {
-                const lightCore = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8), new THREE.MeshBasicMaterial({ color: 0x00ff88 }));
-                lightCore.position.set(12 + dx, 0.4, 12 + dz);
-                this.scene.add(lightCore);
-            });
-        });
-
-    }
-
-    teleportToSectorZero() {
-        if (!this.character || !this.character.mesh) {
-            console.warn("⚠️ Player character not ready for teleport.");
-            return;
-        }
-
-        const targetX = 0;
-        const targetZ = (this.modularCity && this.modularCity.center) ? this.modularCity.center.z : 420;
-        const targetY = 1.2;
-
-        if (this.character.isDriving && this.vehicleManager && this.vehicleManager.currentVehicle) {
-            const v = this.vehicleManager.currentVehicle;
-            const vehY = (v.type === 'helicopter') ? 6.0 : 1.5;
-            v.mesh.position.set(targetX, vehY, targetZ);
-            v.velocity = 0;
-            if (v.angularVelocity !== undefined) v.angularVelocity = 0;
-            this.character.mesh.position.copy(v.mesh.position);
-            console.log(`⚡ Vehicle ${v.type} teleported to Sector Cero (${targetX}, ${vehY}, ${targetZ})`);
-        } else {
-            this.character.mesh.position.set(targetX, targetY, targetZ);
-            this.character.velocityY = 0;
-            this.character.isJumping = false;
-            this.character.isGrounded = true;
-            this.character.yaw = 0;
-            this.character.pitch = 0;
-            this.character.aimYaw = 0;
-            this.character.aimPitch = 0;
-            console.log(`⚡ Character teleported to Sector Cero (${targetX}, ${targetY}, ${targetZ})`);
-        }
-
-        // Camera sync
-        this.camera.position.set(targetX, targetY + 3.5, targetZ - 6);
-        this.camera.lookAt(targetX, targetY + 1.5, targetZ);
-        if (this.character.updateCamera) {
-            this.character.updateCamera(0.016);
-        }
-
-        // Audio & Visual FX
-        this.triggerShake(0.35);
-
-        // Cyberpunk Banner Notification
-        const oldNotif = document.getElementById('tp-sector0-notif');
-        if (oldNotif) oldNotif.remove();
-
-        const notif = document.createElement('div');
-        notif.id = 'tp-sector0-notif';
-        notif.style.cssText = `
-            position: fixed; top: 68px; left: 50%; transform: translateX(-50%);
-            background: rgba(8, 18, 30, 0.95); border: 2px solid #00f0ff;
-            border-radius: 8px; padding: 12px 24px; color: #ffffff;
-            font-family: monospace; font-size: 13px; font-weight: 900;
-            letter-spacing: 2px; box-shadow: 0 0 30px rgba(0, 240, 255, 0.6);
-            text-align: center; z-index: 100000; pointer-events: none;
-            transition: opacity 0.5s ease;
-        `;
-        notif.innerHTML = `⚡ <b>TELETRANSPORTE COMPLETADO</b><br><span style="color:#00ffaa; font-size:11px;">BIENVENIDO A SECTOR CERO // COORDENADAS (0, ${Math.round(targetZ)})</span>`;
-        document.body.appendChild(notif);
-        setTimeout(() => {
-            notif.style.opacity = '0';
-            setTimeout(() => notif.remove(), 500);
-        }, 4500);
-
-        // Multiplayer Sync
-        if (this.networkManager && this.networkManager.sendUpdate) {
-            this.networkManager.sendUpdate(
-                this.character.mesh.position,
-                this.character.yaw,
-                this.character.pitch || 0,
-                this.character.state,
-                this.weaponManager ? this.weaponManager.currentWeaponType : 'pistol',
-                false,
-                this.character.vehicle ? this.character.vehicle.type : null
-            );
-        }
     }
 
     onWindowResize() {
