@@ -1,0 +1,211 @@
+import * as THREE from 'three';
+
+export class SniperManager {
+    constructor(world) {
+        this.world = world;
+        this.scene = world.scene;
+        this.weaponManager = world.weaponManager;
+
+        this.timer = 0;
+        this.fireInterval = 3 + Math.random() * 12; // Between 3 and 15 seconds
+        this.accuracy = 0.8; // 80% accuracy for snipers
+    }
+
+    update(dt) {
+        if (!this.world.character || !this.world.character.mesh) return;
+
+        const character = this.world.character;
+        const targetObject = (character.isDriving && character.vehicle) ? character.vehicle.mesh : character.mesh;
+        if (!targetObject) return;
+
+        const playerPos = targetObject.position;
+
+        // Only fire if inside the city (approx -430 to 430 range)
+        if (Math.abs(playerPos.x) > 430 || Math.abs(playerPos.z) > 430) return;
+
+        this.timer += dt;
+        if (this.timer >= this.fireInterval) {
+            // console.log(`🎯 Sniper Timer: ${this.timer.toFixed(2)} / ${this.fireInterval.toFixed(2)}`);
+            this.timer = 0;
+            this.tryFire(playerPos, targetObject);
+            // Randomize next shot interval (3 to 15 seconds)
+            this.fireInterval = 3.0 + Math.random() * 12.0;
+        }
+    }
+
+    tryFire(playerPos, targetObject) {
+        // 1. Find ANY building nearby to spawn the bullet from
+        const buildings = this.world.cityBlocks.filter(b => {
+            const centerX = (b.minX + b.maxX) / 2;
+            const centerZ = (b.minZ + b.maxZ) / 2;
+            const dist = new THREE.Vector2(centerX, centerZ).distanceTo(new THREE.Vector2(playerPos.x, playerPos.z));
+            return dist < 300; // Increased radius, removed minimum distance
+        });
+
+        let spawnPos = new THREE.Vector3();
+
+        if (buildings.length === 0) {
+            // Force a spawn point in the air nearby (simulating a window in an unregistered building)
+            const angle = Math.random() * Math.PI * 2;
+            const dist = 50 + Math.random() * 50;
+            spawnPos.set(
+                playerPos.x + Math.cos(angle) * dist,
+                25 + Math.random() * 20, // High up
+                playerPos.z + Math.sin(angle) * dist
+            );
+        } else {
+            const block = buildings[Math.floor(Math.random() * buildings.length)];
+            const side = Math.floor(Math.random() * 4);
+            const height = 8 + Math.random() * 25;
+
+            if (side === 0) spawnPos.set(block.minX, height, THREE.MathUtils.lerp(block.minZ, block.maxZ, Math.random()));
+            else if (side === 1) spawnPos.set(block.maxX, height, THREE.MathUtils.lerp(block.minZ, block.maxZ, Math.random()));
+            else if (side === 2) spawnPos.set(THREE.MathUtils.lerp(block.minX, block.maxX, Math.random()), height, block.minZ);
+            else spawnPos.set(THREE.MathUtils.lerp(block.minX, block.maxX, Math.random()), height, block.maxZ);
+        }
+
+        // 3. Target logic: prioritize canisters near player
+        let targetPos = playerPos.clone().add(new THREE.Vector3(0, 1.2, 0));
+
+        const nearbyCanister = this.weaponManager.canisters.find(c => c.mesh.position.distanceTo(playerPos) < 15);
+        if (nearbyCanister) {
+            // FORCE fire at canister if player is nearby
+            targetPos.copy(nearbyCanister.mesh.position);
+        } else if (Math.random() > this.accuracy) {
+            // Near miss
+            targetPos.x += (Math.random() - 0.5) * 6;
+            targetPos.z += (Math.random() - 0.5) * 6;
+            targetPos.y = 0;
+        }
+
+        const dir = targetPos.clone().sub(spawnPos).normalize();
+
+        // 4. Fire Bullet (Visual only until impact)
+        const bulletMesh = new THREE.Mesh(
+            new THREE.BoxGeometry(0.1, 0.1, 2.0),
+            new THREE.MeshBasicMaterial({ color: 0xffff00 })
+        );
+        bulletMesh.position.copy(spawnPos);
+        bulletMesh.lookAt(targetPos);
+        this.scene.add(bulletMesh);
+
+        // Movement and Collision handling
+        const bulletSpeed = 350;
+        const ray = new THREE.Raycaster(spawnPos, dir);
+        ray.far = 1000;
+
+        // TARGET CULLING: Only check objects that intersect the bullet's mathematical ray!
+        const possibleTargets = [targetObject];
+        this.weaponManager.canisters.forEach(c => possibleTargets.push(c.mesh));
+        if (this.world.vehicleManager) {
+            this.world.vehicleManager.vehicles.forEach(v => possibleTargets.push(v.mesh));
+        }
+
+        // Filter the 1000+ city meshes so we only test faces of buildings the bullet flies past
+        for (const c of this.world.character.colliders) {
+            if (c.geometry) {
+                if (!c.geometry.boundingSphere) c.geometry.computeBoundingSphere();
+                const center = c.geometry.boundingSphere.center.clone().applyMatrix4(c.matrixWorld);
+                const radius = c.geometry.boundingSphere.radius * Math.max(c.scale.x, c.scale.y, c.scale.z) + 1.0;
+                
+                if (ray.ray.distanceSqToPoint(center) <= (radius * radius)) {
+                    possibleTargets.push(c);
+                }
+            } else {
+                possibleTargets.push(c); // fallback for Groups
+            }
+        }
+
+        const hits = ray.intersectObjects(possibleTargets, true);
+
+        // Track sniper bullet dynamically for vehicle pilot threat awareness HUD
+        const threatObj = {
+            position: spawnPos.clone(),
+            direction: dir.clone(),
+            speed: bulletSpeed,
+            alive: true,
+            isHomingOnMe: (targetObject === this.world.character.vehicle || targetObject === this.world.character.mesh)
+        };
+        if (this.weaponManager && this.weaponManager.sniperBullets) {
+            this.weaponManager.sniperBullets.push(threatObj);
+        }
+
+        if (hits.length > 0) {
+            const hit = hits[0];
+            const timeToHit = (hit.distance / bulletSpeed) * 1000;
+
+            // Bullet travel animation
+            let elapsed = 0;
+            const animateBullet = (dt_ms) => {
+                elapsed += dt_ms;
+                const progress = Math.min(elapsed / timeToHit, 1.0);
+                bulletMesh.position.lerpVectors(spawnPos, hit.point, progress);
+                
+                // Keep the threat tracker position synchronized in real-time
+                threatObj.position.copy(bulletMesh.position);
+
+                if (progress < 1.0) requestAnimationFrame((t) => animateBullet(16));
+                else {
+                    this.scene.remove(bulletMesh);
+                    this.handleImpact(hit);
+                    threatObj.alive = false; // Cleanup threat
+                }
+            };
+            animateBullet(0);
+        } else {
+            // Unobstructed shot animation
+            let elapsed = 0;
+            const timeToHit = 1500; // Simulated 1.5 seconds travel
+            const endPoint = spawnPos.clone().add(dir.clone().multiplyScalar(500));
+            const animateBullet = (dt_ms) => {
+                elapsed += dt_ms;
+                const progress = Math.min(elapsed / timeToHit, 1.0);
+                bulletMesh.position.lerpVectors(spawnPos, endPoint, progress);
+                
+                threatObj.position.copy(bulletMesh.position);
+
+                if (progress < 1.0) requestAnimationFrame((t) => animateBullet(16));
+                else {
+                    this.scene.remove(bulletMesh);
+                    threatObj.alive = false;
+                }
+            };
+            animateBullet(0);
+        }
+    }
+
+    handleImpact(hit) {
+        const obj = hit.object;
+        const point = hit.point;
+        const normal = hit.face ? hit.face.normal.clone().transformDirection(obj.matrixWorld) : new THREE.Vector3(0, 1, 0);
+
+        this.weaponManager.createImpact(point, normal, 'spark', 1.0, obj);
+        if (this.world.soundManager) this.world.soundManager.playShoot('rifle', point);
+
+        // Damage Logic
+        if (obj === this.world.character.mesh || obj.parent === this.world.character.mesh) {
+            if (this.world.character.damage) this.world.character.damage(40); // Sniper is powerful
+        }
+
+        // Hit Canister?
+        const canister = this.weaponManager.canisters.find(c => {
+            let found = false;
+            c.mesh.traverse(m => { if (m === obj) found = true; });
+            return found;
+        });
+        if (canister) {
+            this.weaponManager.explodeCanister(canister);
+        }
+
+        // Hit Vehicle?
+        const targetVeh = this.world.vehicleManager.findVehicleByMesh(obj);
+        if (targetVeh) {
+            if (targetVeh.type === 'tank' || targetVeh.type === 'helicopter') {
+                console.log(`🛡️ Sniper bullet deflected by ${targetVeh.type}'s heavy armor!`);
+                this.world.vehicleManager.flashRed(targetVeh.mesh || targetVeh); // Visual impact only
+            } else {
+                this.world.vehicleManager.damageVehicle(targetVeh, 0.25, obj);
+            }
+        }
+    }
+}

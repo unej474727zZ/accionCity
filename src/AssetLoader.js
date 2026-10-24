@@ -1,0 +1,87 @@
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
+
+export class AssetLoader {
+  constructor() {
+    this.loader = new GLTFLoader();
+    this.dracoLoader = new DRACOLoader();
+    this.dracoLoader.setDecoderPath('draco/');
+    this.loader.setDRACOLoader(this.dracoLoader);
+    
+    this.assets = {};
+    this.modelsToLoad = [
+      { name: 'city', url: 'models/city_pack_3.glb' },
+      { name: 'idle', url: 'models/Idle.glb' },
+      { name: 'walk', url: 'models/Walking.glb' },
+      { name: 'run', url: 'models/Running.glb' },
+      { name: 'backward', url: 'models/BackwardWalk.glb' },
+      { name: 'jump', url: 'models/RunningJump.glb' },
+      { name: 'firing', url: 'models/FiringRifle.glb' },
+      { name: 'shooting', url: 'models/shooting.glb' },
+      { name: 'car1', url: 'models/car1.glb' },
+      { name: 'casco', url: 'models/car2.glb' },
+      { name: 'car3', url: 'models/car3.glb' },
+      { name: 'motorcycle', url: 'models/motorcycle.glb' },
+      { name: 'tank', url: 'models/tank.glb' },
+      { name: 'helicopter', url: 'models/helicoptero.glb' },
+      { name: 'driving', url: 'models/driving.glb' },
+      { name: 'pistol', url: 'models/pistol.glb' },
+      { name: 'rifle', url: 'models/awp.glb' },
+      { name: 'transporter', url: 'models/transporter.glb' },
+      { name: 'trash_can', url: 'models/trash_cans.glb' },
+      { name: 'tank_wreck', url: 'models/t-80_damaged.glb' },
+      { name: 'dumpster1', url: 'models/dumpster.glb' },
+      { name: 'dumpster2', url: 'models/dumpster.glb' },
+      { name: 'car_wreck_fsc', url: 'models/wrecked_fsc_zuk.glb' },
+      { name: 'canister', url: 'models/bombona.glb' },
+      { name: 'bazooka', url: 'models/bazooka.glb' }
+    ];
+  }
+
+  async loadAll() {
+    const loadingEl = document.getElementById('loading');
+    let loadedCount = 0;
+    const total = this.modelsToLoad.length;
+
+    const loadWithRetry = (item, retries = 3) => {
+      return new Promise((resolve) => {
+        // Añadimos un cache-buster si es un reintento para forzar una conexión nueva
+        const url = retries < 3 ? `${item.url}?retry=${Date.now()}` : item.url;
+        
+        this.loader.load(url, (gltf) => {
+          this.assets[item.name] = gltf;
+          loadedCount++;
+          if (loadingEl) loadingEl.innerText = `Cargando Assets: ${Math.round((loadedCount/total)*100)}%`;
+          resolve();
+        }, undefined, (err) => {
+          if (retries > 0) {
+            console.warn(`[REINTENTO] Fallo al cargar ${item.name}. Intentos restantes: ${retries}. Error:`, err);
+            // Reintentar tras un breve delay
+            setTimeout(() => {
+              loadWithRetry(item, retries - 1).then(resolve);
+            }, 600);
+          } else {
+            console.error(`Error definitivo cargando ${item.name}:`, err);
+            resolve(); // Resolvemos de todos modos para no bloquear el juego
+          }
+        });
+      });
+    };
+
+    // Pool de descarga concurrente (máximo 3 descargas simultáneas) para evitar desbordar el túnel HTTP/2
+    const queue = [...this.modelsToLoad];
+    const concurrency = 3;
+    const workers = Array.from({ length: concurrency }, async () => {
+      while (queue.length > 0) {
+        const item = queue.shift();
+        if (item) {
+          await loadWithRetry(item, 3);
+        }
+      }
+    });
+
+    await Promise.all(workers);
+    if (loadingEl) loadingEl.innerText = "Generando Ciudad...";
+    return this.assets;
+  }
+}

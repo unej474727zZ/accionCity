@@ -1,0 +1,185 @@
+import { io } from "socket.io-client";
+import { encodeClientMove, decodeServerMove } from "./BinaryProtocol.js";
+
+export class NetworkManager {
+    constructor() {
+        this.socket = null;
+        this.start = false;
+
+        // Events
+        this.onPlayerJoined = null;
+        this.onPlayerMoved = null;
+        this.onPlayerLeft = null;
+        this.onEnterVehicleSuccess = null;
+        this.onEnterVehicleFailure = null;
+        this.onVehicleStateUpdate = null;
+        this.onLocalPlayerIdentified = null; // Evento para identificar nombre local
+
+        this.id = null;
+        this.activeRemotePlayerIds = new Set();
+        this.slotToId = new Map();
+        this.idToSlot = new Map();
+    }
+
+    connect() {
+        // Connect to the same origin (the browser URL)
+        // Vite proxy will handle forwarding /socket.io to port 3000
+        const url = window.location.origin;
+        console.log("Connecting to Socket.IO at:", url);
+
+        this.socket = io(url, {
+            reconnection: true,
+            reconnectionAttempts: 5,
+            reconnectionDelay: 5000,
+            transports: ['websocket'],
+            path: '/socket.io',
+            forceNew: true
+        });
+
+        this.socket.on("connect_error", (err) => {
+            console.error("Socket Connection Error:", err);
+        });
+
+        this.socket.on("connect", () => {
+            console.log("Connected to server! ID:", this.socket.id);
+            this.id = this.socket.id;
+        });
+
+        // 1. Initial State: Load all existing players
+        this.socket.on('currentPlayers', (players) => {
+            const localPlayer = players[this.id];
+            if (localPlayer && this.onLocalPlayerIdentified) {
+                this.onLocalPlayerIdentified(localPlayer);
+            }
+
+            // Clean up players that are no longer in the list (ghost prevention)
+            const newKeys = new Set(Object.keys(players).filter(id => id !== this.id));
+            this.activeRemotePlayerIds.forEach((id) => {
+                if (!newKeys.has(id)) {
+                    if (this.onPlayerLeft) this.onPlayerLeft(id);
+                    const slot = this.idToSlot.get(id);
+                    if (slot !== undefined) {
+                        this.slotToId.delete(slot);
+                        this.idToSlot.delete(id);
+                    }
+                    this.activeRemotePlayerIds.delete(id);
+                }
+            });
+
+            // Join new players and register slots
+            Object.keys(players).forEach((id) => {
+                const p = players[id];
+                if (p && p.slot !== undefined) {
+                    this.slotToId.set(p.slot, id);
+                    this.idToSlot.set(id, p.slot);
+                }
+                if (id !== this.id) {
+                    this.activeRemotePlayerIds.add(id);
+                    if (this.onPlayerJoined) this.onPlayerJoined(id, p);
+                }
+            });
+        });
+
+        // 2. New Player Joined
+        this.socket.on('newPlayer', (data) => {
+            this.activeRemotePlayerIds.add(data.id);
+            if (data.player && data.player.slot !== undefined) {
+                this.slotToId.set(data.player.slot, data.id);
+                this.idToSlot.set(data.id, data.player.slot);
+            }
+            if (this.onPlayerJoined) this.onPlayerJoined(data.id, data.player);
+        });
+
+        // 3. Ultra-Fast Zero-JSON Binary Movement (26 bytes)
+        this.socket.on('playerMovedBin', (buf) => {
+            const data = decodeServerMove(buf);
+            const remoteId = this.slotToId.get(data.slot);
+            if (remoteId && this.onPlayerMoved) {
+                this.onPlayerMoved(remoteId, data);
+            }
+        });
+
+        // 3b. Legacy JSON Fallback
+        this.socket.on('playerMoved', (data) => {
+            if (this.onPlayerMoved) this.onPlayerMoved(data.id, data);
+        });
+
+        // 4. Player Left
+        this.socket.on('playerDisconnected', (id) => {
+            const slot = this.idToSlot.get(id);
+            if (slot !== undefined) {
+                this.slotToId.delete(slot);
+                this.idToSlot.delete(id);
+            }
+            this.activeRemotePlayerIds.delete(id);
+            if (this.onPlayerLeft) this.onPlayerLeft(id);
+        });
+
+        this.socket.on('chatMessage', (data) => {
+            if (this.onChatMessage) this.onChatMessage(data);
+        });
+
+        // 6. Player Shoot
+        this.socket.on('playerShoot', (data) => {
+            if (this.onPlayerShoot) this.onPlayerShoot(data);
+        });
+
+        // 7. Player Hit
+        this.socket.on('playerHit', (data) => {
+            if (this.onPlayerHit) this.onPlayerHit(data);
+        });
+
+        // 8. Game Pause
+        this.socket.on('gamePauseUpdate', (data) => {
+            if (this.onGamePause) this.onGamePause(data);
+        });
+
+        // 9. Vehicles Sincronización Dictatorial
+        this.socket.on('enterVehicleSuccess', (data) => {
+            if (this.onEnterVehicleSuccess) this.onEnterVehicleSuccess(data);
+        });
+
+        this.socket.on('enterVehicleFailure', (data) => {
+            if (this.onEnterVehicleFailure) this.onEnterVehicleFailure(data);
+        });
+
+        this.socket.on('vehicleStateUpdate', (data) => {
+            if (this.onVehicleStateUpdate) this.onVehicleStateUpdate(data.vehicles);
+        });
+    }
+
+    sendPause(paused) {
+        if (this.socket && this.socket.connected) {
+            console.log("🚀 Socket emitiendo 'togglePause':", paused);
+            this.socket.emit('togglePause', { paused });
+        } else {
+            console.error("❌ Error: Socket no conectado. No se puede enviar la pausa.");
+        }
+    }
+
+    sendUpdate(pos, yaw, pitch, state, weaponType, firing, vehicleType) {
+        if (this.socket && this.socket.connected) {
+            const vType = vehicleType !== undefined ? vehicleType : (arguments[6] || null);
+            const bin = encodeClientMove(pos, yaw, pitch, state, weaponType, firing, vType);
+            this.socket.emit('playerMoveBin', bin);
+        }
+    }
+
+    sendShoot(origin, direction, weaponType) {
+        if (this.socket) {
+            this.socket.emit('playerShoot', { origin, direction, weaponType });
+        }
+    }
+
+    sendHit(position, type, scale = 1.0) {
+        if (this.socket) {
+            this.socket.emit('playerHit', { position, type, scale });
+        }
+    }
+
+    sendChat(text) {
+        if (this.socket) {
+            this.socket.emit('chatMessage', { text: text });
+        }
+    }
+}
